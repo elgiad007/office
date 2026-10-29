@@ -144,7 +144,7 @@ try {
     if ($route==='sync' && $method==='POST') {
         $a=account((string)($input['id']??'')); session_write_close();
         try {
-            $count=match($a['type']) { 'google'=>sync_google($a),'imap'=>sync_imap($a),'caldav'=>sync_caldav($a) };
+            $count=with_account_mail_lock($a['id'],function() use (&$a) { return match($a['type']) { 'google'=>sync_google($a),'imap'=>sync_imap($a),'caldav'=>sync_caldav($a) }; });
             db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]); json_response(['count'=>$count]);
         } catch(Throwable $e) { db()->prepare('UPDATE accounts SET error=? WHERE id=?')->execute(['Sync failed. Open Sync now to retry and see details.',$a['id']]); throw $e; }
     }
@@ -161,7 +161,13 @@ try {
     if ($route==='mail-action' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])fail('Message changed. Reopen it.',409);
         $action=(string)($input['action']??''); if (!in_array($action,['archive','read','unread'],true))fail('Unknown mail action.');
-        session_write_close(); json_response(['record'=>remote_mail_action($r,$action)]);
+        session_write_close();
+        $record=with_account_mail_lock((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
+            $current=get_record($r['id']);
+            if ((int)($input['revision']??0)!==$current['revision']) fail('Message changed. Reopen it.',409);
+            return remote_mail_action($current,$action);
+        });
+        json_response(['record'=>$record]);
     }
     fail('Route not found.',404);
 } catch (HttpError $e) { json_response(['error'=>$e->getMessage()],$e->getCode() ?: 400); }

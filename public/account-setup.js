@@ -62,7 +62,7 @@ export function openAccountSetup({dialog, request, onSaved}) {
         + input('SMTP server (TLS 465)', 'smtp', {placeholder:'smtp.example.com', help:'Sending currently uses the same username and password as IMAP.'})
         + input('Username', 'username', {help:'Usually your full email address. Confirm with your provider.'})
         + input('Password / app password', 'password', {type:'password', help:'Use an app password if your provider requires one.'})
-        + input('Existing IMAP archive folder', 'archiveFolder', {help:'Defaults to Archive. Match the existing folder name on your server; archive requires IMAP MOVE support.'});
+        + input('Existing IMAP archive folder', 'archiveFolder', {help:'Use the exact server path, such as INBOX.Archive. The default Archive can detect a unique server archive folder. Test connection checks the folder and MOVE support without moving mail.'});
     }
     return `<p>Your provider supplies the full URL for an individual calendar collection. Its home page or account-discovery URL is not sufficient.</p>`
       + input('Calendar collection URL', 'url', {type:'url', placeholder:'https://calendar.example.com/calendars/user/personal/', help:'Use the final HTTPS collection URL on port 443 or 8443; redirects are not followed.'})

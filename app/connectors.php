@@ -97,9 +97,109 @@ function imap_command(mixed $s,string $command): array {
             while ($remaining>0) { $part=fread($s,min(65536,$remaining)); if ($part===false || $part==='') fail('Incomplete email download.'); $literal.=$part; $remaining-=strlen($part); }
             $literals[]=$literal; $total+=strlen($literal);
         }
-        if (str_starts_with($line,$tag.' ')) { if (!str_starts_with($line,$tag.' OK')) fail('IMAP command refused. Check account settings.'); return ['lines'=>$lines,'literals'=>$literals]; }
+        if (str_starts_with($line,$tag.' ')) {
+            if (!preg_match('/^'.preg_quote($tag,'/').' OK(?:\s|$)/i',$line)) {
+                // Never echo commands or arbitrary server text: either can contain credentials.
+                preg_match('/^([A-Z]+)(?:\s+([A-Z]+))?/i',$command,$operation);
+                $name=strtoupper($operation[1]??'command');
+                if ($name==='UID') $name.=' '.strtoupper($operation[2]??'command');
+                preg_match('/^'.preg_quote($tag,'/').' (NO|BAD)(?:\s+\[([A-Z]+)(?:\s[^\]]*)?\])?/i',$line,$status);
+                $code=strtoupper($status[2]??'');
+                if (!in_array($code,['TRYCREATE','NONEXISTENT','NOPERM','AUTHORIZATIONFAILED','OVERQUOTA','AUTHENTICATIONFAILED'],true)) $code='';
+                $hint=match($code) {
+                    'TRYCREATE','NONEXISTENT'=>'The destination folder does not exist. Check the archive folder path in account setup.',
+                    'NOPERM','AUTHORIZATIONFAILED'=>'The server denied permission for this operation.',
+                    'OVERQUOTA'=>'The mailbox storage quota is exceeded.',
+                    'AUTHENTICATIONFAILED'=>'Sign-in failed. Check the username and password or app password.',
+                    default=>$name==='LOGIN'?'Check the username and password or app password.':($name==='UID MOVE'?'Check archive folder permissions and available mailbox storage.':'Check the account settings and server permissions.'),
+                };
+                fail('IMAP '.$name.' refused'.(isset($status[1])?' ('.strtoupper($status[1]).($code!==''?' / '.$code:'').')':'').'. '.$hint);
+            }
+            return ['lines'=>$lines,'literals'=>$literals];
+        }
     }
     fail('IMAP connection timed out.');
+}
+/** Read-only preflight shared by setup and archive. Never create folders or expunge mail. */
+function imap_archive_folder(mixed $s,string $configured): string {
+    $capabilities=imap_command($s,'CAPABILITY'); $tokens=[];
+    foreach ($capabilities['lines'] as $line) if (preg_match('/^\* CAPABILITY (.*)/i',$line,$m)) $tokens=array_merge($tokens,preg_split('/\s+/',strtoupper(trim($m[1]))));
+    if (!in_array('MOVE',$tokens,true) && !in_array('IMAP4REV2',$tokens,true)) fail('This IMAP server does not support MOVE. Office cannot archive messages on this server.');
+    $list=imap_command($s,'LIST "" "*"'.(in_array('SPECIAL-USE',$tokens,true)?' RETURN (SPECIAL-USE)':''));
+    $folders=[]; $literalIndex=0;
+    $quoted='"(?:[^"\\\\]|\\\\.)*"';
+    foreach ($list['lines'] as $line) {
+        $literal=null;
+        if (preg_match('/\{\d+\}\r\n$/',$line)) $literal=$list['literals'][$literalIndex++]??null;
+        if (!preg_match('/^\* LIST \(([^)]*)\) (NIL|'.$quoted.') (.*)$/i',rtrim($line,"\r\n"),$m)) continue;
+        $flags=preg_split('/\s+/',strtoupper(trim($m[1])));
+        if (in_array('\\NOSELECT',$flags,true) || in_array('\\NONEXISTENT',$flags,true)) continue;
+        $decode=static fn(string $v):string=>preg_replace('/\\\\(["\\\\])/','$1',substr($v,1,-1));
+        $name=str_starts_with($m[3],'{')?$literal:(str_starts_with($m[3],'"')?$decode($m[3]):rtrim($m[3],"\r"));
+        if (!is_string($name) || $name==='' || preg_match('/[\r\n\x00]/',$name)) continue;
+        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
+    }
+    $folder=$configured;
+    if (!isset($folders[$folder])) {
+        // Only the default name may resolve automatically; explicit paths remain authoritative.
+        $candidates=[];
+        if ($configured==='Archive') {
+            foreach ($folders as $name=>$info) if ($info['archive']) $candidates[]=(string)$name;
+            if (!$candidates) foreach ($folders as $name=>$info) if ($info['delimiter']!=='' && str_ends_with((string)$name,$info['delimiter'].'Archive')) $candidates[]=(string)$name;
+        }
+        if (count($candidates)!==1) fail('IMAP archive folder was not found or is ambiguous. Enter the exact existing folder path in account setup (for example, Archive or INBOX.Archive).');
+        $folder=$candidates[0];
+    }
+    if (strcasecmp($folder,'INBOX')===0) fail('The IMAP archive folder must be different from Inbox.');
+    imap_command($s,'STATUS '.imap_quote($folder).' (MESSAGES)');
+    return $folder;
+}
+function imap_search_ids(mixed $s,string $criteria): array {
+    $response=imap_command($s,'UID SEARCH '.$criteria);
+    foreach ($response['lines'] as $line) if (preg_match('/^\* SEARCH(?: (.*))?\r?\n$/i',$line,$m)) {
+        $ids=preg_split('/\s+/',trim($m[1]??''));
+        return array_values(array_filter($ids,static fn($id)=>ctype_digit($id) && (int)$id>0));
+    }
+    fail('The IMAP server did not return a message search result.');
+}
+function imap_message_content(mixed $s,string $id): ?string {
+    $response=imap_command($s,'UID FETCH '.$id.' (UID BODY.PEEK[])');
+    if (!preg_match('/\bUID '.preg_quote($id,'/').'\b/i',implode('',$response['lines']))) return null;
+    return $response['literals'][0]??null;
+}
+function imap_archive(mixed $s,string $id,string $configured): void {
+    if (!ctype_digit($id) || (int)$id<1) fail('Invalid IMAP message identifier.');
+    $folder=imap_archive_folder($s,$configured);
+    $raw=imap_message_content($s,$id);
+    if ($raw===null || $raw==='') fail('This message is no longer in the server Inbox. Sync before trying to archive it.');
+    // Bound destination verification to UIDs allocated after this snapshot, including concurrent deliveries.
+    $status=imap_command($s,'STATUS '.imap_quote($folder).' (UIDNEXT)'); $next='';
+    foreach ($status['lines'] as $line) if (preg_match('/^\* STATUS .*\bUIDNEXT (\d+)\b/i',$line,$m)) $next=$m[1];
+    if ($next==='' || (int)$next<1) fail('The IMAP server did not provide the archive folder UIDNEXT. No message was moved.');
+    imap_command($s,'UID MOVE '.$id.' '.imap_quote($folder));
+    try {
+        if (in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('The message is still in the server Inbox.');
+        imap_command($s,'EXAMINE '.imap_quote($folder));
+        $candidates=array_values(array_filter(imap_search_ids($s,'UID '.$next.':*'),static fn($uid)=>(int)$uid>=(int)$next));
+        if (count($candidates)>10) fail('Too many new archive messages to verify this move.');
+        foreach ($candidates as $uid) {
+            $archived=imap_message_content($s,$uid);
+            if ($archived!==null && hash_equals(hash('sha256',$raw),hash('sha256',$archived))) return;
+        }
+        fail('The message could not be found in the archive folder.');
+    } catch (HttpError $error) {
+        fail('Archive could not be confirmed. '.$error->getMessage().' Check the server Inbox and Archive before retrying.');
+    }
+}
+/** Serialize provider reads and writes so a stale in-flight sync cannot undo an archive in the cache. */
+function with_account_mail_lock(string $accountId,callable $operation): mixed {
+    $lock=fopen(data_dir().'/mail-'.hash('sha256',$accountId).'.lock','c');
+    if ($lock===false) fail('Cannot lock this account for synchronization.',503);
+    try {
+        if (!flock($lock,LOCK_EX|LOCK_NB)) fail('This account is syncing or updating mail. Try again when it finishes.',409);
+        try { return $operation(); }
+        finally { flock($lock,LOCK_UN); }
+    } finally { fclose($lock); }
 }
 function sync_imap(array $a): int {
     $deadline=microtime(true)+18;
@@ -142,7 +242,7 @@ function remote_mail_action(array $r,string $action): array {
             $select=imap_command($s,'SELECT INBOX'); $validity='';foreach ($select['lines'] as $line) if(preg_match('/UIDVALIDITY (\d+)/',$line,$m))$validity=$m[1];
             if ($r['meta']['source']!=='imap:'.$validity.':'.$id) fail('Mailbox identifiers changed. Remove/reconnect this account before processing cached messages.');
             // MOVE is atomic on supporting servers; never fall back to a broad EXPUNGE.
-            if ($action==='archive') imap_command($s,'UID MOVE '.$id.' '.imap_quote($a['config']['archiveFolder']??'Archive'));
+            if ($action==='archive') imap_archive($s,$id,$a['config']['archiveFolder']??'Archive');
             else imap_command($s,'UID STORE '.$id.' '.($action==='read'?'+':'-').'FLAGS.SILENT (\\Seen)');
         } finally { fclose($s); }
     } else fail('This connector does not support email actions.');

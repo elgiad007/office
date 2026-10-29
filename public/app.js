@@ -75,7 +75,7 @@ function renderList() {
   document.querySelector('#items').innerHTML=rows.length?rows.map(r=>{
     const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?(r.meta.email||r.meta.company||''):state.app==='wiki'?(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):'Edited '+dateLabel(r.updated);
     const selected=state.current?.id===r.id;
-    return `<button class="item ${selected?'selected':''}" data-id="${r.id}" aria-pressed="${selected}" ${selected?'id="selected-item"':''}><span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>${r.meta.remote?'<span class="badge">Synced</span>':r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}</button>`;
+    return `<button class="item ${selected?'selected':''}" data-id="${r.id}" aria-pressed="${selected}" ${selected?'id="selected-item"':''}><span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span><span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span></button>`;
   }).join(''):`<div class="list-empty">${state.search?'No matching items. Try a different search.':'Nothing here yet.<br>Your workspace is ready when you are.'}</div>`;
 }
 function renderDetail() {

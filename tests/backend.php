@@ -47,6 +47,13 @@ try {
         public function stream_stat():array{return [];}
     }
     stream_wrapper_register('mailfixture',MailFixture::class);$stream=fopen('mailfixture://test','r+');$response=imap_command($stream,'UID FETCH 1 (BODY.PEEK[])');check($response['literals']===['hello'],'IMAP literal/tag fixture');fclose($stream);
+    with_account_mail_lock('fixture-account',function() {
+        try { with_account_mail_lock('fixture-account',fn()=>throw new RuntimeException('Overlapping sync acquired the lock')); throw new RuntimeException('Expected lock conflict'); }
+        catch(HttpError $e) { check($e->getCode()===409,'sync and archive on the same account cannot overlap'); }
+        check(with_account_mail_lock('another-account',fn()=>true),'different accounts may run concurrently');
+    });
+    try { with_account_mail_lock('fixture-account',fn()=>throw new RuntimeException('fixture failure')); } catch(RuntimeException) {}
+    check(with_account_mail_lock('fixture-account',fn()=>true),'account lock released after failure');
 } finally {
     // This test-created directory has a fixed unique prefix, never user data.
     foreach (glob($testDir.'/*')?:[] as $file) @unlink($file); @rmdir($testDir);

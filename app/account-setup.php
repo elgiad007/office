@@ -69,12 +69,13 @@ function check_account_connection(array $account): array {
         }
     };
     if ($account['type'] === 'imap') {
-        $probe('IMAP inbox · TLS 993', static function () use ($account): void {
+        $probe('IMAP inbox and archive · TLS 993', static function () use ($account): void {
             $socket = socket_connection($account['config']['host'], 993);
             try {
                 if (!str_starts_with((string)fgets($socket,65536), '* OK')) fail('Unexpected IMAP greeting.');
                 imap_command($socket, 'LOGIN '.imap_quote($account['credentials']['username']).' '.imap_quote($account['credentials']['password']));
                 imap_command($socket, 'EXAMINE INBOX');
+                imap_archive_folder($socket, $account['config']['archiveFolder']);
             } finally { fclose($socket); }
         });
         $probe('SMTP login · TLS 465', static function () use ($account): void {
