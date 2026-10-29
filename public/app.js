@@ -12,7 +12,7 @@ const apps = {
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
 };
 const defaultKeys = {down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',read:'m',delete:'d'};
-const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'all'};
+const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox'};
 const root=document.querySelector('#app'), dialog=document.querySelector('#dialog');
 let noticeTimer, saveTimer, keySequence='', sequenceTime=0;
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
@@ -146,7 +146,7 @@ async function commit() {
   } catch(error) { state.dirty=true; const s=document.querySelector('#save-status'); if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
   await state.savePromise; if(state.dirty) await commit();
 }
-async function changeApp(name) { await commit(); state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
+async function changeApp(name) { await commit(); if(name==='mail'&&state.app!=='mail')state.mailFolder='Inbox'; state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
 async function selectRecord(id,focus=false) { await commit(); state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; renderList(); renderDetail(); if(focus)document.querySelector('#selected-item')?.focus({preventScroll:true}); }
 async function createRecord(initial={}) {
   await commit(); const kind=state.app;

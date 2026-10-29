@@ -31,7 +31,8 @@ export async function testMailArchive(page, url) {
   try {
     await page.goto(url+'#mail');await page.reload();
     await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
-    await folder('Inbox');await select(message.title);
+    assert.equal(await page.locator('#mail-folder').inputValue(),'Inbox');
+    await select(message.title);
     assert.deepEqual(await page.locator('.item .badge').allTextContents(),['Inbox','Cached']);
     await page.getByRole('button',{name:'Archive',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Archive could not be confirmed'}).waitFor();
@@ -40,7 +41,9 @@ export async function testMailArchive(page, url) {
     await page.getByRole('button',{name:'Archive',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Archived 1 messages.'}).waitFor();
     assert.equal(await page.locator('.item').count(),0);
-    await folder('Archive');await select(message.title);
+    await folder('Archive');await sync();
+    assert.equal(await page.locator('#mail-folder').inputValue(),'Archive');
+    await select(message.title);
     assert.deepEqual(await page.locator('.item .badge').allTextContents(),['Archive','Cached']);
     await page.locator('#main').focus();await page.keyboard.press('d');
     await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
@@ -76,7 +79,9 @@ export async function testMailArchive(page, url) {
     await page.getByRole('button',{name:'Repair / resync',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Mail folders resynchronized.'}).waitFor();
     assert.equal(repairs,1);
-    await page.getByRole('button',{name:'Mail',exact:true}).click();await folder('Inbox');await select('Repaired server message');
+    await page.getByRole('button',{name:'Mail',exact:true}).click();
+    assert.equal(await page.locator('#mail-folder').inputValue(),'Inbox');
+    await select('Repaired server message');
     assert.ok((await page.locator('.mail-body').textContent()).includes('Fresh server content'));
     await folder('Local mail');assert.equal(await page.locator('.item').count(),1);
     await page.screenshot({path:'test-results/mail-archive.png',fullPage:true});
