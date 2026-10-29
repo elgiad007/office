@@ -18,65 +18,41 @@ export async function testAccountSetup(page, url) {
       {label:'SMTP login · TLS 465',status:imapChecks === 1 ? 'error' : 'ok',message:imapChecks === 1 ? 'Fixture: SMTP authentication failed. Check your app password.' : 'Connection and authentication succeeded.'},
     ]}});
   });
-  let authorizeId;
+  let authorizeEmail;
   await page.route(authPredicate, async route => {
     const data = route.request().postDataJSON();
-    authorizeId = data.id;
-    assert.deepEqual(Object.keys(data), ['id']);
+    authorizeEmail = data.email;
+    assert.deepEqual(Object.keys(data), ['email','calendar']);
+    assert.equal(data.calendar,true);
     await route.fulfill({status:400,json:{error:'Fixture: Google authorization unavailable. Try again.'}});
   });
   try {
+    await page.getByLabel('Google OAuth client ID',{exact:true}).fill('browser.apps.googleusercontent.com');
+    await page.getByLabel('Google OAuth client secret',{exact:true}).fill('browser-google-secret');
+    assert.equal(await page.getByLabel('Google callback URL',{exact:true}).inputValue(),url+'api.php?r=oauth-callback');
+    await page.evaluate(() => Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text => {window.copiedCallback=text;}}}));
+    await page.getByRole('button',{name:'Copy this location’s callback',exact:true}).click();
+    assert.equal(await page.evaluate(() => window.copiedCallback),url+'api.php?r=oauth-callback');
+    await page.getByRole('button',{name:'Save Google integration',exact:true}).click();
+    await page.getByText('Google integration saved. You can now add a Gmail account.',{exact:true}).waitFor();
+    assert.equal(await page.getByLabel('Google OAuth client secret',{exact:true}).inputValue(),'');
     await open();
     assert.equal(await modal.getByRole('button',{name:'Guided setup',exact:true}).evaluate(node => node === document.activeElement),true);
     await page.keyboard.press('Enter');
     await selectProvider('google');
-    // Required identity fields are checked before advancing.
-    await next();
-    assert.equal(await modal.locator('[aria-current="step"]').innerText(),'1. Account');
-    await modal.getByLabel('Account label',{exact:true}).fill('Guided Google fixture');
-    await modal.getByLabel('Sender email',{exact:true}).fill('guided@example.com');
-    await page.keyboard.press('Enter');
-    await modal.getByRole('heading',{name:'Google project',exact:true}).waitFor();
-    const redirect = await modal.getByLabel('Authorized redirect URI',{exact:true}).inputValue();
-    assert.equal(redirect, url+'api.php?r=oauth-callback');
-    // Test clipboard wiring without changing the user's system clipboard.
-    await page.evaluate(() => Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text => {window.copiedCallback=text;}}}));
-    await modal.getByRole('button',{name:'Copy redirect URI',exact:true}).click();
-    assert.equal(await page.evaluate(() => window.copiedCallback),redirect);
-    assert.ok(await modal.getByRole('link',{name:'Google Cloud Console',exact:true}).count());
-    await page.screenshot({path:'test-results/account-google-guide.png',fullPage:true});
-    await next();
-    await modal.getByLabel('OAuth client ID',{exact:true}).fill('fixture.apps.googleusercontent.com');
-    await modal.getByLabel('OAuth client secret',{exact:true}).fill('fixture-google-secret');
-    assert.equal(await modal.getByLabel('OAuth client secret',{exact:true}).getAttribute('type'),'password');
+    await modal.getByRole('button',{name:'Connect with Google',exact:true}).click();
+    assert.equal(authorizeEmail,undefined);
+    await modal.getByLabel('Gmail address',{exact:true}).fill('guided@example.com');
+    await modal.getByLabel('Include Google Calendar (read-only)',{exact:true}).check();
     await modal.getByRole('button',{name:'Manual setup',exact:true}).click();
-    assert.equal(await modal.getByLabel('Account label',{exact:true}).inputValue(),'Guided Google fixture');
-    assert.equal(await modal.getByLabel('OAuth client secret',{exact:true}).inputValue(),'fixture-google-secret');
-    // Switching providers retains a separate draft for each one.
-    await selectProvider('caldav');
-    await modal.getByLabel('Account label',{exact:true}).fill('Unsaved calendar draft');
-    await selectProvider('google');
-    assert.equal(await modal.getByLabel('OAuth client secret',{exact:true}).inputValue(),'fixture-google-secret');
-    await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
-    await next(); await next();
-    assert.equal(await modal.getByLabel('OAuth client ID',{exact:true}).inputValue(),'fixture.apps.googleusercontent.com');
-    await back(); await back();
-    assert.equal(await modal.getByLabel('Sender email',{exact:true}).inputValue(),'guided@example.com');
-    await next(); await next();
-    await modal.getByRole('button',{name:'Check settings',exact:true}).click();
-    await modal.getByText('Configuration checked · Google authorization still required',{exact:true}).waitFor();
-    await next();
-    assert.equal(await modal.getByRole('heading',{name:'Review',exact:true}).count(),1);
-    assert.ok(!(await modal.innerHTML()).includes('fixture-google-secret'));
-    assert.ok(!(await modal.innerText()).includes('Connection checks passed'));
-    await page.screenshot({path:'test-results/account-google-review.png',fullPage:true});
-    await modal.getByRole('button',{name:'Save account',exact:true}).click();
-    await modal.getByRole('heading',{name:'Account saved',exact:true}).waitFor();
-    await modal.getByRole('button',{name:'Authorize with Google',exact:true}).click();
+    assert.equal(await modal.getByLabel('Gmail address',{exact:true}).inputValue(),'guided@example.com');
+    assert.equal(await modal.getByLabel('Google OAuth client secret',{exact:true}).count(),0);
+    await modal.getByRole('button',{name:'Connect with Google',exact:true}).click();
     await modal.getByText('Fixture: Google authorization unavailable. Try again.',{exact:true}).waitFor();
-    assert.ok(authorizeId);
-    await done();
-    await page.waitForFunction(() => !document.querySelector('#dialog').children.length);
+    assert.equal(authorizeEmail,'guided@example.com');
+    assert.equal((await (await page.request.get(url+'api.php?r=accounts')).json()).accounts.length,0);
+    await page.screenshot({path:'test-results/account-google-connect.png',fullPage:true});
+    await modal.getByRole('button',{name:'Close dialog',exact:true}).click();
 
     await open();
     await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
@@ -121,16 +97,13 @@ export async function testAccountSetup(page, url) {
     await modal.getByRole('button',{name:'Save account',exact:true}).click();
     await modal.getByRole('heading',{name:'Account saved',exact:true}).waitFor(); await done();
     const accounts = (await (await page.request.get(url+'api.php?r=accounts')).json()).accounts;
-    assert.equal(accounts.length,3);
-    assert.ok(accounts.some(account => account.id === authorizeId));
+    assert.equal(accounts.length,2);
     // Mobile and Escape close work without retaining the last draft's secrets.
     await page.setViewportSize({width:390,height:844});
     await open(); await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
     await selectProvider('google');
-    assert.equal(await modal.getByLabel('Account label',{exact:true}).inputValue(),'');
-    await modal.getByLabel('Account label',{exact:true}).fill('Mobile draft');
-    await modal.getByLabel('Sender email',{exact:true}).fill('mobile@example.com');
-    await next();
+    assert.equal(await modal.getByLabel('Gmail address',{exact:true}).inputValue(),'');
+    await modal.getByLabel('Gmail address',{exact:true}).fill('mobile@example.com');
     await page.screenshot({path:'test-results/account-mobile.png',fullPage:true});
     assert.ok(await modal.evaluate(node => node.scrollWidth <= node.clientWidth+1));
     await page.keyboard.press('Escape'); await modal.waitFor({state:'hidden'});
@@ -141,7 +114,7 @@ export async function testAccountSetup(page, url) {
     }
     await page.setViewportSize({width:1440,height:1000});
     await page.reload(); await page.getByRole('button',{name:'+ Add account',exact:true}).waitFor();
-    console.log('PASS account setup: guided/manual paths, required fields, drafts across provider/mode/back changes, Google instructions/copy/configuration check/authorization handoff, masked review, connection results/invalidation, save/error recovery, cleared secrets, keyboard and mobile.');
+    console.log('PASS account setup: guided/manual paths, required fields, drafts across provider/mode/back changes, Google connection with optional Calendar and no premature save, masked review, connection results/invalidation, save/error recovery, cleared secrets, keyboard and mobile.');
   } finally {
     await page.unroute(testPredicate);
     await page.unroute(authPredicate);

@@ -50,10 +50,14 @@ Before hosting, verify PHP version/extensions, writable private data storage, ou
 
 ### Account setup: guided and manual paths
 
-Add an explicit setup-method choice to Add account. Guided setup covers provider/identity, provider-specific instructions and fields, optional non-destructive connection checks, a review with masked secrets, and completion. Google guidance links to the Cloud console, explains enabling both APIs and configuring consent/test users, supplies a copyable callback, and offers authorization after saving. Google credentials can only be verified by completing Google's authorization flow.
+Add an explicit setup-method choice to Add account. Guided setup covers provider/identity, provider-specific instructions and fields, optional non-destructive connection checks, a review with masked secrets, and completion. Google application configuration lives in owner-only installation settings, with Cloud setup instructions and a copyable callback. Adding a Google account asks only for email and optional Calendar access, then opens Google consent and saves after confirming the provider identity.
 
 Manual setup shows the full fields immediately. Both paths share one in-memory draft per provider and the same backend validation/save route, so switching paths or going Back preserves values. Secrets are not put in browser storage and are cleared when the dialog closes. Editing settings invalidates any previous check result. Tab/Enter/Escape, labelled controls and focus management must work across steps.
 
 An authenticated, CSRF-protected account-test route checks IMAP login/read-only Inbox access, SMTP login without sending, or a CalDAV collection's properties. It must neither save an account nor fetch messages/events. Google testing is explicitly configuration-only pending authorization. Tests cover switching paths, back navigation, validation/errors, masked review, manual and guided saves, and Google completion. Rebuild both portable distributions after validation.
 
 MBOX/ZIP content archives, bulk attachment import/export, external calendar writes, full recurrence display, CalDAV discovery, full Vim operators in rich text, offline editing and DOCX/ODT/XLSX/ODS conversion are subsequent work. A portable Windows runtime bundle and launcher are included in this initial delivery. Keep these limits visible in the README and interface.
+
+### Installation-level Google integration
+
+Configure the owner’s Google web OAuth application once per installation, with an explicit registered callback for that host. Connect Gmail accounts using email and browser consent, with optional Calendar access. Verify granted scopes and Gmail profile before creating an account; reject duplicate addresses and wrong-account reconnects. Keep legacy account credentials working. Installation secrets are encrypted and excluded from JSON backups.

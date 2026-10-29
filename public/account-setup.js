@@ -2,16 +2,15 @@ import {escapeHtml as escape} from './formats.js';
 
 const providers = {
   imap: 'IMAP + SMTP',
-  google: 'Gmail + Google Calendar',
+  google: 'Gmail (optional Google Calendar)',
   caldav: 'CalDAV calendar',
 };
 
 /** The entire draft lives in this dialog closure, never browser storage. */
 export function openAccountSetup({dialog, request, onSaved}) {
-  const callback = new URL('api.php?r=oauth-callback', location.href).href;
   const drafts = {
     imap: {label:'', email:'', host:'', smtp:'', username:'', password:'', archiveFolder:'Archive'},
-    google: {label:'', email:'', client_id:'', client_secret:'', redirect:callback},
+    google: {label:'', email:'', calendar:false},
     caldav: {label:'', url:'', username:'', password:''},
   };
   let mode = null;
@@ -23,15 +22,14 @@ export function openAccountSetup({dialog, request, onSaved}) {
   let closed = false;
   let previouslyFocused = document.activeElement;
   const draft = () => drafts[provider];
-  const steps = () => provider === 'google'
-    ? ['Account', 'Google project', 'Credentials', 'Review']
-    : ['Account', 'Connection', 'Review'];
+  const steps = () => ['Account', 'Connection', 'Review'];
   const payload = () => ({type:provider, ...draft()});
 
   function capture() {
     const form = dialog.querySelector('#account-form');
     if (form) {
-      for (const [key, value] of new FormData(form)) if (key !== 'provider') draft()[key] = value;
+      for (const [key, value] of new FormData(form)) if (key !== 'provider' && key !== 'calendar') draft()[key] = value;
+      if (provider === 'google') draft().calendar = !!form.querySelector('[name=calendar]:checked');
     }
   }
 
@@ -51,18 +49,13 @@ export function openAccountSetup({dialog, request, onSaved}) {
   }
 
   function identity() {
+    if (provider === 'google') return providerSelect() + input('Gmail address', 'email', {type:'email'})
+      + '<label class="setup-checkbox"><input type="checkbox" name="calendar" '+(draft().calendar ? 'checked' : '')+'> Include Google Calendar (read-only)</label><p>Sign in on Google’s page and approve access. Google integration must be configured once in Settings.</p>';
     return providerSelect() + input('Account label', 'label', {help:'A name to recognize this account, such as Personal Gmail.'})
       + (provider !== 'caldav' ? input('Sender email', 'email', {type:'email'}) : '');
   }
 
   function credentials() {
-    if (provider === 'google') {
-      return `<p>Choose a <strong>Web application</strong> OAuth client in your Google project. Copy its values below.</p>`
-        + input('OAuth client ID', 'client_id', {placeholder:'…apps.googleusercontent.com'})
-        + input('OAuth client secret', 'client_secret', {type:'password', help:'This identifies your OAuth application. It is separate from your Google password.'})
-        + input('Authorized redirect URI', 'redirect', {type:'url', help:'Register this exact URL in Google Auth platform → Clients → Authorized redirect URIs.'})
-        + '<button type="button" data-setup="copy">Copy redirect URI</button>';
-    }
     if (provider === 'imap') {
       return `<p>Find these settings in your email provider’s mail-client instructions. Office currently supports implicit TLS on ports 993 and 465.</p>`
         + input('IMAP server (TLS 993)', 'host', {placeholder:'imap.example.com', help:'Enter the hostname only, without a protocol or port.'})
@@ -75,24 +68,6 @@ export function openAccountSetup({dialog, request, onSaved}) {
       + input('Calendar collection URL', 'url', {type:'url', placeholder:'https://calendar.example.com/calendars/user/personal/', help:'Use the final HTTPS collection URL on port 443 or 8443; redirects are not followed.'})
       + input('Username', 'username')
       + input('Password / app password', 'password', {type:'password', help:'Use an app password if your provider requires one.'});
-  }
-
-  function googleInstructions() {
-    return `<p>Create credentials in a Google Cloud project that you control. Keep this wizard open while working in the console.</p>
-      <ol class="setup-instructions">
-        <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> and create or select a project, such as Personal Office.</li>
-        <li>In <strong>APIs &amp; Services → Library</strong>, enable both
-          <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener noreferrer">Gmail API</a> and
-          <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener noreferrer">Google Calendar API</a> in that same project.</li>
-        <li>In <strong>Google Auth platform</strong>, configure the app name and contact email. For personal Gmail, choose <strong>External</strong> and add your Gmail address under <strong>Audience → Test users</strong>.</li>
-        <li>Under <strong>Data Access</strong>, add the two permissions below. Gmail access includes reading, sending and organizing messages; Calendar access is read-only.</li>
-        <li>Under <strong>Clients → Create client</strong>, choose <strong>Web application</strong>. Register the exact redirect URI below, then create the client and copy its client ID and secret for the next step. JavaScript origins are not required for this flow.</li>
-      </ol>
-      <pre class="setup-code">https://www.googleapis.com/auth/gmail.modify\nhttps://www.googleapis.com/auth/calendar.readonly</pre>
-      ${input('Authorized redirect URI', 'redirect', {type:'url', readonly:true})}
-      <button type="button" data-setup="copy">Copy redirect URI</button>
-      <p class="setup-note">While your Google app is in Testing, authorization for these permissions normally expires after seven days. Reconnect when needed. Changing the Office domain or port requires updating the registered callback.</p>
-      <p><a href="https://developers.google.com/workspace/guides/configure-oauth-consent" target="_blank" rel="noopener noreferrer">Google’s consent setup guide</a> · <a href="https://developers.google.com/identity/protocols/oauth2/web-server" target="_blank" rel="noopener noreferrer">Google’s web-server authorization guide</a></p>`;
   }
 
   function checks() {
@@ -109,13 +84,12 @@ export function openAccountSetup({dialog, request, onSaved}) {
     const data = draft();
     const fields = [['Connection',providers[provider]],['Account label',data.label]];
     if (provider !== 'caldav') fields.push(['Sender email',data.email]);
-    if (provider === 'google') fields.push(['OAuth client ID',data.client_id],['OAuth client secret','Entered · hidden'],['Redirect URI',data.redirect]);
     if (provider === 'imap') fields.push(['IMAP',data.host+' · TLS 993'],['SMTP',data.smtp+' · TLS 465'],['Username',data.username],['Password','Entered · hidden'],['Archive folder',data.archiveFolder]);
     if (provider === 'caldav') fields.push(['Calendar collection',data.url],['Username',data.username],['Password','Entered · hidden']);
     return `<p>Review these settings before saving. Secrets are hidden and will be encrypted on disk.</p>
       <dl class="setup-review">${fields.map(([name,value]) => `<div><dt>${escape(name)}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>
-      ${checks()}<button type="button" data-setup="test">${provider === 'google' ? 'Check settings' : 'Test connection'}</button>
-      <p class="setup-note">${provider === 'google' ? 'Checking settings validates the required fields and callback format. Only Google’s authorization flow can verify your client ID, secret and permissions.' : 'Connection checks sign in and inspect access without saving the account, downloading items, or sending mail. They do not verify archive-folder or delivery behavior.'}</p>`;
+      ${checks()}<button type="button" data-setup="test">Test connection</button>
+      <p class="setup-note">Connection checks sign in and inspect access without saving the account, downloading items, or sending mail. They do not verify archive-folder or delivery behavior.</p>`;
   }
 
   function setError(message) {
@@ -157,7 +131,7 @@ export function openAccountSetup({dialog, request, onSaved}) {
     try {
       const response = await request('account-save', payload());
       savedId = response.id;
-      for (const data of Object.values(drafts)) { if ('password' in data) data.password = ''; if ('client_secret' in data) data.client_secret = ''; }
+      for (const data of Object.values(drafts)) if ('password' in data) data.password = '';
       // Settings can refresh behind the modal. Saving never initiates sync or sends mail.
       try { await onSaved(provider); }
       catch { /* The account was saved even if the background account-list refresh failed. */ }
@@ -169,6 +143,16 @@ export function openAccountSetup({dialog, request, onSaved}) {
     }
   }
 
+  async function connectGoogle() {
+    busy = true; render(false);
+    try {
+      const response = await request('google-connect', {email:draft().email, calendar:draft().calendar});
+      const destination = new URL(response.url);
+      if (destination.origin !== 'https://accounts.google.com') throw Error('Unexpected Google authorization destination.');
+      location.assign(destination.href);
+    } catch (error) { busy = false; if (!closed) { render(false); setError(error.message); } }
+  }
+
   function render(focus=true) {
     const complete = !!savedId;
     const title = complete ? 'Account saved' : 'Add an account';
@@ -178,26 +162,27 @@ export function openAccountSetup({dialog, request, onSaved}) {
     let body;
     if (complete) {
       body = `<h3 id="setup-step-title" tabindex="-1">${escape(draft().label)} is ready for the next step.</h3>
-        <p>${provider === 'google' ? 'Authorize with Google to connect Gmail and Calendar. You can also authorize later from Settings.' : 'The account is saved. Use Sync now in Office to download your recent mail or calendar entries.'}</p>
+        <p>The account is saved. Use Sync now in Office to download your recent mail or calendar entries.</p>
         <p id="account-error" class="error" role="alert" tabindex="-1"></p>
-        <div class="dialog-actions">${provider === 'google' ? '<button type="button" class="primary" data-setup="authorize">Authorize with Google</button>' : ''}<button type="button" data-setup="done">Done</button></div>`;
+        <div class="dialog-actions"><button type="button" data-setup="done">Done</button></div>`;
     } else if (!mode) {
       body = `<h3 id="setup-step-title" tabindex="-1">How would you like to set up your account?</h3>
         <div class="setup-options"><button type="button" data-mode="guided" aria-label="Guided setup" aria-describedby="setup-guided-description"><strong>Guided setup</strong><span id="setup-guided-description">Follow provider-specific steps, check your settings, and review before saving.</span><small>Recommended</small></button>
         <button type="button" data-mode="manual" aria-label="Manual setup" aria-describedby="setup-manual-description"><strong>Manual setup</strong><span id="setup-manual-description">Enter all connection settings directly.</span></button></div>`;
+    } else if (provider === 'google') {
+      body = `<h3 id="setup-step-title" tabindex="-1">Connect your Google account</h3><form id="account-form" class="setup-form">${identity()}<p id="account-error" class="error" role="alert" tabindex="-1"></p><div class="dialog-actions"><button type="submit" class="primary">Connect with Google</button></div></form>`;
     } else {
       const names = steps();
       const isReview = mode === 'guided' && step === names.length - 1;
       const content = mode === 'manual' ? identity()+credentials()
         : step === 0 ? identity()
-        : provider === 'google' && step === 1 ? googleInstructions()
         : isReview ? review() : credentials();
       body = `${mode === 'guided' ? `<ol class="setup-progress" aria-label="Setup progress">${names.map((name,index) => `<li ${index === step ? 'aria-current="step"' : ''}>${index+1}. ${name}</li>`).join('')}</ol>` : ''}
         <h3 id="setup-step-title" tabindex="-1">${mode === 'manual' ? 'Connection settings' : names[step]}</h3>
         <form id="account-form" class="setup-form">
           ${content}
-          ${mode === 'manual' ? `${checks()}<button type="button" data-setup="test">${provider === 'google' ? 'Check settings' : 'Test connection'}</button>` : ''}
-          ${mode === 'guided' && !isReview && !(provider === 'google' && step === 1) && step > 0 ? `${checks()}<button type="button" data-setup="test">${provider === 'google' ? 'Check settings' : 'Test connection'}</button>` : ''}
+          ${mode === 'manual' ? `${checks()}<button type="button" data-setup="test">Test connection</button>` : ''}
+          ${mode === 'guided' && !isReview && step > 0 ? `${checks()}<button type="button" data-setup="test">Test connection</button>` : ''}
           <p id="account-error" class="error" role="alert" tabindex="-1"></p>
           <div class="dialog-actions">
             ${mode === 'guided' && step > 0 ? '<button type="button" data-setup="back">Back</button>' : ''}
@@ -233,7 +218,8 @@ export function openAccountSetup({dialog, request, onSaved}) {
         event.preventDefault();
         if (busy || !validateVisible()) return;
         capture();
-        if (mode === 'manual' || step === steps().length - 1) void save();
+        if (provider === 'google') void connectGoogle();
+        else if (mode === 'manual' || step === steps().length - 1) void save();
         else {
           if (step === 0 && provider === 'imap' && !draft().username) draft().username = draft().email;
           step++;
@@ -245,27 +231,6 @@ export function openAccountSetup({dialog, request, onSaved}) {
     if (back) back.onclick = () => { capture(); step--; render(); };
     const test = dialog.querySelector('[data-setup="test"]');
     if (test) test.onclick = () => void runCheck();
-    const copy = dialog.querySelector('[data-setup="copy"]');
-    if (copy) copy.onclick = async () => {
-      capture();
-      try {
-        await navigator.clipboard.writeText(draft().redirect);
-        if (!closed) { copy.textContent = 'Copied'; const live=dialog.querySelector('#setup-live'); if (live) live.textContent='Redirect URI copied.'; }
-      } catch {
-        const input = dialog.querySelector('[name="redirect"]'); input?.focus(); input?.select();
-        const live=dialog.querySelector('#setup-live'); if (live) live.textContent='Press Ctrl+C or Cmd+C to copy the selected redirect URI.';
-      }
-    };
-    const authorize = dialog.querySelector('[data-setup="authorize"]');
-    if (authorize) authorize.onclick = async () => {
-      authorize.disabled = true;
-      try {
-        const response = await request('google-connect', {id:savedId});
-        const destination = new URL(response.url);
-        if (destination.origin !== 'https://accounts.google.com') throw Error('Unexpected Google authorization destination.');
-        location.assign(destination.href);
-      } catch (error) { setError(error.message); authorize.disabled = false; }
-    };
     if (focus) {
       dialog.scrollTop = 0;
       (dialog.querySelector('#setup-step-title') || dialog.querySelector('button'))?.focus({preventScroll:true});

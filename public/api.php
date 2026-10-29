@@ -4,6 +4,7 @@ require dirname(__DIR__).'/app/bootstrap.php';
 require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/connectors.php';
 require dirname(__DIR__).'/app/account-setup.php';
+require dirname(__DIR__).'/app/google.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -16,12 +17,18 @@ try {
     }
     if ($route==='oauth-callback' && $method==='GET') {
         owner(); $oauth=$_SESSION['oauth']??null; unset($_SESSION['oauth']);
-        if (!$oauth || time()-$oauth['time']>600 || !hash_equals($oauth['state'],(string)($_GET['state']??''))) fail('Expired or invalid Google authorization.',403);
-        if (empty($_GET['code'])) fail('Google authorization was cancelled.');
-        $a=account($oauth['account']); $s=$a['credentials'];
-        $response=web_request('https://oauth2.googleapis.com/token','POST',['Content-Type: application/x-www-form-urlencoded'],http_build_query(['code'=>$_GET['code'],'client_id'=>$s['client_id'],'client_secret'=>$s['client_secret'],'redirect_uri'=>$a['config']['redirect'],'grant_type'=>'authorization_code','code_verifier'=>$oauth['verifier']]));
-        $t=json_decode($response['body'],true,64,JSON_THROW_ON_ERROR); if (empty($t['refresh_token'])) fail('No refresh token received. Reconnect with consent.');
-        $s=array_merge($s,$t,['expires'=>time()+(int)$t['expires_in']]); db()->prepare('UPDATE accounts SET secret=?,error=NULL WHERE id=?')->execute([encrypt_secret($s),$a['id']]);
+        try {
+            if (!$oauth || time()-$oauth['time']>600 || !is_string($_GET['state']??null) || !hash_equals($oauth['state'],$_GET['state'])) fail('Expired or invalid Google authorization. Connect again.');
+            if (!empty($_GET['error']) || !is_string($_GET['code']??null) || !$_GET['code']) fail('Google authorization was cancelled or denied. You can try connecting again.');
+            $s=decrypt_secret($oauth['credentials']);
+            $response=web_request('https://oauth2.googleapis.com/token','POST',['Content-Type: application/x-www-form-urlencoded'],http_build_query(['code'=>$_GET['code'],'client_id'=>$s['client_id'],'client_secret'=>$s['client_secret'],'redirect_uri'=>$oauth['redirect'],'grant_type'=>'authorization_code','code_verifier'=>$oauth['verifier']]));
+            $tokens=json_decode($response['body'],true,64,JSON_THROW_ON_ERROR);
+            if (empty($tokens['access_token'])) fail('Google did not return an access token. Connect again.');
+            $profile=google_json('https://gmail.googleapis.com/gmail/v1/users/me/profile',$tokens['access_token']);
+            finish_google_connection($oauth,$tokens,$profile);
+            $_SESSION['google_notice']=['message'=>'Google account connected.','error'=>false];
+        } catch (HttpError $e) { $_SESSION['google_notice']=['message'=>$e->getMessage(),'error'=>true]; }
+        catch (Throwable $e) { $_SESSION['google_notice']=['message'=>'Google connection failed. Try connecting again.','error'=>true]; }
         header('Location: ./#settings',true,303); exit;
     }
     if ($method==='POST') { csrf(); $input=request_json(); }
@@ -109,6 +116,13 @@ try {
         try { foreach ($items as $r) save_record($r); $db->commit(); } catch(Throwable $e) { $db->rollBack(); throw $e; }
         json_response(['count'=>count($items)]);
     }
+    if ($route==='google-settings' && $method==='GET') {
+        $settings=google_settings(); $notice=$_SESSION['google_notice']??null; unset($_SESSION['google_notice']);
+        json_response(['configured'=>!!$settings,'client_id'=>$settings['client_id']??'','redirect'=>$settings['redirect']??'','notice'=>$notice]);
+    }
+    if ($route==='google-settings' && $method==='POST') {
+        save_google_settings($input); json_response(['ok'=>true]);
+    }
     if ($route==='accounts' && $method==='GET') { $rows=db()->query('SELECT id,label,type,last_sync,error FROM accounts ORDER BY label')->fetchAll(); json_response(['accounts'=>$rows]); }
     if ($route==='account-save' && $method==='POST') {
         if (!extension_loaded('openssl')) fail('OpenSSL is required for encrypted account credentials.');
@@ -125,11 +139,7 @@ try {
         $q=$db->prepare("DELETE FROM records WHERE json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1"); $q->execute([$a['id']]); $db->prepare('DELETE FROM accounts WHERE id=?')->execute([$a['id']]); $db->commit(); json_response(['ok'=>true]);
     }
     if ($route==='google-connect' && $method==='POST') {
-        $a=account((string)($input['id']??'')); if ($a['type']!=='google') fail('Not a Google account.');
-        $state=bin2hex(random_bytes(24)); $verifier=rtrim(strtr(base64_encode(random_bytes(48)),'+/','-_'),'=');
-        $_SESSION['oauth']=['account'=>$a['id'],'state'=>$state,'verifier'=>$verifier,'time'=>time()];
-        $query=['client_id'=>$a['credentials']['client_id'],'redirect_uri'=>$a['config']['redirect'],'response_type'=>'code','scope'=>'https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.readonly','access_type'=>'offline','prompt'=>'consent','state'=>$state,'code_challenge'=>rtrim(strtr(base64_encode(hash('sha256',$verifier,true)),'+/','-_'),'='),'code_challenge_method'=>'S256'];
-        json_response(['url'=>'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query($query)]);
+        json_response(['url'=>start_google_connection($input)]);
     }
     if ($route==='sync' && $method==='POST') {
         $a=account((string)($input['id']??'')); session_write_close();

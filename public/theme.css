@@ -22,6 +22,8 @@
 .setup-progress [aria-current] { color: var(--accent); font-weight: 650; }
 .account-setup .setup-form { gap: 9px; }
 .setup-form > label { margin-top: 10px; }
+.setup-form > .setup-checkbox { display: flex; align-items: center; gap: 10px; }
+.setup-checkbox input[type=checkbox] { width: auto; margin: 0; flex: none; }
 .setup-form > small { font-size: 12px; line-height: 1.6; }
 .setup-form > button { justify-self: start; margin-top: 8px; }
 .setup-form p { margin-bottom: 8px; }

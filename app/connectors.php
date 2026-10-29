@@ -51,6 +51,7 @@ function sync_google(array &$a): int {
         $parsed=parse_eml($raw);
         cache_remote($a,'gmail:'.$m['id'],'mail',$parsed['title'],$parsed['body'],$parsed['meta']+['rawBase64'=>base64_encode($raw),'providerId'=>$m['id'],'read'=>!in_array('UNREAD',$msg['labelIds']??[],true),'folder'=>'Inbox']); $count++;
     }
+    if (($a['config']['calendar'] ?? true) === false) return $count;
     $start=gmdate('Y-m-d\T00:00:00\Z',time()-7*86400); $end=gmdate('Y-m-d\T00:00:00\Z',time()+90*86400);
     $events=google_json('https://www.googleapis.com/calendar/v3/calendars/primary/events?'.http_build_query(['timeMin'=>$start,'timeMax'=>$end,'singleEvents'=>'true','orderBy'=>'startTime','maxResults'=>100]),$token);
     foreach ($events['items']??[] as $e) {

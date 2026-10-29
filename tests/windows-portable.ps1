@@ -15,10 +15,26 @@ Expand-Archive -LiteralPath (Join-Path $officeRoot 'dist\portable-office-windows
 $officeExtracted=Join-Path $officeSmoke 'office'
 $officeUrl="http://127.0.0.1:$Port/api.php?r="
 $officeStarted=$false
+function Test-OfficeCertificatePaths {
+    # This fixture exists only in the isolated extracted test bundle.
+    $officeProbe=Join-Path $officeExtracted 'public\certificate-probe.php'
+    try {
+        Set-Content -LiteralPath $officeProbe -Encoding UTF8 -Value '<?php header("Content-Type: application/json"); $result=[]; foreach (["openssl.cafile","curl.cainfo"] as $key) { $path=ini_get($key); $result[$key]=["path"=>realpath($path),"readable"=>is_readable($path)]; } echo json_encode($result);'
+        $officeCertificateResult=Invoke-RestMethod -Uri "http://127.0.0.1:$Port/certificate-probe.php"
+        $officeExpectedCa=[IO.Path]::GetFullPath((Join-Path $officeExtracted 'runtime\windows\cacert.pem'))
+        foreach($officeSetting in @('openssl.cafile','curl.cainfo')) {
+            $officeCertificate=$officeCertificateResult.$officeSetting
+            if(-not $officeCertificate.readable -or $officeCertificate.path -ne $officeExpectedCa) { throw "$officeSetting must resolve to this installation's readable CA bundle during a web request." }
+        }
+    } finally {
+        Remove-Item -LiteralPath $officeProbe -ErrorAction SilentlyContinue
+    }
+}
 try {
     $officeStartOutput = & (Join-Path $officeExtracted 'Start Office.bat') -NoBrowser -Port $Port
     if($LASTEXITCODE -ne 0){throw ($officeStartOutput -join "`n")}
     $officeStarted=$true
+    Test-OfficeCertificatePaths
     $officeStatus=Invoke-RestMethod -Uri ($officeUrl+'status') -SessionVariable officeWebSession
     if(-not $officeStatus.setup){throw 'Windows release unexpectedly contains an initialized database.'}
     $officeToken=(Get-Content -Raw -LiteralPath (Join-Path $officeExtracted 'data\setup-token.txt')).Trim()
@@ -41,9 +57,10 @@ try {
     $officeStartOutput = & (Join-Path $officeExtracted 'Start Office.bat') -NoBrowser -Port $Port
     if($LASTEXITCODE -ne 0){throw ($officeStartOutput -join "`n")}
     $officeStarted=$true
+    Test-OfficeCertificatePaths
     $officeRecords=Invoke-RestMethod -Uri ($officeUrl+'records&kind=tasks') -WebSession $officeWebSession
     if($officeRecords.records[0].title -ne 'Portable path test'){throw 'The copied folder did not preserve its database.'}
-    Write-Output 'PASS Windows portable ZIP: actual batch launch/stop, bundled PHP/SQLite, owner setup, persistence, paths with spaces, repeated launch reuse, and copy-folder portability.'
+    Write-Output 'PASS Windows portable ZIP: actual batch launch/stop, bundled PHP/SQLite, owner setup, persistence, paths with spaces, repeated launch reuse, certificate paths in web requests, and copy-folder portability.'
 } finally {
     if($officeStarted){ & (Join-Path $officeExtracted 'Stop Office.bat') | Out-Null }
 }

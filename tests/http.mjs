@@ -23,7 +23,19 @@ async function start(){
 }
 async function setup(c){const before=c.cookie;const result=await c.call('setup',{token:(await readFile(c.dir+'/setup-token.txt','utf8')).trim(),password:'test-password-only-123'});c.csrf=result.csrf;assert.notEqual(c.cookie,before);}
 try{
- const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ await a.call('google-settings',{},403,'bad-token');
+ await a.call('google-connect',{email:'person@example.com'},400);
+ const integration={client_id:'shared.apps.googleusercontent.com',client_secret:'shared-secret-not-exported',redirect:a.url.replace('api.php?r=','api.php?r=oauth-callback')};
+ await a.call('google-settings',integration);
+ const config=await a.call('google-settings');assert.equal(config.configured,true);assert.equal(config.client_id,integration.client_id);assert.ok(!JSON.stringify(config).includes(integration.client_secret));
+ await a.call('google-settings',{...integration,client_secret:''});
+ const connection=await a.call('google-connect',{email:'person@example.com',calendar:false});const auth=new URL(connection.url);
+ assert.equal(auth.origin,'https://accounts.google.com');assert.equal(auth.searchParams.get('login_hint'),'person@example.com');assert.ok(!auth.searchParams.get('scope').includes('calendar'));
+ assert.equal((await a.call('accounts')).accounts.length,0);
+ const denied=await fetch(a.url+'oauth-callback&state='+auth.searchParams.get('state')+'&error=access_denied',{headers:{Cookie:a.cookie},redirect:'manual'});assert.equal(denied.status,303);
+ assert.match((await a.call('google-settings')).notice.message,/cancelled/);assert.equal((await a.call('accounts')).accounts.length,0);
+ const stale=await fetch(a.url+'oauth-callback&state=bad&code=unused',{headers:{Cookie:a.cookie},redirect:'manual'});assert.equal(stale.status,303);assert.match((await a.call('google-settings')).notice.message,/Expired or invalid/);
  await a.call('account-test',{},403,'bad-token');
  const googleDraft={type:'google',label:'Configuration only',email:'fixture@example.com',client_id:'fixture.apps.googleusercontent.com',client_secret:'not-a-real-google-secret',redirect:'http://127.0.0.1:8765/api.php?r=oauth-callback'};
  const googleCheck=await a.call('account-test',googleDraft);assert.equal(googleCheck.status,'authorization_required');assert.ok(!JSON.stringify(googleCheck).includes(googleDraft.client_secret));assert.equal((await a.call('accounts')).accounts.length,0);
@@ -46,7 +58,7 @@ try{
  const account=await a.call('account-save',{type:'imap',label:'Fixture account',host:'imap.example.com',smtp:'smtp.example.com',email:'test@example.com',username:'test@example.com',password:'a-secret-never-exported'});
  const listed=await a.call('accounts');assert.equal(listed.accounts.length,1);assert.ok(!JSON.stringify(listed).includes('secret'));
  const dbBytes=await readFile(a.dir+'/office.sqlite');assert.ok(!dbBytes.includes(Buffer.from('a-secret-never-exported')));
- await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup');assert.equal(backup.records.length,4);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));
+ await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup');assert.equal(backup.records.length,4);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));assert.ok(!JSON.stringify(backup).includes(integration.client_secret));assert.ok(!(await readFile(a.dir+'/office.sqlite')).includes(Buffer.from(integration.client_secret)));
  await a.call('restore',{backup},409);
  const b=await start();await setup(b);await b.call('restore',{backup:{...backup,records:[...backup.records,{kind:'bad',id:'bad',title:'bad',body:'',meta:{}}]}},400);assert.equal((await b.call('records&kind=wiki')).records.length,0);
  const restored=await b.call('restore',{backup});assert.equal(restored.count,4);assert.equal((await b.call('history&id='+record.id)).revisions.length,2);assert.equal((await b.call('status')).preferences.theme,'dark');assert.equal((await b.call('accounts')).accounts.length,0);assert.equal((await b.call('records&kind=sheets')).records[0].meta.workbook.sheets[0].cells.A1,'=2+3');

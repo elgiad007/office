@@ -44,18 +44,24 @@ Shared-host filesystem locking, outbound connections, PHP extensions and request
 
 Choose **Settings → Add account**, then select either:
 
-- **Guided setup:** provider and identity, connection settings or Google project instructions, optional checks, and a review before saving. Google guidance includes links to its console, the permissions to request, a copyable redirect URI, and an authorization button after saving.
+- **Account setup:** Gmail connects through Google sign-in after one-time installation configuration in Settings → Google integration, with optional read-only Calendar access. IMAP and CalDAV offer guided and manual setup, optional checks, and a masked review before saving.
 - **Manual setup:** all configuration fields on one screen, with the same validation and optional checks.
 
 Switching between these paths, going Back, or temporarily choosing another provider preserves entered values while the dialog remains open. Each provider has a separate draft. Secrets stay masked in inputs and are omitted from the review. Drafts are kept only in memory, never localStorage; closing the dialog clears them. Saving stores credentials encrypted on disk. Neither path automatically synchronizes or sends mail.
 
-**Test connection** signs in to IMAP using read-only Inbox access and signs in to SMTP without sending a message, or checks a CalDAV collection's properties without downloading events. Results are cleared if settings change. Checks do not save an account, validate mail delivery, or verify IMAP archive-folder behavior. You may save for later if a check cannot run on the current host. For Google, **Check settings** validates required fields and the callback format; Google must verify the actual client credentials and permissions during authorization after saving.
+**Test connection** signs in to IMAP using read-only Inbox access and signs in to SMTP without sending a message, or checks a CalDAV collection's properties without downloading events. Results are cleared if settings change. Checks do not save an account, validate mail delivery, or verify IMAP archive-folder behavior. You may save for later if a check cannot run on the current host. Google accounts are created only after Google authorization succeeds and Gmail confirms the account address. Cancelled or failed authorization does not create an account.
 
 All connections require public DNS hostnames and verified TLS; private LAN endpoints and self-signed certificates are intentionally not supported initially. Generic mail currently uses **IMAP 993 and SMTP 465 with the same username/password**. STARTTLS/587, separate SMTP credentials and IMAP folder discovery are future work. Check your provider's app-password policy.
 
 For CalDAV, supply the actual calendar **collection URL**, username and password/app password. Discovery from a service's home URL is not implemented. Redirects are not followed; use the final HTTPS endpoint. Only ports 443/8443 are accepted.
 
-For Google, create a web OAuth client in your own Google Cloud project; enable Gmail and Calendar APIs. Register the **exact callback URL** displayed in the account form, including `api.php?r=oauth-callback`. Configure the consent screen and test users as needed. Save the client ID/secret, then choose Authorize. Personal-use verification exceptions and testing-token expiration depend on Google's policy; an unverified/testing client is not promised permanent authorization. Domain/port changes require updating the registered callback and reconnecting. Requested access is Gmail modify (including send) and Calendar read-only.
+In **Settings → Google integration**, configure your own Google Cloud web OAuth client once per installation. Enable Gmail API and optionally Calendar API. Register the **exact callback URL** shown there, including `api.php?r=oauth-callback`. Configure the consent screen and test users as needed. Save the client ID, secret, and callback. A blank secret retains the saved secret only for the same client ID. These settings are encrypted and excluded from JSON backups.
+
+You can register both your hosted HTTPS callback and your local callback in the same web client. The Windows launcher defaults to `http://127.0.0.1:8765/api.php?r=oauth-callback`; use the address actually shown by your installation. Keep its hostname and port fixed. Enter the client credentials once in each installation and authorize accounts separately there. Do not copy a live database to transfer connections.
+
+Then choose **Add account → Guided setup (or Manual setup) → Gmail**, enter your email, optionally include Google Calendar, and choose **Connect with Google**. Google confirms the actual address; duplicate accounts are rejected. Reauthorization must use the original address. Gmail modify access includes reading, sending and organizing messages; Calendar access is optional and read-only. Existing Google accounts keep their credentials and Calendar behavior. Changing integration credentials affects future connections; existing connections continue using the credentials under which they were authorized.
+
+Personal-use verification exceptions and testing-token expiration depend on Google's policy; an unverified/testing client is not promised permanent authorization. Testing grants normally expire after seven days. Domain/port changes require updating the registered callback; existing accounts retain their original callback for reauthorization.
 
 Opening the app initiates a check. Further checks run every two minutes while the tab is visible and the owner has interacted within the last two minutes. Manual **Sync now** also checks accounts. Hidden or idle tabs initiate no new checks; an already-running request may finish. No jobs or sends happen when the application is closed. No push notifications or reminders are delivered while it is closed.
 
@@ -84,6 +90,7 @@ No frontend build step is needed. Run:
 ```sh
 node --test tests/formats.test.mjs
 php tests/backend.php
+php tests/google.php
 node tests/http.mjs
 ```
 

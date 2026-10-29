@@ -20,7 +20,10 @@ try {
     if (-not $officeRunning) {
         $officeListener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,$Port)
         try { $officeListener.Start() } catch { throw "Port $Port is already in use. Run Start Office.bat -Port 8766 to use another port." } finally { $officeListener.Stop() }
-        $officeArgs = @('-c', ('"' + (Join-Path $officeRoot 'runtime\windows\php.ini') + '"'), '-d', ('extension_dir="' + (Join-Path $officeRoot 'runtime\windows\ext') + '"'), '-d', ('error_log="' + (Join-Path $officeData 'php-error.log') + '"'), '-S', "127.0.0.1:$Port", '-t', ('"' + (Join-Path $officeRoot 'public') + '"'))
+        # Web requests run from public/, so certificate paths must be absolute.
+        # Resolve them on every launch to keep copied/moved installations portable.
+        $officeCaFile = Join-Path $officeRoot 'runtime\windows\cacert.pem'
+        $officeArgs = @('-c', ('"' + (Join-Path $officeRoot 'runtime\windows\php.ini') + '"'), '-d', ('extension_dir="' + (Join-Path $officeRoot 'runtime\windows\ext') + '"'), '-d', ('openssl.cafile="' + $officeCaFile + '"'), '-d', ('curl.cainfo="' + $officeCaFile + '"'), '-d', ('error_log="' + (Join-Path $officeData 'php-error.log') + '"'), '-S', "127.0.0.1:$Port", '-t', ('"' + (Join-Path $officeRoot 'public') + '"'))
         # Do not inherit a development/test database path into a user's portable installation.
         $officePreviousData = $env:OFFICE_DATA_DIR
         $env:OFFICE_DATA_DIR = $officeData
