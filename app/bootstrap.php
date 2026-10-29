@@ -88,6 +88,15 @@ function decrypt_secret(string $value): array {
 }
 function record_row(array $row): array {
     $row['meta']=json_decode($row['meta'],true,64,JSON_THROW_ON_ERROR);
+    // Repair legacy multipart display from the retained original without changing
+    // stored records, revisions, provider flags or locally composed drafts.
+    if ($row['kind']==='mail' && !empty($row['meta']['multipart']) && !isset($row['meta']['bodyParserVersion']) && isset($row['meta']['rawBase64']) && is_string($row['meta']['rawBase64']) && strlen($row['meta']['rawBase64'])<=1866668 && $row['body']==='This multipart message is preserved in its original EML format. Download it to view attachments or complex formatting in a full mail client.') {
+        $raw=base64_decode($row['meta']['rawBase64'],true);
+        if ($raw!==false) {
+            require_once __DIR__.'/formats.php';
+            $row['body']=parse_eml($raw)['body'];
+        }
+    }
     // Empty PHP maps otherwise serialize as [], which loses named cell edits in JavaScript.
     if ($row['kind']==='sheets') foreach ($row['meta']['workbook']['sheets'] as &$sheet) $sheet['cells']=(object)$sheet['cells'];
     $row['revision']=(int)$row['revision']; return $row;
