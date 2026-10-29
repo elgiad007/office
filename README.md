@@ -83,7 +83,7 @@ Calendar imports retain raw event sources for original download when available. 
 
 ## Keyboard operation
 
-Press `?` for context help. Normal mode: `j/k` next/previous, `h/l` focus list/detail, `gg/G` first/last, `/` search, `n/N` move through results, `g 1`–`g 7` change apps, `c` create, `i` edit, `v` select, `s` save. Mail: `a` archive selected messages, `m` toggle read/unread, `r` reply. `Escape` leaves an editor and saves; Ctrl/Cmd+S saves. Single-character bindings can be remapped in Settings. No send/permanent-delete key is enabled.
+Press `?` for context help. Normal mode: `j/k` next/previous, `h/l` focus list/detail, `gg/G` first/last, `/` search, `n/N` move through results, `g 1`–`g 7` change apps, `c` create, `i` edit, `v` select, `s` save, `d` delete the current item (with confirmation) or move connected mail to Trash. Mail: `a` archive selected messages, `m` toggle read/unread, `r` reply. `Escape` leaves an editor and saves; Ctrl/Cmd+S saves. Single-character bindings can be remapped in Settings. The delete shortcut leaves synced read-only items and connected mail already in Trash unchanged. No send key is enabled.
 
 In spreadsheets, focus a cell, use h/j/k/l or arrows to move, i/Enter to edit its formula, Escape to return, Tab/Shift+Tab to move cells. Typing fields keep their normal text input and browser editing behavior. **Full Vim motions/operators in text editors are not implemented yet.** The current mode distinction supplies home-row application navigation, not a full Vim emulator.
 

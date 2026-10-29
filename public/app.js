@@ -11,7 +11,7 @@ const apps = {
   wiki:{name:'Wiki',singular:'page',subtitle:'A growing home for everything you know.',empty:'Build your own reference shelf.',hint:'Write Markdown pages, organize namespaces, and connect ideas with [[wiki links]].',icon:'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3'},
   sheets:{name:'Sheets',singular:'workbook',subtitle:'Small tables. Clear answers.',empty:'Give your numbers a home.',hint:'Create a workbook or bring in a CSV file. Formulas stay on your server and device.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
 };
-const defaultKeys = {down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',read:'m'};
+const defaultKeys = {down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',read:'m',delete:'d'};
 const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'all'};
 const root=document.querySelector('#app'), dialog=document.querySelector('#dialog');
 let noticeTimer, saveTimer, keySequence='', sequenceTime=0;
@@ -209,7 +209,7 @@ async function syncAccounts(manual=true) {
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable(document.activeElement))await load();
 }
 function help() {
-  const k=keys();modal('Stay on the home row',`<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down+' / '+k.up,'Next / previous item'],[k.left+' / '+k.right,'Focus list / selected item'],['gg / G','First / last item'],['g 1 … g 7','Switch applications'],[k.search,'Search this application'],['n / N','Next / previous search result'],[k.new,'Create an item / compose'],[k.edit,'Enter edit mode'],['Escape','Leave editing and save'],[k.select,'Toggle selection'],[k.save+' / Ctrl or Cmd+S','Save changes'],[k.archive,'Archive selected messages'],[k.read,'Toggle read / unread'],[k.reply,'Reply to message'],['Sheets: h j k l / arrows','Move between cells'],['Sheets: i / Enter','Edit selected cell'],['Sheets: Tab / Shift+Tab','Next / previous cell']].map(([key,meaning])=>`<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. No permanent-delete or send shortcut is enabled.</p>`);
+  const k=keys();modal('Stay on the home row',`<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down+' / '+k.up,'Next / previous item'],[k.left+' / '+k.right,'Focus list / selected item'],['gg / G','First / last item'],['g 1 … g 7','Switch applications'],[k.search,'Search this application'],['n / N','Next / previous search result'],[k.new,'Create an item / compose'],[k.edit,'Enter edit mode'],['Escape','Leave editing and save'],[k.select,'Toggle selection'],[k.save+' / Ctrl or Cmd+S','Save changes'],[k.delete,'Delete current item / move connected mail to Trash'],[k.archive,'Archive selected messages'],[k.read,'Toggle read / unread'],[k.reply,'Reply to message'],['Sheets: h j k l / arrows','Move between cells'],['Sheets: i / Enter','Edit selected cell'],['Sheets: Tab / Shift+Tab','Next / previous cell']].map(([key,meaning])=>`<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. No send shortcut is enabled.</p>`);
 }
 async function history() {await commit();const r=await api('history&id='+state.current.id);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision));modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector('#restore-revision').onclick=()=>void attempt(async()=>{state.current.title=h.snapshot.title;state.current.body=h.snapshot.body;state.current.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
 async function handleClick(event) {
@@ -329,6 +329,12 @@ document.addEventListener('keydown',event=>{
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}
   if(action==='edit'||(state.app==='sheets'&&key==='Enter')){event.preventDefault();enterEdit();return;}
   if(action==='save'){event.preventDefault();void attempt(commit);return;}
+  if(action==='delete'){
+    event.preventDefault();
+    // Use the current item's available action, preserving confirmation and read-only restrictions.
+    if(!event.repeat&&state.current)document.querySelector('#detail [data-action="trash-mail"], #detail [data-action="delete"]')?.click();
+    return;
+  }
   if(action==='archive'){event.preventDefault();void attempt(archiveLocal);return;}
   if(action==='read'){event.preventDefault();void attempt(readMail);return;}
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector('[data-action=reply]')?.click();return;}
