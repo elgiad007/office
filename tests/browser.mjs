@@ -8,6 +8,7 @@ import {testScrolling} from './scrolling.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
+import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES || new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
@@ -56,8 +57,8 @@ try{
  const htmlMime='Content-Type: multipart/alternative; boundary=h\r\n\r\n--h\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<style>Hidden CSS</style><script>window.mailExecuted=true</script><p>Cached &amp; readable</p><p>&lt;script&gt;literal text&lt;/script&gt;</p><img src="https://example.invalid/mail-tracker">\r\n--h--\r\n';
  const legacyMail=await page.request.post(url+'api.php?r=import-items',{headers:{'X-CSRF-Token':status.csrf},data:{records:[{kind:'mail',title:'Legacy multipart check',body:'This multipart message is preserved in its original EML format. Download it to view attachments or complex formatting in a full mail client.',meta:{multipart:true,rawBase64:Buffer.from(htmlMime).toString('base64'),folder:'Inbox',from:'sender@example.com'}}]}});assert.equal(legacyMail.status(),200);
  let trackerRequests=0;page.on('request',request=>{if(request.url().includes('example.invalid/mail-tracker'))trackerRequests++;});
- await page.getByRole('button',{name:'Mail',exact:true}).click();await page.locator('#mail-folder').selectOption('all');await page.locator('.item').filter({hasText:'Multipart reading check'}).click();assert.equal(await page.locator('.mail-body').textContent(),'This is the actual message.\nSecond line.');
- await page.locator('.item').filter({hasText:'Legacy multipart check'}).click();assert.equal(await page.locator('.mail-body').textContent(),'Cached & readable\n<script>literal text</script>');assert.equal(await page.locator('.mail-body script, .mail-body img, .mail-body style').count(),0);assert.equal(await page.evaluate(()=>window.mailExecuted),undefined);assert.equal(trackerRequests,0);
+ await page.getByRole('button',{name:'Mail',exact:true}).click();await page.locator('#mail-folder').selectOption('all');await page.locator('.item').filter({hasText:'Multipart reading check'}).click();await page.getByRole('button',{name:'Text only',exact:true}).click();assert.equal(await page.locator('.mail-body').textContent(),'This is the actual message.\nSecond line.');
+ await page.locator('.item').filter({hasText:'Legacy multipart check'}).click();await page.getByRole('button',{name:'Text only',exact:true}).click();assert.equal(await page.locator('.mail-body').textContent(),'Cached & readable\n<script>literal text</script>');assert.equal(await page.locator('.mail-body script, .mail-body img, .mail-body style').count(),0);assert.equal(await page.evaluate(()=>window.mailExecuted),undefined);assert.equal(trackerRequests,0);
  await page.getByRole('button',{name:'Download original EML',exact:true}).waitFor();await page.screenshot({path:'test-results/mail-multipart.png',fullPage:true});
  const forbidden=await page.request.post(url+'api.php?r=save',{data:{kind:'tasks',title:'unauthorized'}});assert.equal(forbidden.status(),403);
  const backup=await(await page.request.get(url+'api.php?r=backup')).json();assert.equal(backup.format,'portable-office');assert.ok(backup.records.length>=8);assert.equal(backup.owner,undefined);
@@ -69,6 +70,7 @@ try{
  await testMailSender(page,url);
  await testMailFolder(page,url);
  await testAccountFolders(page,url);
+ await testMailHtml(page,url);
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.screenshot({path:'test-results/mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
  assert.deepEqual(errors,[]);console.log('PASS browser: setup, all local apps, Vim navigation, autosave, persistence, wiki safety/backlinks, formulas, theme, mobile layout, CSRF, imports and stale writes.');
 }catch(error){await page.screenshot({path:'test-results/failure.png',fullPage:true});console.error((await page.locator('body').innerText()).slice(0,3000));throw error;}finally{await browser.close();}

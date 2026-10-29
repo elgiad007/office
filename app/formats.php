@@ -10,11 +10,16 @@ function eml_parameter(string $value,string $name): ?string {
     if (!preg_match('/;\s*'.preg_quote($name,'/').'\s*=\s*(?:"((?:[^"\\\\]|\\\\.)*)"|([^;\s]+))/i',$value,$m)) return null;
     return isset($m[2]) && $m[2]!=='' ? $m[2] : preg_replace('/\\\\(.)/s','$1',$m[1]);
 }
-// Return text plus its MIME preference, never executable HTML or attachment bytes.
-function eml_text(array $headers,string $body,int $depth,int &$remaining): ?array {
+// Decode the preferred body. Raw HTML is used only by the isolated mail renderer.
+function eml_text(array $headers,string $body,int $depth,int &$remaining,bool $html=false,array &$images=[]): ?array {
     if ($depth>20 || --$remaining<0) return null;
     $type=$headers['content-type']??'text/plain'; $media=strtolower(trim(explode(';',$type,2)[0]));
     $disposition=$headers['content-disposition']??'';
+    if ($html && in_array($media,['image/png','image/jpeg','image/gif','image/webp'],true) && isset($headers['content-id']) && !str_starts_with(strtolower($disposition),'attachment')) {
+        $bytes=strtolower(trim($headers['content-transfer-encoding']??''))==='base64' ? base64_decode(preg_replace('/\s+/','',$body),true) : (strtolower(trim($headers['content-transfer-encoding']??''))==='quoted-printable' ? quoted_printable_decode($body) : $body);
+        if ($bytes!==false && strlen($bytes)<=500000 && ($info=@getimagesizefromstring($bytes)) && ($info['mime']??'')===$media) $images[trim($headers['content-id'],' <>')]='data:'.$media.';base64,'.base64_encode($bytes);
+        return null;
+    }
     if (strtolower(trim(explode(';',$disposition,2)[0]))==='attachment' || eml_parameter($disposition,'filename')!==null || eml_parameter($type,'name')!==null) return null;
     if (str_starts_with($media,'multipart/')) {
         $boundary=eml_parameter($type,'boundary');
@@ -30,30 +35,38 @@ function eml_text(array $headers,string $body,int $depth,int &$remaining): ?arra
             $part=substr($body,$offset,$end-$offset);
             $part=preg_replace('/\r?\n$/','',$part);
             [$childHeaders,$childBody]=eml_entity($part);
-            if ($media==='multipart/related' && $start!==null && trim($childHeaders['content-id']??'',' <>')!==trim($start,' <>')) continue;
-            $text=eml_text($childHeaders,$childBody,$depth+1,$remaining);
+            $isRoot=$media!=='multipart/related' || ($start!==null ? trim($childHeaders['content-id']??'',' <>')===trim($start,' <>') : $i===0);
+            if (!$html && !$isRoot) continue;
+            $text=eml_text($childHeaders,$childBody,$depth+1,$remaining,$html,$images);
+            if (!$isRoot) continue;
             if ($text!==null && trim($text['body'])!=='') $candidates[]=$text;
-            if ($media==='multipart/related' || $media==='multipart/signed') break;
+            if ((!$html && $media==='multipart/related') || $media==='multipart/signed') break;
         }
         if (!$candidates) return null;
         if ($media==='multipart/alternative') {
-            foreach ($candidates as $candidate) if ($candidate['type']==='text/plain') return $candidate;
+            foreach ($candidates as $candidate) if ($candidate['type']===($html?'text/html':'text/plain')) return $candidate;
             return $candidates[count($candidates)-1];
         }
         return ['body'=>implode("\n\n",array_column($candidates,'body')),'type'=>$candidates[0]['type']];
     }
     if (!in_array($media,['text/plain','text/html'],true)) return null;
+    if ($html && $media!=='text/html') return null;
     $encoding=strtolower(trim($headers['content-transfer-encoding']??''));
     if ($encoding==='base64') { $decoded=base64_decode($body,true); if ($decoded===false) return null; $body=$decoded; }
     elseif ($encoding==='quoted-printable') $body=quoted_printable_decode($body);
     $charset=eml_parameter($type,'charset');
     if ($charset!==null && function_exists('iconv')) { $converted=@iconv($charset,'UTF-8//IGNORE',$body); if ($converted!==false) $body=$converted; }
-    if ($media==='text/html') {
+    if ($media==='text/html' && !$html) {
         $body=preg_replace('/<!--.*?-->|<(script|style|head)\b[^>]*>.*?<\/\1\s*>/is','',$body);
         $body=preg_replace('/<(?:br\b[^>]*|\/(?:p|div|li|tr|h[1-6]|blockquote|table)\s*)>/i',"\n",$body);
         $body=trim(html_entity_decode(strip_tags($body),ENT_QUOTES|ENT_HTML5,'UTF-8'));
     }
     return ['body'=>$body,'type'=>$media];
+}
+function eml_html(string $raw): array {
+    [$headers,$body]=eml_entity($raw); $remaining=500; $images=[];
+    $part=eml_text($headers,$body,0,$remaining,true,$images);
+    return ['html'=>$part['body']??'','images'=>$images];
 }
 function parse_eml(string $raw): array {
     [$headers,$body]=eml_entity($raw);
@@ -61,7 +74,7 @@ function parse_eml(string $raw): array {
     $multipart=str_starts_with(strtolower(trim($headers['content-type']??'')),'multipart/');
     $remaining=500; $text=eml_text($headers,$body,0,$remaining);
     $body=$text['body']??'No readable message body was found. Download the original EML to view attachments or unsupported message formats in a full mail client.';
-    $parsed=['title'=>$decode($headers['subject']??'(No subject)'),'body'=>$body,'meta'=>['from'=>$decode($headers['from']??''),'to'=>$decode($headers['to']??''),'date'=>$headers['date']??'','multipart'=>$multipart,'bodyParserVersion'=>1]];
+    $parsed=['title'=>$decode($headers['subject']??'(No subject)'),'body'=>$body,'meta'=>['from'=>$decode($headers['from']??''),'to'=>$decode($headers['to']??''),'date'=>$headers['date']??'','multipart'=>$multipart,'bodyParserVersion'=>1,'hasHtml'=>eml_html($raw)['html']!=='']];
     return json_decode(json_encode($parsed,JSON_INVALID_UTF8_SUBSTITUTE|JSON_THROW_ON_ERROR),true,64,JSON_THROW_ON_ERROR);
 }
 function ics_unescape(string $value): string { return str_replace(['\\n','\\N','\\,','\\;','\\\\'],["\n","\n",',',';','\\'],$value); }

@@ -4,6 +4,7 @@ $testDir=sys_get_temp_dir().'/office-unit-'.bin2hex(random_bytes(8));
 putenv('OFFICE_DATA_DIR='.$testDir);
 require dirname(__DIR__).'/app/bootstrap.php';
 require dirname(__DIR__).'/app/formats.php';
+require dirname(__DIR__).'/app/mail-html.php';
 require dirname(__DIR__).'/app/connectors.php';
 function check(bool $condition,string $message): void { if (!$condition) throw new RuntimeException($message); echo "PASS $message\n"; }
 try {
@@ -20,6 +21,9 @@ try {
     $alternative="Content-Type: multipart/alternative;\r\n boundary=\"alt.+\"\r\n\r\nIgnored preamble\r\n--alt.+\r\nContent-Type: text/html\r\n\r\n<p>HTML alternative</p>\r\n--alt.+\r\nContent-Type: text/plain; charset=iso-8859-1\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nCaf=E9 plain body\r\n--alt.+--\r\nIgnored epilogue";
     $nested="Subject: Nested mail\r\nContent-Type: multipart/mixed; boundary=outer\r\n\r\n--outer\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=secret.txt\r\n\r\nDo not show attached text\r\n--outer\r\n".$alternative."\r\n--outer\r\nContent-Type: application/pdf\r\nContent-Transfer-Encoding: base64\r\n\r\n".base64_encode('Do not show binary attachment')."\r\n--outer--\r\n";
     $parsed=parse_eml($nested);check($parsed['body']==='Café plain body' && $parsed['title']==='Nested mail','nested mixed/alternative prefers decoded plain text and excludes attachments');
+    check($parsed['meta']['hasHtml'] && eml_html($nested)['html']==='<p>HTML alternative</p>','HTML alternative retained separately from text and attachments');
+    $sanitized=safe_mail_html('<style>.heading{color:red}</style><table><tr><td>Layout</td></tr></table><script>alert(1)</script><iframe src="https://evil.invalid"></iframe><meta http-equiv="refresh" content="0;url=https://evil.invalid"><a href="javascript:alert(1)" onclick="alert(1)">Link</a><img src="https://example.invalid/pixel" onerror="alert(1)">',[],false);
+    check(str_contains($sanitized,'color:red') && str_contains($sanitized,'<table>') && !str_contains($sanitized,'<script') && !str_contains($sanitized,'<iframe') && !str_contains($sanitized,'http-equiv') && !str_contains($sanitized,'javascript:') && !str_contains($sanitized,'onerror') && !str_contains($sanitized,'https://example.invalid'),'HTML layouts retained while active content and unapproved images removed');
     $htmlSource="Content-Type: multipart/related; boundary=rel; start=\"<root>\"\r\n\r\n--rel\r\nContent-Type: image/png\r\nContent-ID: <image>\r\n\r\nIMAGE\r\n--rel\r\nContent-Type: text/html; charset=iso-8859-1\r\nContent-ID: <root>\r\nContent-Transfer-Encoding: base64\r\n\r\n".base64_encode("<head><title>Hidden title</title></head><style>hidden style</style><script>bad()</script><p>Caf\xe9 &amp; tea</p><p>Next<br>line &lt;safe&gt;</p><img src='https://example.invalid/tracker'>")."\r\n--rel--\r\n";
     check(parse_eml($htmlSource)['body']==="Café & tea\nNext\nline <safe>",'related HTML root decodes charset before text conversion and removes active content');
     check(parse_eml(str_replace("\r\n","\n",$nested))['body']==='Café plain body','LF-only multipart boundaries');

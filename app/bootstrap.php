@@ -88,6 +88,11 @@ function decrypt_secret(string $value): array {
 }
 function record_row(array $row): array {
     $row['meta']=json_decode($row['meta'],true,64,JSON_THROW_ON_ERROR);
+    if ($row['kind']==='mail' && ($row['meta']['folder']??'')!=='Drafts' && !isset($row['meta']['hasHtml'])) {
+        $raw=isset($row['meta']['rawBase64']) && is_string($row['meta']['rawBase64']) && strlen($row['meta']['rawBase64'])<=1866668 ? base64_decode($row['meta']['rawBase64'],true) : ($row['meta']['raw']??'');
+        require_once __DIR__.'/formats.php';
+        $row['meta']['hasHtml']=is_string($raw) && strlen($raw)<=1400000 && eml_html($raw)['html']!=='';
+    }
     // Repair legacy multipart display from the retained original without changing
     // stored records, revisions, provider flags or locally composed drafts.
     if ($row['kind']==='mail' && !empty($row['meta']['multipart']) && !isset($row['meta']['bodyParserVersion']) && isset($row['meta']['rawBase64']) && is_string($row['meta']['rawBase64']) && strlen($row['meta']['rawBase64'])<=1866668 && $row['body']==='This multipart message is preserved in its original EML format. Download it to view attachments or complex formatting in a full mail client.') {
