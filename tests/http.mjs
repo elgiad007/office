@@ -1,4 +1,4 @@
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {mkdtemp,mkdir,readFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {once} from 'node:events';
@@ -56,6 +56,20 @@ try{
  const ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:one\r\nSUMMARY:Meeting\r\nDTSTART;VALUE=DATE:20261029\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
  await a.call('import',{format:'ics',text:ics});assert.equal((await a.call('records&kind=calendar')).records[0].meta.rawIcs,ics);
  const account=await a.call('account-save',{type:'imap',label:'Fixture account',host:'imap.example.com',smtp:'smtp.example.com',email:'test@example.com',username:'test@example.com',password:'a-secret-never-exported'});
+ // Seed an isolated account cache, then exercise the authenticated HTTP routes.
+ const seed="require getcwd().'/app/bootstrap.php';require getcwd().'/app/connectors.php';$a=account($argv[1]);foreach(['one','two'] as $id)cache_remote($a,'fixture:'.$id,'mail','Recovery '.$id,'Cached body',['folder'=>'Recovery copies','providerId'=>$id,'rawBase64'=>base64_encode('Original EML')]);";
+ execFileSync(php,[...(extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite','-d','extension=openssl','-d','extension=curl']:[]),'-r',seed,'--',account.id],{env:{...process.env,OFFICE_DATA_DIR:a.dir},windowsHide:true});
+ const recoveries=(await a.call('records&kind=mail')).records.filter(r=>r.meta.remote);
+ const recovery=recoveries[0],other=recoveries[1];
+ await a.call('mail-action',{id:recovery.id,revision:recovery.revision,action:'discard'},403,'bad-token');
+ await a.call('mail-action',{id:recovery.id,revision:0,action:'discard'},409);
+ await a.call('mail-action',{id:mail.id,revision:mail.revision,action:'discard'},400);
+ await a.call('mail-action',{id:recovery.id,revision:recovery.revision,action:'discard'});
+ const kept=(await a.call('mail-action',{id:other.id,revision:other.revision,action:'keep-local'})).record;
+ assert.equal(kept.meta.folder,'Local mail');assert.ok(!kept.meta.remote && !kept.meta.account);assert.equal(Buffer.from(kept.meta.rawBase64,'base64').toString(),'Original EML');
+ assert.ok(!(await a.call('records&kind=mail')).records.some(r=>r.id===other.id || r.id===recovery.id));
+ await a.call('delete',{id:kept.id,revision:kept.revision});
+ await a.call('sync',{id:account.id,repair:'yes'},400);
  const listed=await a.call('accounts');assert.equal(listed.accounts.length,1);assert.ok(!JSON.stringify(listed).includes('secret'));
  const dbBytes=await readFile(a.dir+'/office.sqlite');assert.ok(!dbBytes.includes(Buffer.from('a-secret-never-exported')));
  await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup');assert.equal(backup.records.length,4);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));assert.ok(!JSON.stringify(backup).includes(integration.client_secret));assert.ok(!(await readFile(a.dir+'/office.sqlite')).includes(Buffer.from(integration.client_secret)));

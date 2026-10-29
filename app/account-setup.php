@@ -21,6 +21,8 @@ function validate_account_input(array $input): array {
         }
         $config['archiveFolder'] = trim($text('archiveFolder', 'Archive'));
         if (!$config['archiveFolder'] || preg_match('/[\r\n\x00]/', $config['archiveFolder'])) fail('Enter a valid existing archive folder.');
+        $config['trashFolder'] = trim($text('trashFolder', 'Trash'));
+        if (!$config['trashFolder'] || preg_match('/[\r\n\x00]/', $config['trashFolder'])) fail('Enter a valid existing trash folder.');
     }
     if ($type !== 'caldav') {
         $config['email'] = trim($text('email'));

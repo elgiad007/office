@@ -142,9 +142,10 @@ try {
         json_response(['url'=>start_google_connection($input)]);
     }
     if ($route==='sync' && $method==='POST') {
+        $repair=$input['repair']??false; if (!is_bool($repair)) fail('Invalid repair option.');
         $a=account((string)($input['id']??'')); session_write_close();
         try {
-            $count=with_account_mail_lock($a['id'],function() use (&$a) { return match($a['type']) { 'google'=>sync_google($a),'imap'=>sync_imap($a),'caldav'=>sync_caldav($a) }; });
+            $count=with_account_mail_lock($a['id'],function() use (&$a,$repair) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair),'caldav'=>sync_caldav($a) }; });
             db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]); json_response(['count'=>$count]);
         } catch(Throwable $e) { db()->prepare('UPDATE accounts SET error=? WHERE id=?')->execute(['Sync failed. Open Sync now to retry and see details.',$a['id']]); throw $e; }
     }
@@ -160,12 +161,12 @@ try {
     }
     if ($route==='mail-action' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])fail('Message changed. Reopen it.',409);
-        $action=(string)($input['action']??''); if (!in_array($action,['archive','read','unread'],true))fail('Unknown mail action.');
+        $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard'],true))fail('Unknown mail action.');
         session_write_close();
         $record=with_account_mail_lock((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
             $current=get_record($r['id']);
             if ((int)($input['revision']??0)!==$current['revision']) fail('Message changed. Reopen it.',409);
-            return remote_mail_action($current,$action);
+            return in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action);
         });
         json_response(['record'=>$record]);
     }

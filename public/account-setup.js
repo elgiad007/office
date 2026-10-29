@@ -9,7 +9,7 @@ const providers = {
 /** The entire draft lives in this dialog closure, never browser storage. */
 export function openAccountSetup({dialog, request, onSaved}) {
   const drafts = {
-    imap: {label:'', email:'', host:'', smtp:'', username:'', password:'', archiveFolder:'Archive'},
+    imap: {label:'', email:'', host:'', smtp:'', username:'', password:'', archiveFolder:'Archive', trashFolder:'Trash'},
     google: {label:'', email:'', calendar:false},
     caldav: {label:'', url:'', username:'', password:''},
   };
@@ -62,7 +62,8 @@ export function openAccountSetup({dialog, request, onSaved}) {
         + input('SMTP server (TLS 465)', 'smtp', {placeholder:'smtp.example.com', help:'Sending currently uses the same username and password as IMAP.'})
         + input('Username', 'username', {help:'Usually your full email address. Confirm with your provider.'})
         + input('Password / app password', 'password', {type:'password', help:'Use an app password if your provider requires one.'})
-        + input('Existing IMAP archive folder', 'archiveFolder', {help:'Use the exact server path, such as INBOX.Archive. The default Archive can detect a unique server archive folder. Test connection checks the folder and MOVE support without moving mail.'});
+        + input('Existing IMAP archive folder', 'archiveFolder', {help:'Use the exact server path, such as INBOX.Archive. The default Archive can detect a unique server archive folder. Test connection checks the folder and MOVE support without moving mail.'})
+        + input('Existing IMAP trash folder', 'trashFolder', {help:'Default Trash detects a unique server-designated trash folder. Custom paths must match an existing folder; Office never creates one.'});
     }
     return `<p>Your provider supplies the full URL for an individual calendar collection. Its home page or account-discovery URL is not sufficient.</p>`
       + input('Calendar collection URL', 'url', {type:'url', placeholder:'https://calendar.example.com/calendars/user/personal/', help:'Use the final HTTPS collection URL on port 443 or 8443; redirects are not followed.'})
@@ -84,7 +85,7 @@ export function openAccountSetup({dialog, request, onSaved}) {
     const data = draft();
     const fields = [['Connection',providers[provider]],['Account label',data.label]];
     if (provider !== 'caldav') fields.push(['Sender email',data.email]);
-    if (provider === 'imap') fields.push(['IMAP',data.host+' · TLS 993'],['SMTP',data.smtp+' · TLS 465'],['Username',data.username],['Password','Entered · hidden'],['Archive folder',data.archiveFolder]);
+    if (provider === 'imap') fields.push(['IMAP',data.host+' · TLS 993'],['SMTP',data.smtp+' · TLS 465'],['Username',data.username],['Password','Entered · hidden'],['Archive folder',data.archiveFolder],['Trash folder',data.trashFolder]);
     if (provider === 'caldav') fields.push(['Calendar collection',data.url],['Username',data.username],['Password','Entered · hidden']);
     return `<p>Review these settings before saving. Secrets are hidden and will be encrypted on disk.</p>
       <dl class="setup-review">${fields.map(([name,value]) => `<div><dt>${escape(name)}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>

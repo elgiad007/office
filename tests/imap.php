@@ -54,7 +54,7 @@ function archive_start(string $folder='Archive'):array {
 function archive_finish(string $folder='Archive'):array {
     return [
         ['UID SEARCH UID 42',"* SEARCH\r\n{tag} OK done\r\n"],
-        ['EXAMINE '.imap_quote($folder),"{tag} OK [READ-ONLY] done\r\n"],
+        ['EXAMINE '.imap_quote($folder),"* OK [UIDVALIDITY 200] valid\r\n{tag} OK [READ-ONLY] done\r\n"],
         ['UID SEARCH UID 100:*',"* SEARCH 100\r\n{tag} OK done\r\n"],
         ['UID FETCH 100 (UID BODY.PEEK[])',message_response('100')],
     ];
@@ -93,14 +93,23 @@ fixture([['LOGIN "user" "secret"',"{tag} NO [SECRET] secret user\r\n"]],function
 });
 fixture([['CAPABILITY',"* CAPABILITY MOVE\r\n{tag} ok done\r\n"]],function($s) { check(count(imap_command($s,'CAPABILITY')['lines'])===2,'case-insensitive OK response'); });
 
-$stale=archive_start(); $stale=array_slice($stale,0,4); $stale[3][1]="{tag} OK no such UID\r\n";
-fixture($stale,function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'no longer in the server Inbox'); check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_starts_with($cmd,'UID MOVE ')),'stale cached UID sends no MOVE'); });
-fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK no operation\r\n"],['UID SEARCH UID 42',"* SEARCH 42\r\n{tag} OK done\r\n"]],function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'still in the server Inbox'); });
+$stale=archive_start(); $stale=array_slice($stale,0,4); $stale[3][1]="{tag} OK no such UID\r\n"; $stale[]=['UID SEARCH UID 42',"* SEARCH\r\n{tag} OK done\r\n"];
+fixture($stale,function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'no longer in its server folder'); check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_starts_with($cmd,'UID MOVE ')),'stale cached UID sends no MOVE'); });
+fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK no operation\r\n"],['UID SEARCH UID 42',"* SEARCH 42\r\n{tag} OK done\r\n"]],function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'still in its source server folder'); });
 $missing=archive_finish(); $missing=array_slice($missing,0,3); $missing[2][1]="* SEARCH 99\r\n{tag} OK done\r\n";
-fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK done\r\n"],...$missing],function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'could not be found in the archive'); check(true,'UID range does not mistake old highest UID for new destination'); });
+fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK done\r\n"],...$missing],function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'could not be found in the destination'); check(true,'UID range does not mistake old highest UID for new destination'); });
 $different=archive_finish(); $different[3][1]=message_response('100','A different message');
 fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK done\r\n"],...$different],function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'could not be confirmed'); });
 $concurrent=archive_finish(); $concurrent[2][1]="* SEARCH 100 101\r\n{tag} OK done\r\n"; $concurrent[3][1]=message_response('100','Concurrent delivery'); $concurrent[]=['UID FETCH 101 (UID BODY.PEEK[])',message_response('101')];
 fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK done\r\n"],...$concurrent],function($s) { imap_archive($s,'42','Archive'); check(true,'destination verification handles concurrent archive delivery'); });
 $noNext=archive_start(); $noNext[4][1]="{tag} OK done\r\n";
 fixture($noNext,function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'No message was moved'); });
+
+fixture([['UID FETCH 42 (UID BODY.PEEK[])',"* 1 FETCH (BODY[] {5}\r\nhello UID 42)\r\n{tag} OK done\r\n"]],function($s) { check(imap_message_content($s,'42')==='hello','UID after body literal'); });
+fixture([['UID FETCH 42 (UID BODY.PEEK[])',"* 1 FETCH (UID 99 BODY[] {5}\r\nother)\r\n* 2 FETCH (UID 42 BODY[] {5}\r\nhello)\r\n{tag} OK done\r\n"]],function($s) { check(imap_message_content($s,'42')==='hello','unsolicited literal is not mistaken for requested content'); });
+fixture([['UID FETCH 42 (UID BODY.PEEK[])',"* 1 FETCH (UID 42 FLAGS (\\Seen))\r\n{tag} OK done\r\n"]],function($s) { refused(fn()=>imap_message_content($s,'42'),'without readable content'); });
+$unreadable=array_slice($stale,0,4); $unreadable[]=['UID SEARCH UID 42',"* SEARCH 42\r\n{tag} OK done\r\n"];
+fixture($unreadable,function($s) { refused(fn()=>imap_archive($s,'42','Archive'),'content could not be read'); check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_starts_with($cmd,'UID MOVE ')),'unreadable message sends no MOVE'); });
+fixture([['UID SEARCH ALL',"* SEARCH\r\n{tag} OK done\r\n"]],function($s) { check(imap_search_ids($s,'ALL')===[],'empty Inbox search'); });
+fixture([['UID SEARCH ALL',"{tag} OK done\r\n"]],function($s) { refused(fn()=>imap_search_ids($s,'ALL'),'did not return a message search result'); });
+fixture([['UID SEARCH ALL',"* SEARCH 42 broken\r\n{tag} OK done\r\n"]],function($s) { refused(fn()=>imap_search_ids($s,'ALL'),'invalid message search result'); });
