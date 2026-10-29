@@ -1,0 +1,5 @@
+.item.multi-selected{background:var(--wash);border-color:var(--accent)}
+.item-context-menu{position:fixed;z-index:30;min-width:210px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:auto;padding:6px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow)}
+.item-context-menu button{display:flex;justify-content:flex-start;text-align:left;width:100%;border:0;background:transparent;padding:9px 12px;border-radius:5px;font-size:13px}
+.item-context-menu button:hover,.item-context-menu button:focus{background:var(--wash);outline:2px solid var(--accent);outline-offset:-2px}
+.context-selection{padding:7px 12px 9px;margin-bottom:4px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}

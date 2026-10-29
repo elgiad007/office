@@ -10,6 +10,7 @@ import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
+import {testItemMenus} from './item-menus.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES || new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
 const browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
@@ -71,6 +72,7 @@ try{
  await testMailFolder(page,url);
  await testAccountFolders(page,url);
  await testMailHtml(page,url);
+ await testItemMenus(page,url);
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.screenshot({path:'test-results/mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
  assert.deepEqual(errors,[]);console.log('PASS browser: setup, all local apps, Vim navigation, autosave, persistence, wiki safety/backlinks, formulas, theme, mobile layout, CSRF, imports and stale writes.');
 }catch(error){await page.screenshot({path:'test-results/failure.png',fullPage:true});console.error((await page.locator('body').innerText()).slice(0,3000));throw error;}finally{await browser.close();}

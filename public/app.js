@@ -3,6 +3,7 @@ import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
 import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail} from './mail-folders.js';
 import {mailBody, bindMailReader} from './mail-reader.js';
+import {installItemMenus} from './item-menus.js';
 
 const apps = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -17,6 +18,7 @@ const defaultKeys = {down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:
 const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const root=document.querySelector('#app'), dialog=document.querySelector('#dialog');
 let noticeTimer, saveTimer, keySequence='', sequenceTime=0;
+let selectionAnchor=null,keyboardSelection=false;
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
 const keys = () => ({...defaultKeys,...state.prefs.keys});
 const editable = node => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName);
@@ -65,6 +67,7 @@ function mailLocation(record) {
 }
 function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(r.title+' '+r.body+' '+JSON.stringify(r.meta)).toLocaleLowerCase().includes(q)); }
 async function load(preferId) {
+  itemMenus.close();selectionAnchor=null;keyboardSelection=false;
   document.querySelectorAll('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   document.querySelector('#crumb').textContent=apps[state.app]?.name||'Settings';
   document.querySelector('.shell').classList.toggle('mail-active',state.app==='mail');
@@ -106,7 +109,7 @@ function renderList() {
     const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?(r.meta.email||r.meta.company||''):state.app==='wiki'?(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):'Edited '+dateLabel(r.updated);
     const selected=state.current?.id===r.id;
     const badges=state.app==='mail'?'':`<span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span>`;
-    return `<button class="item ${selected?'selected':''}" data-id="${r.id}" aria-pressed="${selected}" ${selected?'id="selected-item"':''}><span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>${badges}</button>`;
+    return `<button class="item ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}><span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>${badges}</button>`;
   }).join(''):`<div class="list-empty">${state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
 }
 function renderDetail() {
@@ -188,6 +191,21 @@ async function commit() {
 }
 async function changeApp(name) { await commit(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
 async function selectRecord(id,focus=false) { await commit(); state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; renderList(); renderDetail(); if(focus)document.querySelector('#selected-item')?.focus({preventScroll:true}); }
+async function clickRecord(id,event) {
+  await commit();
+  if(event.shiftKey){
+    keyboardSelection=false;
+    const rows=filteredRows(),to=rows.findIndex(r=>r.id===id),anchor=rows.findIndex(r=>r.id===(selectionAnchor||state.current?.id)),from=anchor<0?to:anchor;
+    if(!event.ctrlKey&&!event.metaKey)state.selected.clear();
+    for(const r of rows.slice(Math.max(0,Math.min(from,to)),Math.max(from,to)+1))state.selected.add(r.id);
+  }else if(event.ctrlKey||event.metaKey){
+    keyboardSelection=false;
+    if(!state.selected.size&&state.current)state.selected.add(state.current.id);
+    if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);
+    selectionAnchor=id;
+  }else{if(!keyboardSelection)state.selected.clear();selectionAnchor=id;}
+  await selectRecord(id,true);
+}
 function mailAccounts() { return state.accounts.filter(a=>['imap','google'].includes(a.type)); }
 function draftAccount(context) {
   const accounts=mailAccounts();
@@ -219,8 +237,9 @@ function modal(title,body) { dialog.innerHTML=`<div class="dialog-head"><h2 id="
 function confirmation(title,message,action) { modal(title,`<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`); dialog.querySelector('#cancel').onclick=()=>dialog.close();dialog.querySelector('#cancel').focus();dialog.querySelector('#confirm').onclick=async()=>{dialog.close();await attempt(action);}; }
 function download(name,text,type='text/plain') { const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'_');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
 function originalMail(record) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64),c=>c.charCodeAt(0)) : record.meta.raw || ''; }
-async function exportRecords(all=false) {
-  await commit(); const records=all?state.rows:[state.current].filter(Boolean); if(!records.length){notice('There is nothing to export yet.');return;}
+async function exportRecords(all=false,selectedRecords=null) {
+  await commit(); const records=selectedRecords|| (all?state.rows:[state.current].filter(Boolean)); if(!records.length){notice('There is nothing to export yet.');return;}
+  all=all||records.length>1;
   const name=all?state.app:records[0].title;
   if(state.app==='calendar')download(name+'.ics',icsExport(records),'text/calendar');
   else if(state.app==='contacts')download(name+'.vcf',vcardExport(records),'text/vcard');
@@ -263,7 +282,7 @@ async function handleClick(event) {
   const button=event.target.closest('button');if(!button)return;
   await attempt(async()=>{
     if(button.dataset.app){await changeApp(button.dataset.app);return;}
-    if(button.dataset.id){await selectRecord(button.dataset.id);return;}
+    if(button.dataset.id){await clickRecord(button.dataset.id,event);return;}
     if(button.dataset.wiki){const page=state.rows.find(r=>r.title===button.dataset.wiki);if(page){state.wikiPreview=true;await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki}”?`,()=>createRecord({title:button.dataset.wiki}));}return;}
     if(button.dataset.cell){selectCell(button.dataset.cell,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet);state.cell='A1';renderDetail();return;}
@@ -362,7 +381,9 @@ function accountDialog() {
     renderSettings();
   }});
 }
+const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,notice,confirmation,attempt,exportRecords,mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented)return;
   state.lastActivity=Date.now();if(dialog.open)return;
   if(event.key==='Escape'&&document.querySelector('.shell')?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector('#mail-folders-toggle')?.focus();event.preventDefault();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(commit);return;}
@@ -390,7 +411,7 @@ document.addEventListener('keydown',event=>{
   if(action==='archive'){event.preventDefault();void attempt(archiveLocal);return;}
   if(action==='read'){event.preventDefault();void attempt(readMail);return;}
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector('[data-action=reply]')?.click();return;}
-  if(action==='select'&&state.current){event.preventDefault();const id=state.current.id;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);renderList();return;}
+  if(action==='select'&&state.current){event.preventDefault();const id=state.current.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);renderList();return;}
   if(state.app==='sheets'&&state.current&&event.target.closest('.sheet-wrap')&&([k.left,k.right,k.down,k.up,'ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key===k.left||key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key===k.right||key==='ArrowRight'||key==='Tab')c++;else if(key===k.up||key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
   if(action==='left'){event.preventDefault();document.querySelector('#selected-item')?.focus();return;}
   if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else{document.querySelector('#detail')?.setAttribute('tabindex','-1');document.querySelector('#detail')?.focus();}return;}
