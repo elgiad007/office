@@ -65,7 +65,14 @@ function renderWorkspace() {
   document.querySelector('#search').oninput=event=>{state.search=event.target.value; renderList();};
   if(state.app==='mail'){
     document.querySelector('.search-wrap').insertAdjacentHTML('beforeend',`<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox','Drafts','Sent','Archive','Trash','Local mail','Recovery copies','Sending','Delivery uncertain'].map(folder=>`<option ${state.mailFolder===folder?'selected':''}>${folder}</option>`).join('')}</select>`);
-    document.querySelector('#mail-folder').onchange=event=>{state.mailFolder=event.target.value;renderList();};
+    document.querySelector('#mail-folder').onchange=event=>void attempt(async()=>{
+      const select=event.target, folder=select.value; select.disabled=true;
+      try {
+        await commit();
+        state.mailFolder=folder; state.current=null; state.selected.clear(); setMode('normal');
+        renderList(); renderDetail();
+      } finally { select.value=state.mailFolder; select.disabled=false; }
+    });
   }
   renderList(); renderDetail();
 }
@@ -80,7 +87,11 @@ function renderList() {
 }
 function renderDetail() {
   const panel=document.querySelector('#detail'), r=state.current, a=apps[state.app];
-  if (!r) { panel.innerHTML=`<div class="empty"><span class="empty-symbol">${state.app==='mail'?'↗':state.app==='wiki'?'Aa':state.app==='sheets'?'∑':'○'}</span><h2>${state.rows.length?'Select a '+a.singular:a.empty}</h2><p>${a.hint}</p><button data-action="new">${state.app==='mail'?'Write a message':'Create '+a.singular} <span aria-hidden="true">↗</span></button></div>`; return; }
+  if (!r) {
+    const emptyMail=state.app==='mail'&&!filteredRows().length;
+    const heading=emptyMail?(state.search?'No matching messages.':'No messages in this folder.'):(state.rows.length?'Select a '+a.singular:a.empty);
+    panel.innerHTML=`<div class="empty"><span class="empty-symbol">${state.app==='mail'?'↗':state.app==='wiki'?'Aa':state.app==='sheets'?'∑':'○'}</span><h2>${heading}</h2><p>${emptyMail?(state.search?'Try a different search or choose another folder.':'Choose another folder or write a new message.'):a.hint}</p><button data-action="new">${state.app==='mail'?'Write a message':'Create '+a.singular} <span aria-hidden="true">↗</span></button></div>`; return;
+  }
   const fillSender=state.app==='mail' && !r.meta.remote && r.meta.folder==='Drafts' && !r.meta.sendAccount ? draftAccount(r) : '';
   if (fillSender) r.meta.sendAccount=fillSender;
   const remote=!!r.meta.remote;

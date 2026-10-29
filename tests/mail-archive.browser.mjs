@@ -25,9 +25,15 @@ export async function testMailArchive(page, url) {
     r.meta.folder=input.action==='trash'?'Trash':input.action==='restore'?'Inbox':'Archive';r.revision++;
     return route.fulfill({json:{record:r}});
   });
-  const folder=async value=>page.locator('#mail-folder').selectOption(value);
+  const folder=async value=>{await page.locator('#mail-folder').selectOption(value);await page.locator('#mail-folder:not([disabled])').waitFor();};
   const select=async title=>page.locator('.item').filter({hasText:title}).click();
-  const sync=async()=>{await page.locator('#sync-button').click();await page.locator('#sync-button:not([disabled])').waitFor();};
+  const sync=async()=>{
+    await page.locator('#sync-button').click();await page.locator('#sync-button:not([disabled])').waitFor();
+    // The button is enabled before the refreshed records finish rendering.
+    const value=await page.locator('#mail-folder').inputValue();
+    const ids=messages.filter(r=>value==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):value==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):r.meta.folder===value).map(r=>r.id).sort();
+    await page.waitForFunction(expected=>JSON.stringify([...document.querySelectorAll('.item')].map(item=>item.dataset.id).sort())===JSON.stringify(expected),ids);
+  };
   try {
     await page.goto(url+'#mail');await page.reload();
     await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
