@@ -30,7 +30,7 @@ async function api(route,data) {
 }
 function applyTheme() {
   let theme=state.prefs.theme||'system'; if (theme==='system') theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-  document.documentElement.dataset.theme=theme; root.classList.toggle('compact',state.prefs.density==='compact');
+  document.documentElement.dataset.theme=theme; document.documentElement.classList.toggle('compact',state.prefs.density==='compact');
   // Fixed palettes avoid injecting arbitrary CSS through imported preferences.
   document.documentElement.dataset.accent=['green','blue','plum'].includes(state.prefs.accent)?state.prefs.accent:'green';
 }

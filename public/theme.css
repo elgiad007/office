@@ -44,7 +44,83 @@
   .setup-review > div { grid-template-columns: 1fr; gap: 5px; }
   .account-setup { padding: 20px; }
 }
+/* Density belongs to the whole workspace, including dialogs outside #app.
+   Keep document typography and printed output independent of UI spacing. */
+@media screen {
+  .compact button { padding: 4px 8px; gap: 4px; }
+  .compact input, .compact textarea, .compact select { padding: 5px 7px; }
+  .compact label { gap: 4px; }
+  .compact .sidebar { padding: 16px 10px 8px; }
+  .compact .brand { padding: 0 8px 16px; gap: 8px; }
+  .compact .nav-label { padding: 0 8px; margin: 7px 0 5px; }
+  .compact .nav { gap: 2px; }
+  .compact .nav button { padding: 6px 8px; gap: 8px; }
+  .compact .sidebar-bottom { gap: 5px; padding-top: 16px; }
+  .compact .privacy-note { padding: 7px 8px; }
+  .compact .topbar { height: 52px; padding: 0 16px; gap: 8px; }
+  .compact .top-actions { gap: 6px; }
+  .compact .view-head { padding: 15px 16px 12px; gap: 10px; }
+  .compact .view-head h1 { margin-bottom: 4px; }
+  .compact .head-actions { gap: 4px; }
+  .compact .work-grid { min-height: calc(100vh - 130px); }
+  .compact .search-wrap { padding: 9px; }
+  .compact .list-summary { padding: 8px 12px 5px; }
+  .compact .items { padding: 0 5px 8px; max-height: calc(100vh - 230px); }
+  .compact .item { padding: 7px 8px; gap: 7px; margin-bottom: 2px; }
+  .compact .item small { margin-top: 3px; }
+  .compact .badge { padding: 2px 4px; }
+  .compact .detail { padding: 12px 16px 30px; }
+  .compact .detail-toolbar { padding-bottom: 8px; margin-bottom: 12px; gap: 6px; }
+  .compact .detail-form { gap: 10px; }
+  .compact .title-input { padding: 3px 0; }
+  .compact .fields { gap: 8px; }
+  .compact .rich-toolbar { padding: 4px; gap: 2px; }
+  .compact .rich-toolbar button { padding: 3px 6px; }
+  .compact .rich-editor { padding: 12px; }
+  .compact .bottom-hint { padding: 9px 12px; gap: 8px; }
+  .compact .list-empty { padding: 15px 12px; }
+  .compact .empty { min-height: 260px; padding: 18px; }
+  .compact .empty .empty-symbol { margin-bottom: 12px; }
+  .compact .settings { padding: 0 16px 30px; }
+  .compact .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .compact .card { min-width: 0; padding: 12px; overflow-wrap: anywhere; }
+  .compact .card h2 { margin-bottom: 8px; }
+  .compact .card p { margin-bottom: 8px; }
+  .compact .card form { gap: 8px; }
+  .compact .account { padding: 8px 0; gap: 6px; }
+  .compact .account small { margin-top: 3px; }
+  .compact .meta-strip { padding: 6px 0 10px; gap: 8px; }
+  .compact .recurrence-note { padding: 6px; }
+  .compact .wiki-layout { padding-top: 10px; }
+  .compact .sheet-tabs, .compact .formula-bar { margin-bottom: 6px; gap: 4px; }
+  .compact .formula-bar code { padding: 4px; }
+  .compact .sheet th { height: 24px; }
+  .compact .sheet td { height: 24px; }
+  .compact .sheet td button { min-height: 24px; padding: 2px 5px; }
+  .compact dialog { padding: 14px; }
+  .compact dialog form { gap: 8px; }
+  .compact dialog .dialog-head { margin-bottom: 10px; }
+  .compact dialog .dialog-actions { margin-top: 10px; gap: 4px; }
+  .compact .help-row { padding: 6px 0; }
+  .compact .setup-options { gap: 8px; margin: 12px 0 6px; }
+  .compact .setup-options button { padding: 12px; gap: 7px; }
+  .compact .setup-method { gap: 4px; margin-bottom: 10px; }
+  .compact .account-setup h3 { margin: 11px 0 8px; }
+  .compact .setup-form > label { margin-top: 5px; }
+  .compact .setup-review > div { padding: 6px 8px; gap: 6px; }
+  .compact .setup-checks, .compact .setup-code { padding: 7px; }
+}
+@media screen and (max-width: 800px) {
+  .compact .sidebar { padding: 12px 5px; }
+  .compact .brand { padding: 0 5px 16px; }
+  .compact .nav button { padding: 7px; }
+  .compact .items { max-height: 220px; }
+  .compact .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .compact .view-head { gap: 8px; }
+  .compact .top-actions { gap: 3px; }
+}
 @media print {
+  .compact .detail { padding: 0; }
   .detail-form { display: block; }
   .document-content, .document-content .rich-editor { display: block !important; }
 }
