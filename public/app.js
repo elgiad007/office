@@ -37,6 +37,11 @@ function applyTheme() {
   document.documentElement.dataset.theme=theme; document.documentElement.classList.toggle('compact',state.prefs.density==='compact');
   // Fixed palettes avoid injecting arbitrary CSS through imported preferences.
   document.documentElement.dataset.accent=['green','blue','plum'].includes(state.prefs.accent)?state.prefs.accent:'green';
+  document.querySelectorAll('iframe.mail-html').forEach(frame=>{
+    const url=new URL(frame.src);
+    url.searchParams.set('theme',theme); url.searchParams.set('accent',document.documentElement.dataset.accent);
+    if(url.href!==frame.src) frame.src=url.href;
+  });
 }
 function authView(status) {
   const setup=status.setup;

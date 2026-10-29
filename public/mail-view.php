@@ -17,7 +17,10 @@ try {
     $raw=isset($meta['rawBase64']) ? base64_decode($meta['rawBase64'],true) : ($meta['raw']??'');
     if (!is_string($raw) || strlen($raw)>1400000) fail('Original email is unavailable.',400);
     $content=eml_html($raw);
-    echo safe_mail_html($content['html']?:'<p>This email has no HTML version. Choose Text only.</p>',$content['images'],$remote);
+    $theme=($_GET['theme']??'')==='dark'?'dark':'light';
+    if (($_GET['colors']??'')==='original') $theme='light';
+    $accent=is_string($_GET['accent']??null)?$_GET['accent']:'green';
+    echo safe_mail_html($content['html']?:'<p>This email has no HTML version. Choose Text only.</p>',$content['images'],$remote,$theme,$accent);
 } catch (Throwable $error) {
     http_response_code($error instanceof HttpError ? $error->getCode() : 500);
     echo '<p>'.htmlspecialchars($error instanceof HttpError ? $error->getMessage() : 'Email could not be displayed. Choose Text only.',ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8').'</p>';
