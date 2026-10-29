@@ -1,0 +1,12 @@
+/data/*
+!/data/.gitkeep
+/.runtime/
+/test-results/
+/node_modules/
+*.log
+/.php-releases.json
+/dist/
+/runtime/windows/*
+!/runtime/windows/php.ini
+!/runtime/windows/README.md
+!/runtime/windows/cacert.pem

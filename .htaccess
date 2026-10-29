@@ -1,0 +1,2 @@
+# Fail closed if someone points the domain at the parent instead of public/.
+Require all denied
