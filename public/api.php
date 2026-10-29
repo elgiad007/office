@@ -5,6 +5,7 @@ require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/connectors.php';
 require dirname(__DIR__).'/app/account-setup.php';
 require dirname(__DIR__).'/app/google.php';
+require dirname(__DIR__).'/app/mail-folders.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -123,7 +124,20 @@ try {
     if ($route==='google-settings' && $method==='POST') {
         save_google_settings($input); json_response(['ok'=>true]);
     }
-    if ($route==='accounts' && $method==='GET') { $rows=db()->query('SELECT id,label,type,last_sync,error FROM accounts ORDER BY label')->fetchAll(); json_response(['accounts'=>$rows]); }
+    if ($route==='accounts' && $method==='GET') {
+        $rows=db()->query('SELECT id,label,type,last_sync,error FROM accounts ORDER BY label')->fetchAll();
+        foreach ($rows as &$row) $row['folders']=setting('mail-folders:'.$row['id'],[]);
+        unset($row); json_response(['accounts'=>$rows]);
+    }
+    if (in_array($route,['mail-folders','mail-folder-manage','mail-folder-sync'],true) && $method==='POST') {
+        $a=account((string)($input['account']??'')); session_write_close();
+        $result=with_account_mail_lock($a['id'],function() use($route,$a,$input) {
+            if ($route==='mail-folders') return ['folders'=>discover_mail_folders($a)];
+            if ($route==='mail-folder-manage') return ['folders'=>manage_mail_folder($a,(string)($input['action']??''),(string)($input['folder']??''),(string)($input['name']??''))];
+            return ['count'=>sync_mail_folder($a,(string)($input['folder']??''),(int)($input['limit']??10))];
+        });
+        json_response($result);
+    }
     if ($route==='account-save' && $method==='POST') {
         if (!extension_loaded('openssl')) fail('OpenSSL is required for encrypted account credentials.');
         $account=validate_account_input($input);
@@ -161,11 +175,12 @@ try {
     }
     if ($route==='mail-action' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])fail('Message changed. Reopen it.',409);
-        $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard'],true))fail('Unknown mail action.');
+        $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard','move','label','unlabel'],true))fail('Unknown mail action.');
         session_write_close();
         $record=with_account_mail_lock((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
             $current=get_record($r['id']);
             if ((int)($input['revision']??0)!==$current['revision']) fail('Message changed. Reopen it.',409);
+            if (in_array($action,['move','label','unlabel'],true)) return file_remote_mail($current,$action,(string)($input['folder']??''));
             return in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action);
         });
         json_response(['record'=>$record]);

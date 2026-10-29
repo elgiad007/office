@@ -218,7 +218,7 @@ function smtp_expect(mixed $s,array $allowed): void {
 function remote_mail_action(array $r,string $action): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote'])) fail('Choose a synchronized message.');
     if (!in_array($action,['archive','trash','restore','read','unread'],true)) fail('Unknown mail action.');
-    if (!in_array($r['meta']['folder']??'',MAIL_FOLDERS,true)) fail('This is a recovery copy. Save it locally or discard it.');
+    if (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('This is a recovery copy. Save it locally or discard it.');
     $a=account($r['meta']['account']); $id=(string)$r['meta']['providerId'];
     $destination=match($action) { 'archive'=>'Archive','trash'=>'Trash','restore'=>'Inbox',default=>null };
     if ($destination!==null && $r['meta']['folder']===$destination) return $r;
@@ -234,6 +234,7 @@ function remote_mail_action(array $r,string $action): array {
         };
         if (!is_array($msg['labelIds']??null)) fail('The provider action could not be confirmed. Use Repair / resync before retrying.');
         $r['meta']['folder']=gmail_folder($msg['labelIds'])??'Recovery copies';
+        $r['meta']['labelIds']=$msg['labelIds'];
         $r['meta']['read']=!in_array('UNREAD',$msg['labelIds'],true);
     } elseif ($a['type']==='imap') {
         if (!ctype_digit($id)) fail('Invalid IMAP message identifier.');

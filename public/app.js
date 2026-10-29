@@ -1,6 +1,7 @@
 import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
+import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail} from './mail-folders.js';
 
 const apps = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -12,7 +13,7 @@ const apps = {
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
 };
 const defaultKeys = {down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',read:'m',delete:'d'};
-const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox'};
+const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const root=document.querySelector('#app'), dialog=document.querySelector('#dialog');
 let noticeTimer, saveTimer, keySequence='', sequenceTime=0;
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
@@ -47,32 +48,53 @@ async function boot() {
   } catch(error) { root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector('#retry').onclick=boot; }
 }
 function shell() {
-  root.innerHTML=`<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  root.innerHTML=`<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
   root.onclick=handleClick;
 }
-function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(r.title+' '+r.body+' '+JSON.stringify(r.meta)).toLocaleLowerCase().includes(q)); }
+function setMailFolderPanel(open) {
+  document.querySelector('.shell')?.classList.toggle('folders-open',open);
+  document.querySelector('#mail-folders-toggle')?.setAttribute('aria-expanded',String(open));
+}
+function mailFolderEnv() { return {state,api,commit,load,notice,modal,dialog,e,field,confirmation,attempt,closeFolderPanel:()=>setMailFolderPanel(false)}; }
+function mailLocation(record) {
+  const m=record.meta, account=state.accounts.find(a=>a.id===m.account);
+  if(!m.remote || ['Recovery copies','Not in Inbox'].includes(m.folder))return m.folder||'';
+  if(account?.type==='google')return [m.folder,...(account.folders||[]).filter(f=>!f.protected&&(m.labelIds||[]).includes(f.id)).map(f=>f.name)].filter(Boolean).join(' · ');
+  return m.folder==='Custom folder'?(account?.folders?.find(f=>f.id===m.serverFolder)?.name||m.serverFolder||m.folder):m.folder;
+}
+function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(r.title+' '+r.body+' '+JSON.stringify(r.meta)).toLocaleLowerCase().includes(q)); }
 async function load(preferId) {
   document.querySelectorAll('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   document.querySelector('#crumb').textContent=apps[state.app]?.name||'Settings';
+  document.querySelector('.shell').classList.toggle('mail-active',state.app==='mail');
+  document.querySelector('#mail-folder-navigation').hidden=state.app!=='mail';
+  document.querySelector('#mail-folders-toggle').hidden=state.app!=='mail';
+  if(state.app!=='mail')setMailFolderPanel(false);
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
   state.rows=(await api('records&kind='+state.app)).records;
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
   state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null; state.selected.clear(); renderWorkspace();
+  if(state.app==='mail'&&state.mailScope&&state.current&&!matchesMailScope(state.current,state.mailScope,state.accounts)){state.current=null;renderList();renderDetail();}
 }
 function renderWorkspace() {
   const a=apps[state.app];
   document.querySelector('#main').innerHTML=`<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ ${state.app==='mail'?'Compose':'New '+a.singular}</button></div></section><div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
   document.querySelector('#search').oninput=event=>{state.search=event.target.value; renderList();};
   if(state.app==='mail'){
-    document.querySelector('.search-wrap').insertAdjacentHTML('beforeend',`<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox','Drafts','Sent','Archive','Trash','Local mail','Recovery copies','Sending','Delivery uncertain'].map(folder=>`<option ${state.mailFolder===folder?'selected':''}>${folder}</option>`).join('')}</select>`);
+    const folderNavigation=document.querySelector('#mail-folder-navigation');
+    folderNavigation.innerHTML='<div class="mail-folder-panel-head"><strong>Mail folders</strong><button data-action="close-mail-folders" aria-label="Close mail folders">✕</button></div>';
+    folderNavigation.insertAdjacentHTML('beforeend',`<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox','Drafts','Sent','Archive','Trash','Local mail','Recovery copies','Sending','Delivery uncertain'].map(folder=>`<option ${state.mailFolder===folder?'selected':''}>${folder}</option>`).join('')}</select>`);
     document.querySelector('#mail-folder').onchange=event=>void attempt(async()=>{
       const select=event.target, folder=select.value; select.disabled=true;
       try {
         await commit();
-        state.mailFolder=folder; state.current=null; state.selected.clear(); setMode('normal');
-        renderList(); renderDetail();
+        state.mailFolder=folder; state.mailScope=null; state.current=null; state.selected.clear(); setMode('normal');
+        renderWorkspace();
+        if(matchMedia('(max-width: 800px)').matches)setMailFolderPanel(false);
       } finally { select.value=state.mailFolder; select.disabled=false; }
     });
+    if(state.mailScope){const select=document.querySelector('#mail-folder');select.insertAdjacentHTML('afterbegin','<option value="account-folder">Selected account folder</option>');select.value='account-folder';}
+    renderMailFolders(mailFolderEnv());
   }
   renderList(); renderDetail();
 }
@@ -82,7 +104,7 @@ function renderList() {
   document.querySelector('#items').innerHTML=rows.length?rows.map(r=>{
     const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?(r.meta.email||r.meta.company||''):state.app==='wiki'?(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):'Edited '+dateLabel(r.updated);
     const selected=state.current?.id===r.id;
-    return `<button class="item ${selected?'selected':''}" data-id="${r.id}" aria-pressed="${selected}" ${selected?'id="selected-item"':''}><span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span><span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?`<span class="badge">${state.app==='mail'?'Cached':'Synced'}</span>`:''}</span></button>`;
+    return `<button class="item ${selected?'selected':''}" data-id="${r.id}" aria-pressed="${selected}" ${selected?'id="selected-item"':''}><span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span><span>${r.meta.folder?`<span class="badge">${e(state.app==='mail'?mailLocation(r):r.meta.folder)}</span>`:''}${r.meta.remote?`<span class="badge">${state.app==='mail'?'Cached':'Synced'}</span>`:''}</span></button>`;
   }).join(''):`<div class="list-empty">${state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
 }
 function renderDetail() {
@@ -111,8 +133,8 @@ function detailContent(r) {
   const m=r.meta, disabled=m.remote?'disabled':'';
   if (state.app==='mail' && m.folder!=='Drafts') {
     const recovery=!!m.remote && ['Recovery copies','Not in Inbox'].includes(m.folder);
-    const actions=recovery?'<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>':`${m.folder!=='Archive'?`<button data-action="archive">${m.remote?'Archive':'Archive locally'}</button>`:''}${m.remote?m.folder==='Trash'?'<button data-action="restore-mail">Restore to Inbox</button>':'<button data-action="trash-mail">Move to Trash</button>':''}<button data-action="read">Mark ${m.read?'unread':'read'}</button>`;
-    return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from||'Unknown')}</span><span>To: ${e(m.to||'')}</span><span>${e(m.date||'')}</span></div>${m.remote?`<p class="recurrence-note">${recovery?'This copy is absent from the synchronized Inbox, Archive and Trash. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.':'Downloaded copy from '+e(m.folder)+'. Mail actions update the provider; Sync now refreshes its location.'}</p>`:''}<div class="head-actions">${m.from?'<button data-action="reply">Reply</button>':''}${(m.rawBase64||m.raw)?'<button data-action="eml">Download original EML</button>':''}${actions}</div><hr><div class="mail-body">${e(r.body)}</div>`;
+    const actions=recovery?'<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>':`${m.remote?'<button data-action="file-mail">Move / Labels</button>':''}${m.folder!=='Archive'?`<button data-action="archive">${m.remote?'Archive':'Archive locally'}</button>`:''}${m.remote?m.folder==='Trash'?'<button data-action="restore-mail">Restore to Inbox</button>':'<button data-action="trash-mail">Move to Trash</button>':''}<button data-action="read">Mark ${m.read?'unread':'read'}</button>`;
+    return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from||'Unknown')}</span><span>To: ${e(m.to||'')}</span><span>${e(m.date||'')}</span></div>${m.remote?`<p class="recurrence-note">${recovery?'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.':'Downloaded copy from '+e(mailLocation(r))+'. Mail actions update the provider; Sync now refreshes its location.'}</p>`:''}<div class="head-actions">${m.from?'<button data-action="reply">Reply</button>':''}${(m.rawBase64||m.raw)?'<button data-action="eml">Download original EML</button>':''}${actions}</div><hr><div class="mail-body">${e(r.body)}</div>`;
   }
   if (state.app==='wiki' && state.wikiPreview) return `<span class="eyebrow">${e(r.title.split(':').slice(0,-1).join(' / ')||'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x=>x.id!==r.id && x.body.includes('[['+r.title+']]')).map(x=>`<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('')||'<p class="muted">No pages link here yet.</p>'}</div>`;
   let content=`<form id="record-form" class="detail-form"><label><span class="file-input">${state.app==='wiki'?'Page ID (namespace:page)':'Title'}</span><input class="title-input" name="title" value="${e(r.title)}" required ${disabled} aria-label="Title"></label>`;
@@ -160,7 +182,7 @@ async function commit() {
   } catch(error) { state.dirty=true; const s=document.querySelector('#save-status'); if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
   await state.savePromise; if(state.dirty) await commit();
 }
-async function changeApp(name) { await commit(); if(name==='mail'&&state.app!=='mail')state.mailFolder='Inbox'; state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
+async function changeApp(name) { await commit(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
 async function selectRecord(id,focus=false) { await commit(); state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; renderList(); renderDetail(); if(focus)document.querySelector('#selected-item')?.focus({preventScroll:true}); }
 function mailAccounts() { return state.accounts.filter(a=>['imap','google'].includes(a.type)); }
 function draftAccount(context) {
@@ -177,7 +199,7 @@ async function createRecord(initial={}) {
   if(kind==='mail' && !record.meta.sendAccount)record.meta.sendAccount=draftAccount(previous);
   if(kind==='calendar') { const start=new Date(); start.setMinutes(0,0,0); record.meta.start=start.toISOString(); record.meta.end=new Date(+start+3600000).toISOString(); }
   if(kind==='sheets')record.meta.workbook={sheets:[{name:'Sheet 1',cells:{}}]};
-  if(kind==='mail'&&state.mailFolder!=='all')state.mailFolder='Drafts';
+  if(kind==='mail'){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
   try { const result=await api('save',record); state.wikiPreview=false; await load(result.record.id); enterEdit(true); }
   catch(error) { state.current=previous;renderDetail();throw error; }
 }
@@ -225,6 +247,7 @@ async function syncAccounts(manual=true) {
   for(const a of state.accounts){if(document.hidden || (!manual && Date.now()-state.lastActivity>120000))break;const s=document.querySelector('#sync-status');if(s)s.textContent='Syncing '+a.label+'…';try{await api('sync',{id:a.id});}catch(error){errors++;if(manual)notice(a.label+': '+error.message,true);}}
   state.syncing=false;busyButton(document.querySelector('#sync-button'),false);const s=document.querySelector('#sync-status');if(s)s.textContent=errors?'Sync needs attention':'Checked '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   state.accounts=(await api('accounts')).accounts;
+  if(state.app==='mail'&&state.mailScope&&!state.dirty){try{await syncOpenFolder(mailFolderEnv());}catch(error){if(manual)notice(error.message,true);}}
   // Never replace an active editor with network data.
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable(document.activeElement))await load();
 }
@@ -241,9 +264,12 @@ async function handleClick(event) {
     if(button.dataset.cell){selectCell(button.dataset.cell,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action;
+    if(action==='toggle-mail-folders')setMailFolderPanel(!document.querySelector('.shell').classList.contains('folders-open'));
+    if(action==='close-mail-folders'){setMailFolderPanel(false);document.querySelector('#mail-folders-toggle')?.focus();}
     if(action==='new')await createRecord();
     if(action==='help')help();
     if(action==='sync')await syncAccounts();
+    if(action==='file-mail')await fileMail(mailFolderEnv());
     if(action==='trash-mail')await mailAction('trash');
     if(action==='restore-mail')await mailAction('restore');
     if(action==='keep-local')await mailAction('keep-local');
@@ -334,6 +360,7 @@ function accountDialog() {
 }
 document.addEventListener('keydown',event=>{
   state.lastActivity=Date.now();if(dialog.open)return;
+  if(event.key==='Escape'&&document.querySelector('.shell')?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector('#mail-folders-toggle')?.focus();event.preventDefault();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(commit);return;}
   if(event.key==='Escape'){if(editable(event.target)){event.target.blur();setMode('normal');event.preventDefault();void attempt(commit);if(event.target.id==='formula')selectCell(state.cell,true);}else{state.selected.clear();if(state.app!=='settings')renderList();}return;}
   if(editable(event.target)){setMode('insert');return;}

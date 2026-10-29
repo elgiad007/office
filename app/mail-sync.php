@@ -25,12 +25,14 @@ function mail_download(array $a,string $source,string $raw,array $meta): array {
 }
 /** Publish one complete account scan atomically. Downloads may be a recent window,
  * but membership is always based on complete folder identifier lists. */
-function publish_mail_snapshot(array $a,array $membership,array $downloads): int {
+function publish_mail_snapshot(array $a,array $membership,array $downloads,?callable $scope=null): int {
     $db=db(); $db->beginTransaction();
     try {
         $q=$db->prepare('SELECT id FROM accounts WHERE id=?'); $q->execute([$a['id']]);
         if (!$q->fetch()) fail('Account was removed during synchronization.',409);
-        $rows=mail_cache_rows($a['id']); $bySource=[]; $missing=[]; $hashes=[];
+        $rows=mail_cache_rows($a['id']);
+        if ($scope!==null) $rows=array_values(array_filter($rows,$scope));
+        $bySource=[]; $missing=[]; $hashes=[];
         foreach ($rows as $r) {
             $source=mail_row_source($r); $bySource[$source]=$r;
             if (!isset($membership[$source])) {
@@ -98,7 +100,7 @@ function imap_list_folders(array $list): array {
         $decode=static fn(string $v):string=>preg_replace('/\\\\(["\\\\])/','$1',substr($v,1,-1));
         $name=str_starts_with($m[3],'{')?$literal:(str_starts_with($m[3],'"')?$decode($m[3]):$m[3]);
         if (!is_string($name) || $name==='' || preg_match('/[\r\n\x00]/',$name)) fail('The IMAP server returned an invalid folder name. The previous mail view was kept.');
-        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'trash'=>in_array('\\TRASH',$flags,true),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
+        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'trash'=>in_array('\\TRASH',$flags,true),'protected'=>(bool)array_intersect($flags,['\\ARCHIVE','\\TRASH','\\SENT','\\DRAFTS','\\JUNK','\\ALL','\\IMPORTANT','\\FLAGGED']),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
     }
     return $folders;
 }
@@ -121,7 +123,7 @@ function imap_validity(array $response): string {
     foreach ($response['lines'] as $line) if (preg_match('/\[UIDVALIDITY (\d+)\]/i',$line,$m) && (int)$m[1]>0) return $m[1];
     fail('IMAP server did not provide UIDVALIDITY.');
 }
-function imap_sync_stream(array $a,mixed $s,bool $repair=false): int {
+function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath=null,int $limit=10): int {
     $deadline=microtime(true)+45;
     $cap=imap_command($s,'CAPABILITY');
     $special=(bool)preg_match('/\bSPECIAL-USE\b/i',implode('',$cap['lines']));
@@ -133,7 +135,15 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false): int {
         if ($path!==null) $paths[$label]=$path;
     }
     if (count(array_unique($paths))!==count($paths)) fail('Inbox, Archive and Trash must use different server folders.');
-    $membership=[]; $scans=[]; $downloads=[]; $cached=mail_cache_rows($a['id']);
+    if ($onlyPath!==null) {
+        if (!isset($folders[$onlyPath])) fail('Folder no longer exists. Refresh the folder list.',409);
+        $label=array_search($onlyPath,$paths,true);
+        $paths=[$label===false?'Custom folder':$label=>$onlyPath];
+    }
+    $scope=$onlyPath!==null
+        ? static fn($r)=>($r['meta']['serverFolder']??null)===$onlyPath
+        : static fn($r)=>in_array($r['meta']['folder']??'',MAIL_FOLDERS,true) || (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true) && in_array($r['meta']['recoveryFrom']??'Inbox',MAIL_FOLDERS,true));
+    $membership=[]; $scans=[]; $downloads=[]; $cached=array_values(array_filter(mail_cache_rows($a['id']),$scope));
     foreach ($paths as $label=>$path) {
         mail_deadline($deadline);
         $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($path)));
@@ -144,7 +154,7 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false): int {
     foreach ($scans as $label=>$scan) {
         mail_deadline($deadline);
         if (imap_validity(imap_command($s,'EXAMINE '.imap_quote($scan['path'])))!==$scan['validity']) fail('Mailbox identifiers changed during synchronization. Retry Repair / resync.');
-        $ids=array_slice($scan['ids'],-10);
+        $ids=array_slice($scan['ids'],-$limit);
         // Refresh cached flags in bounded batches; repair also reloads bodies.
         $flagIds=[];
         foreach ($cached as $r) {
@@ -181,7 +191,7 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false): int {
         }
     }
     mail_deadline($deadline);
-    return publish_mail_snapshot($a,$membership,$downloads);
+    return publish_mail_snapshot($a,$membership,$downloads,$scope);
 }
 function imap_fetch_flags(array $response,string $uid): bool {
     // FLAGS and UID belong to the same FETCH tuple, including UID-after-body.
@@ -227,7 +237,7 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
             if (!is_array($msg['labelIds']??null)) fail('Invalid Gmail message labels. The previous mail view was kept.');
             $folder=gmail_folder($msg['labelIds']);
             if ($folder===null) unset($membership[$source]);
-            else $membership[$source]=['folder'=>$folder,'providerId'=>$membership[$source]['providerId'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
+            else $membership[$source]=['folder'=>$folder,'providerId'=>$membership[$source]['providerId'],'labelIds'=>$msg['labelIds'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
         }
     }
     foreach (array_unique($recent) as $id) {
@@ -238,9 +248,9 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
         if (strlen($raw)>1400000) continue;
         $folder=gmail_folder($msg['labelIds']); $source='gmail:'.$id;
         if ($folder===null) { unset($membership[$source]); continue; }
-        $meta=['folder'=>$folder,'providerId'=>$id,'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
+        $meta=['folder'=>$folder,'providerId'=>$id,'labelIds'=>$msg['labelIds'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
         $membership[$source]=$meta; $downloads[$source]=mail_download($a,$source,$raw,$meta);
     }
     mail_deadline($deadline);
-    return publish_mail_snapshot($a,$membership,$downloads);
+    return publish_mail_snapshot($a,$membership,$downloads,static fn($r)=>in_array($r['meta']['folder']??'',array_merge(MAIL_FOLDERS,['Recovery copies','Not in Inbox']),true));
 }

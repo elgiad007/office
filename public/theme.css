@@ -7,6 +7,43 @@
 .rich-editor a { text-decoration: underline; }
 .form-error { color: var(--danger); font-size: 12px; }
 #mail-folder { width: 100%; margin-top: 9px; font-size: 12px; }
+.account-folders { max-height: 240px; overflow: auto; margin-top: 12px; font-size: 13px; }
+.folder-account { margin: 6px 0; }
+.folder-account summary { cursor: pointer; padding: 5px 0; overflow-wrap: anywhere; }
+.folder-link { display: block; text-align: left; width: 100%; padding: 6px 9px; font-size: 12px; border: 0; background: transparent; overflow-wrap: anywhere; }
+.folder-link:hover, .folder-link:focus-visible { background: var(--wash); }
+.folder-link[aria-current="location"] { background: var(--wash); font-weight: 650; }
+.folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
+.item .badge { max-width: 125px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.folder-children { padding-left: 12px; }
+.folder-tools { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.folder-tools button { font-size: 11px; padding: 5px 7px; }
+.folder-current { margin-top: 10px; font-size: 12px; overflow-wrap: anywhere; }
+.folder-current small { display: block; }
+.application-nav { min-height: 0; overflow-y: auto; align-content: start; flex: 1; }
+.sidebar .brand, .sidebar .nav-label, .sidebar-bottom { flex-shrink: 0; }
+.mail-folders-toggle, .mail-folder-panel-head { display: none; }
+#mail-folder-navigation[hidden], #mail-folders-toggle[hidden] { display: none; }
+#mail-folder-navigation { min-width: 0; margin: 0 0 10px 12px; padding-left: 9px; border-left: 1px solid var(--line); }
+#mail-folder-navigation .account-folders { max-height: none; overflow: visible; margin-top: 8px; }
+#mail-folder-navigation #mail-folder { margin-top: 5px; }
+#mail-folder-navigation .folder-link { display: block; width: 100%; padding: 6px 7px; color: var(--text); font-size: 12px; text-align: left; border-radius: 5px; }
+#mail-folder-navigation summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
+#mail-folder-navigation .folder-link[aria-current="location"] { background: var(--wash); color: var(--accent); font-weight: 650; }
+#mail-folder-navigation .folder-tools button { padding: 5px 6px; border: 1px solid var(--line); font-size: 10px; color: var(--text); background: var(--surface); }
+#mail-folder-navigation .folder-account summary { font-size: 12px; overflow-wrap: anywhere; }
+#mail-folder-navigation .muted { font-size: 11px; line-height: 1.5; }
+@media (min-width: 801px) {
+  .shell.mail-active { grid-template-columns: 260px minmax(0, 1fr); }
+}
+@media (max-width: 800px) {
+  .nav .mail-folders-toggle { display: flex; justify-content: center; padding: 6px; margin-top: -4px; font-size: 18px; }
+  #mail-folder-navigation { display: none; position: fixed; top: 77px; left: 65px; bottom: 12px; width: min(290px, calc(100vw - 77px)); margin: 0; padding: 14px; overflow: auto; border: 1px solid var(--line); border-radius: 0 8px 8px 0; background: var(--side); box-shadow: var(--shadow); z-index: 15; }
+  .folders-open #mail-folder-navigation:not([hidden]) { display: block; }
+  #mail-folder-navigation .mail-folder-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+  #mail-folder-navigation .mail-folder-panel-head button { padding: 5px 8px; }
+  #mail-folder-navigation span { display: inline; }
+}
 .account-setup { width: min(700px, 94vw); }
 .account-setup > .dialog-head { position: sticky; top: 0; z-index: 2; background: var(--surface); padding: 4px 0 10px; }
 .account-setup h3 { font-size: 19px; margin: 21px 0 16px; }
