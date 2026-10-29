@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {testAccountSetup} from './account-setup.browser.mjs';
 import {testMailArchive} from './mail-archive.browser.mjs';
 import {testDensity} from './density.browser.mjs';
+import {testScrolling} from './scrolling.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
@@ -47,6 +48,7 @@ try{
  await page.getByRole('button',{name:'Contacts',exact:true}).click();await page.getByRole('button',{name:'+ New contact',exact:true}).click();await page.getByRole('textbox',{name:'Title',exact:true}).fill('Test Contact');await page.getByLabel('Email',{exact:true}).fill('contact@example.com');await page.keyboard.press('Escape');await page.getByText('Saved',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByRole('button',{name:'Save preferences',exact:true}).click();await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');await page.screenshot({path:'test-results/settings-dark.png',fullPage:true});
  await testDensity(page);
+ await testScrolling(page,url);
  await testAccountSetup(page,url);
  const status=await(await page.request.get(url+'api.php?r=status')).json();
  const mime='Subject: Multipart reading check\r\nFrom: sender@example.com\r\nContent-Type: multipart/mixed; boundary=outer\r\n\r\n--outer\r\nContent-Type: multipart/alternative; boundary=inner\r\n\r\n--inner\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\n'+Buffer.from('This is the actual message.\nSecond line.').toString('base64')+'\r\n--inner\r\nContent-Type: text/html\r\n\r\n<p>Duplicate HTML alternative</p>\r\n--inner--\r\n--outer\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=private.txt\r\n\r\nHidden attachment content\r\n--outer--\r\n';

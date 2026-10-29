@@ -156,6 +156,22 @@
   .compact .view-head { gap: 8px; }
   .compact .top-actions { gap: 3px; }
 }
+/* Bound the app to the viewport so long items cannot stretch both panes. */
+@media screen {
+  .shell { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .workspace { display: flex; flex-direction: column; min-height: 0; }
+  .topbar, .view-head { flex-shrink: 0; }
+  #main { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+  .settings { flex-shrink: 0; }
+  .work-grid, .compact .work-grid { flex: 1; min-height: 0; overflow: hidden; }
+  .list-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0; }
+  .items, .compact .items { min-height: 0; max-height: none; }
+  .detail { min-height: 0; overflow: auto; }
+  .items, .detail, .application-nav, #main, #mail-folder-navigation { overscroll-behavior: contain; }
+}
+@media screen and (max-width: 800px) {
+  .work-grid { grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }
+}
 @media print {
   .compact .detail { padding: 0; }
   .detail-form { display: block; }
