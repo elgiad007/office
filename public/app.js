@@ -4,6 +4,7 @@ import {renderGoogleSettings} from './google-settings.js';
 import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail} from './mail-folders.js';
 import {mailBody, bindMailReader} from './mail-reader.js';
 import {installItemMenus} from './item-menus.js';
+import {compareMail} from './mail-sort.js';
 
 const apps = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -98,6 +99,7 @@ async function load(preferId,{selectFirst=true}={}) {
   if(state.app!=='mail')setMailFolderPanel(false);
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
   state.rows=(await api('records&kind='+state.app)).records;
+  if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
   state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null;
   if(state.app==='mail'){
