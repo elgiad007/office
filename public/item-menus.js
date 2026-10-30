@@ -52,6 +52,7 @@ export function installItemMenus(env) {
     const apply=async()=>{
       if(state.app!==app)throw Error('The application changed. Open the menu again.');
       await env.commit();let count=0;
+      const reload=env.mailDeletionReload(),removed=[];
       try{
         for(const row of rows){
           if(id==='delete')await env.api('delete',{id:row.id,revision:row.revision});
@@ -66,9 +67,10 @@ export function installItemMenus(env) {
             await env.api('save',copy);
           }
           count++;
+          if(['delete','trash','discard'].includes(id))removed.push(row.id);
         }
       }catch(error){throw Error(`${count} of ${rows.length} items updated. ${error.message}`);}
-      finally{await env.load(state.current?.id);}
+      finally{await reload(removed);}
       env.notice(`${count} ${count===1?'item':'items'} updated.`);
     };
     if(id==='delete'||id==='discard')env.confirmation(id==='delete'?'Delete selected items':'Discard copies',id==='delete'?`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`:`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply);

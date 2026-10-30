@@ -6,6 +6,7 @@ import {testMailArchive} from './mail-archive.browser.mjs';
 import {testDensity} from './density.browser.mjs';
 import {testScrolling} from './scrolling.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
+import {testMailDeleteSelection} from './mail-delete-selection.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
@@ -67,6 +68,7 @@ try{
  const rows=await(await page.request.get(url+'api.php?r=records&kind=tasks')).json();assert.ok(!rows.records.some(r=>r.title==='Should roll back'));
  const first=rows.records[0];const stale=await page.request.post(url+'api.php?r=save',{headers:{'X-CSRF-Token':status.csrf},data:{...first,revision:first.revision-1}});assert.equal(stale.status(),409);
  await testDeleteHotkey(page,url);
+ await testMailDeleteSelection(page,url);
  await testMailArchive(page,url);
  await testMailSender(page,url);
  await testMailFolder(page,url);

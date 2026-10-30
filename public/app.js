@@ -71,6 +71,23 @@ function mailLocation(record) {
   return m.folder==='Custom folder'?(account?.folders?.find(f=>f.id===m.serverFolder)?.name||m.serverFolder||m.folder):m.folder;
 }
 function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(r.title+' '+r.body+' '+JSON.stringify(r.meta)).toLocaleLowerCase().includes(q)); }
+function mailDeletionReload() {
+  const currentId=state.current?.id, ids=filteredRows().map(r=>r.id);
+  const context=()=>JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]);
+  const originalContext=context(),mail=state.app==='mail';
+  return async removedIds=>{
+    const advance=mail&&ids.includes(currentId)&&removedIds.includes(currentId)&&state.current?.id===currentId&&context()===originalContext;
+    await load();
+    if(!advance||context()!==originalContext||(state.current&&state.current.id!==currentId))return;
+    const visible=new Set(filteredRows().map(r=>r.id)),removed=new Set(removedIds),index=ids.indexOf(currentId);
+    const nextId=[...ids.slice(index+1),...ids.slice(0,index).reverse()].find(id=>!removed.has(id)&&visible.has(id));
+    state.current=state.rows.find(r=>r.id===nextId)||null;
+    renderList();renderDetail();
+    const target=document.querySelector('#selected-item')||document.querySelector('#main');
+    target?.focus({preventScroll:true});
+    document.querySelector('#selected-item')?.scrollIntoView({block:'nearest'});
+  };
+}
 async function load(preferId) {
   itemMenus.close();selectionAnchor=null;keyboardSelection=false;
   document.querySelectorAll('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
@@ -311,7 +328,7 @@ async function handleClick(event) {
     if(action==='text'){await commit();const html=safeDocument(state.current.body).replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi,'\n').replace(/<br\s*\/?\s*>/gi,'\n');const doc=new DOMParser().parseFromString(html,'text/html');download(state.current.title+'.txt',doc.body.textContent);}
     if(action==='wiki-mode'){await commit();state.wikiPreview=!state.wikiPreview;renderDetail();if(!state.wikiPreview)enterEdit();}
     if(action==='history')await history();
-    if(action==='delete')confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();await api('delete',{id:state.current.id,revision:state.current.revision});state.current=null;await load();notice('Item deleted.');});
+    if(action==='delete')confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current,reload=mailDeletionReload();await api('delete',{id:record.id,revision:record.revision});await reload([record.id]);notice('Item deleted.');});
     if(action==='logout'){await commit();await api('logout',{});await boot();}
     if(action==='eml')download(state.current.title+'.eml',originalMail(state.current),'message/rfc822');
     if(action==='original-ics')download(state.current.title+'.ics',state.current.meta.rawIcs||state.current.meta.raw,'text/calendar');
@@ -336,8 +353,9 @@ async function archiveLocal() {
 }
 async function mailAction(action,record=state.current) {
   if(state.app!=='mail'||!record)return;await commit();
-  try { await api('mail-action',{id:record.id,revision:record.revision,action}); }
-  finally { await load(); }
+  const reload=mailDeletionReload(),removed=[];
+  try { await api('mail-action',{id:record.id,revision:record.revision,action});if(['trash','discard'].includes(action))removed.push(record.id); }
+  finally { await reload(removed); }
   notice(action==='keep-local'?'Saved in Local mail.':action==='discard'?'Cached copy discarded.':action==='trash'?'Moved to Trash.':'Restored to Inbox.');
 }
 async function repairMail(accountId,button) {
@@ -386,7 +404,7 @@ function accountDialog() {
     renderSettings();
   }});
 }
-const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,notice,confirmation,attempt,exportRecords,mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,notice,confirmation,attempt,exportRecords,mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
   state.lastActivity=Date.now();if(dialog.open)return;
