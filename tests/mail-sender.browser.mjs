@@ -47,7 +47,7 @@ export async function testMailSender(page,url) {
     await page.getByText('Mail preferences saved.',{exact:true}).waitFor();
     await page.reload();
     assert.equal(await page.getByLabel('Default mail account',{exact:true}).inputValue(),'mail-a','Default survives reload');
-    await page.getByRole('button',{name:'Mail',exact:true}).click();await compose();
+    await page.getByRole('button',{name:'Mail',exact:true}).click();await page.locator('#mail-folder').selectOption('Sent');await compose();
     assert.equal(await sender.inputValue(),'mail-a','Compose without a selected message uses the default');
 
     preferences={};accounts=accounts.filter(a=>a.id!=='mail-b');
@@ -62,7 +62,7 @@ export async function testMailSender(page,url) {
 
     accounts.push({id:'mail-c',label:'Account C',type:'imap'});preferences={defaultMailAccount:'removed'};
     records.push({id:'old-draft',kind:'mail',title:'Old draft without sender',body:'',revision:1,meta:{folder:'Drafts'}});
-    await reload();await compose();
+    await reload();await page.locator('#mail-folder').selectOption('Sent');await compose();
     assert.equal(await sender.inputValue(),'','A removed default is ignored when multiple accounts remain');
     preferences={defaultMailAccount:'mail-c'};
     await reload();await page.locator('#mail-folder').selectOption('Drafts');

@@ -77,7 +77,7 @@ function mailDeletionReload() {
   const originalContext=context(),mail=state.app==='mail';
   return async removedIds=>{
     const advance=mail&&ids.includes(currentId)&&removedIds.includes(currentId)&&state.current?.id===currentId&&context()===originalContext;
-    await load();
+    await load(undefined,{selectFirst:false});
     if(!advance||context()!==originalContext||(state.current&&state.current.id!==currentId))return;
     const visible=new Set(filteredRows().map(r=>r.id)),removed=new Set(removedIds),index=ids.indexOf(currentId);
     const nextId=[...ids.slice(index+1),...ids.slice(0,index).reverse()].find(id=>!removed.has(id)&&visible.has(id));
@@ -88,7 +88,7 @@ function mailDeletionReload() {
     document.querySelector('#selected-item')?.scrollIntoView({block:'nearest'});
   };
 }
-async function load(preferId) {
+async function load(preferId,{selectFirst=true}={}) {
   itemMenus.close();selectionAnchor=null;keyboardSelection=false;
   document.querySelectorAll('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   document.querySelector('#crumb').textContent=apps[state.app]?.name||'Settings';
@@ -99,8 +99,12 @@ async function load(preferId) {
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
   state.rows=(await api('records&kind='+state.app)).records;
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
-  state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null; state.selected.clear(); renderWorkspace();
-  if(state.app==='mail'&&state.mailScope&&state.current&&!matchesMailScope(state.current,state.mailScope,state.accounts)){state.current=null;renderList();renderDetail();}
+  state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null;
+  if(state.app==='mail'){
+    if(state.mailScope&&state.current&&!matchesMailScope(state.current,state.mailScope,state.accounts))state.current=null;
+    if(!state.current&&selectFirst)state.current=filteredRows()[0]||null;
+  }
+  state.selected.clear();renderWorkspace();
 }
 function renderWorkspace() {
   const a=apps[state.app];
@@ -114,7 +118,7 @@ function renderWorkspace() {
       const select=event.target, folder=select.value; select.disabled=true;
       try {
         await commit();
-        state.mailFolder=folder; state.mailScope=null; state.current=null; state.selected.clear(); setMode('normal');
+        state.mailFolder=folder; state.mailScope=null; state.current=filteredRows()[0]||null; state.selected.clear(); setMode('normal');
         renderWorkspace();
         if(matchMedia('(max-width: 800px)').matches)setMailFolderPanel(false);
       } finally { select.value=state.mailFolder; select.disabled=false; }

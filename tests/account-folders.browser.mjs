@@ -54,8 +54,11 @@ export async function testAccountFolders(page,url) {
     await page.locator('[data-open-folder="Travel/Orders"]').waitFor();
     await open('imap-a','Travel');await page.locator('.item').filter({hasText:'Personal trip'}).waitFor();
     assert.equal(await page.locator('.item').count(),2,'same-named folders stay account scoped');
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'Personal trip','Opening an account folder selects its first message');
+    await page.locator('.item').filter({hasText:'Personal booking'}).click();
     await page.locator('#folder-more').click();
     await page.waitForFunction(()=>document.querySelector('.folder-current small').textContent.includes('20 recent'));
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'Personal booking','Folder refresh preserves the selected message');
     assert.ok(requests.some(r=>r.action==='mail-folder-sync'&&r.input.limit===20));
     await page.locator('.item').filter({hasText:'Personal trip'}).click();await page.locator('#main').focus();await page.keyboard.press('v');
     await page.locator('.item').filter({hasText:'Personal booking'}).click();await page.locator('#main').focus();await page.keyboard.press('v');
@@ -66,6 +69,7 @@ export async function testAccountFolders(page,url) {
     await open('imap-a','Orders');await page.locator('.item').filter({hasText:'Personal booking'}).waitFor();assert.equal(await page.locator('.item').count(),3);
     failed=true;await page.locator('#folder-refresh').click();await page.getByText('Folder connection unavailable',{exact:true}).waitFor();assert.equal(await page.locator('.item').count(),3,'failed refresh keeps cached messages');failed=false;
     await open('imap-b','Travel');await page.locator('.item').filter({hasText:'Work trip'}).waitFor();assert.equal(await page.locator('.item').count(),1);
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'Work trip','Switching accounts selects mail from the new account');
     await open('gmail-a','Travel');await page.locator('.item').filter({hasText:'Label message'}).click();
     await page.getByRole('button',{name:'Move / Labels',exact:true}).click();
     await page.getByRole('heading',{name:'Organize with labels',exact:true}).waitFor();
