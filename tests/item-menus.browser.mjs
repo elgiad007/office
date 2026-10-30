@@ -93,6 +93,7 @@ export async function testItemMenus(page,url) {
     if(r==='records'&&new URL(request.url()).searchParams.get('kind')==='mail')return route.fulfill({json:{records:remote}});
     if(r==='mail-action'){
       const body=request.postDataJSON();calls.push(body);
+      if(body.action==='trash')remote.find(row=>row.id===body.id).meta.folder='Trash';
       return route.fulfill(calls.length===2?{status:409,json:{error:'Simulated stale message'}}:{json:{record:remote[0]}});
     }
     return route.continue();
@@ -111,8 +112,8 @@ export async function testItemMenus(page,url) {
     await page.locator('#mail-folder').selectOption('Trash');
     await item('Menu trash').click({button:'right'});await menu.waitFor();assert.equal(await action('Restore to Inbox').count(),1);await page.keyboard.press('Escape');
     await page.locator('#mail-folder').selectOption('all');
-    await item('Menu remote').click();
     // Add another live fixture, then force the second item to fail.
+    remote[0].meta.folder='Inbox';
     remote.push({...remote[0],id:'remote-menu-4',title:'Menu remote second'});
     await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'Mail',exact:true}).click();
     await item('Menu remote second').click();await item('Menu remote').filter({hasNotText:'second'}).click({modifiers:['Control']});

@@ -52,6 +52,10 @@ export function installItemMenus(env) {
     const apply=async()=>{
       if(state.app!==app)throw Error('The application changed. Open the menu again.');
       await env.commit();let count=0;
+      if(app==='mail'&&['delete','trash','discard'].includes(id)){
+        await env.deleteMailImmediately(rows,row=>id==='delete'?env.api('delete',{id:row.id,revision:row.revision}):env.api('mail-action',{id:row.id,revision:row.revision,action:id}));
+        env.notice(`${rows.length} ${rows.length===1?'item':'items'} updated.`);return;
+      }
       const reload=env.mailDeletionReload(),removed=[];
       try{
         for(const row of rows){

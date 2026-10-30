@@ -21,6 +21,8 @@ const root=document.querySelector('#app'), dialog=document.querySelector('#dialo
 let noticeTimer, saveTimer, keySequence='', sequenceTime=0;
 let selectionAnchor=null,keyboardSelection=false;
 let sendingMail=false;
+const pendingMailDeletes=new Set();
+let mailDeleteVersion=0;
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
 const keys = () => ({...defaultKeys,...state.prefs.keys});
 const editable = node => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName);
@@ -73,6 +75,49 @@ function mailLocation(record) {
   return m.folder==='Custom folder'?(account?.folders?.find(f=>f.id===m.serverFolder)?.name||m.serverFolder||m.folder):m.folder;
 }
 function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(r.title+' '+r.body+' '+JSON.stringify(r.meta)).toLocaleLowerCase().includes(q)); }
+async function deleteMailImmediately(rows,operation) {
+  const ids=new Set(rows.map(r=>r.id)),visible=filteredRows().map(r=>r.id),currentId=state.current?.id;
+  const context=JSON.stringify([state.mailFolder,state.mailScope,state.search]);
+  for(const id of ids)pendingMailDeletes.add(id);
+  mailDeleteVersion++;
+  state.rows=state.rows.filter(r=>!ids.has(r.id));state.selected.clear();itemMenus.close();
+  const advance=ids.has(currentId),index=visible.indexOf(currentId);
+  if(advance){
+    const next=[...visible.slice(index+1),...visible.slice(0,index).reverse()].find(id=>!ids.has(id));
+    state.current=state.rows.find(r=>r.id===next)||null;
+  }
+  renderList();if(advance)renderDetail();
+  if(advance){
+    (document.querySelector('#selected-item')||document.querySelector('#main'))?.focus({preventScroll:true});
+    document.querySelector('#selected-item')?.scrollIntoView({block:'nearest'});
+  }
+  let count=0;
+  const refresh=()=>{
+    if(state.app!=='mail')return;
+    const focused=document.activeElement?.closest('#items [data-id]')?.dataset.id;
+    renderList();
+    if(focused)document.querySelector(`#items [data-id="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
+  };
+  try{
+    for(const row of rows){
+      const result=await operation(row);count++;pendingMailDeletes.delete(row.id);mailDeleteVersion++;
+      // Keep the provider's returned Trash copy available when switching folders.
+      if(state.app==='mail'&&row.meta.remote&&result?.record?.meta?.folder==='Trash'){state.rows=state.rows.filter(r=>r.id!==row.id);state.rows.push(result.record);state.rows.sort(compareMail);}
+    }
+  }catch(error){
+    const remaining=rows.slice(count);
+    for(const row of remaining)pendingMailDeletes.delete(row.id);
+    mailDeleteVersion++;
+    if(state.app==='mail'){
+      for(const row of remaining)if(!state.rows.some(r=>r.id===row.id))state.rows.push(row);
+      state.rows.sort(compareMail);
+      if(!state.current&&context===JSON.stringify([state.mailFolder,state.mailScope,state.search])){
+        state.current=filteredRows()[0]||null;renderDetail();
+      }
+    }
+    throw Error(rows.length>1?`${count} of ${rows.length} items updated. ${error.message}`:error.message);
+  }finally{refresh();}
+}
 function mailDeletionReload() {
   const currentId=state.current?.id, ids=filteredRows().map(r=>r.id);
   const context=()=>JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]);
@@ -99,7 +144,10 @@ async function load(preferId,{selectFirst=true}={}) {
   document.querySelector('#mail-folders-toggle').hidden=state.app!=='mail';
   if(state.app!=='mail')setMailFolderPanel(false);
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
-  state.rows=(await api('records&kind='+state.app)).records;
+  // Retry snapshots taken across a deletion/rollback, and hide requests still pending.
+  const app=state.app;let records,version;
+  do{version=mailDeleteVersion;records=(await api('records&kind='+app)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion);
+  state.rows=records.filter(r=>!pendingMailDeletes.has(r.id));
   if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
   state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null;
@@ -349,7 +397,7 @@ async function handleClick(event) {
     if(action==='text'){await commit();const html=safeDocument(state.current.body).replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi,'\n').replace(/<br\s*\/?\s*>/gi,'\n');const doc=new DOMParser().parseFromString(html,'text/html');download(state.current.title+'.txt',doc.body.textContent);}
     if(action==='wiki-mode'){await commit();state.wikiPreview=!state.wikiPreview;renderDetail();if(!state.wikiPreview)enterEdit();}
     if(action==='history')await history();
-    if(action==='delete')confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current,reload=mailDeletionReload();await api('delete',{id:record.id,revision:record.revision});await reload([record.id]);notice('Item deleted.');});
+    if(action==='delete')confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current;if(state.app==='mail')await deleteMailImmediately([record],r=>api('delete',{id:r.id,revision:r.revision}));else{await api('delete',{id:record.id,revision:record.revision});await load();}notice('Item deleted.');});
     if(action==='logout'){await commit();await api('logout',{});await boot();}
     if(action==='eml')download(state.current.title+'.eml',originalMail(state.current),'message/rfc822');
     if(action==='original-ics')download(state.current.title+'.ics',state.current.meta.rawIcs||state.current.meta.raw,'text/calendar');
@@ -401,6 +449,10 @@ async function archiveLocal() {
 }
 async function mailAction(action,record=state.current) {
   if(state.app!=='mail'||!record)return;await commit();
+  if(['trash','discard'].includes(action)){
+    await deleteMailImmediately([record],r=>api('mail-action',{id:r.id,revision:r.revision,action}));
+    notice(action==='trash'?'Moved to Trash.':'Cached copy discarded.');return;
+  }
   const reload=mailDeletionReload(),removed=[];
   try { await api('mail-action',{id:record.id,revision:record.revision,action});if(['trash','discard'].includes(action))removed.push(record.id); }
   finally { await reload(removed); }
@@ -453,7 +505,7 @@ function accountDialog() {
     renderSettings();
   }});
 }
-const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,notice,confirmation,attempt,exportRecords,mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
   state.lastActivity=Date.now();if(dialog.open)return;
