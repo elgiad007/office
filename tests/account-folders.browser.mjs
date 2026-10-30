@@ -7,7 +7,7 @@ export async function testAccountFolders(page,url) {
     {id:'gmail-a',label:'Personal Gmail',type:'google',folders:[{id:'Label_travel',name:'Travel',delimiter:'/',protected:false},{id:'Label_orders',name:'Order Confirmations',delimiter:'/',protected:false},{id:'INBOX',name:'Inbox',delimiter:'/',protected:true}]},
   ];
   const discovered=[{id:'INBOX',name:'Inbox',delimiter:'/',protected:true},{id:'Travel',name:'Travel',delimiter:'/',protected:false},{id:'Travel/Orders',name:'Travel/Orders',delimiter:'/',protected:false}];
-  const mail=(id,account,path,extra={})=>({id,kind:'mail',title:id,body:'Cached fixture body',revision:1,meta:{account,remote:true,folder:'Custom folder',serverFolder:path,providerId:id,from:'sender@example.com',...extra}});
+  const mail=(id,account,path,extra={})=>({id,kind:'mail',title:id,body:'Cached fixture body',revision:1,meta:{read:true,account,remote:true,folder:'Custom folder',serverFolder:path,providerId:id,from:'sender@example.com',...extra}});
   let records=[mail('Personal trip','imap-a','Travel'),mail('Personal booking','imap-a','Travel'),mail('Nested receipt','imap-a','Travel/Orders'),mail('Work trip','imap-b','Travel'),mail('Label message','gmail-a','',{folder:'Inbox',labelIds:['INBOX','Label_travel','Label_orders']})];
   let failed=false,requests=[],holdNext=false,releaseSync;
   const routes=t=>t.pathname.endsWith('/api.php');

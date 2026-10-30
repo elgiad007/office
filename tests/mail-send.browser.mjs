@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 export async function testMailSend(page,url) {
   let preferences={},sequence=0,sends=[],rejectSave=false,failSend=false,holdSend=false,releaseSend;
-  const received={id:'send-received',kind:'mail',title:'Received fixture',body:'Received body',revision:1,meta:{remote:true,account:'send-account',folder:'Inbox',from:'sender@example.com'}};
+  const received={id:'send-received',kind:'mail',title:'Received fixture',body:'Received body',revision:1,meta:{read:true,remote:true,account:'send-account',folder:'Inbox',from:'sender@example.com'}};
   let records=[received];
   const routes=target=>target.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{

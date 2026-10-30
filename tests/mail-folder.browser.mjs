@@ -27,7 +27,6 @@ export async function testMailFolder(page,url) {
     await page.waitForFunction(()=>document.querySelector('#selected-item')?.dataset.id==='inbox-message');
     assert.equal(await page.locator('#detail .mail-body').textContent(),message.body,'Opening Mail displays the first message');
     await open(second.title);
-    await page.getByRole('button',{name:'Mark read',exact:true}).click();
     await page.getByRole('button',{name:'Mark unread',exact:true}).waitFor();
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),second.id,'Reloading after an action preserves selection');
     await page.getByRole('button',{name:'Contacts',exact:true}).click();

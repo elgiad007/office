@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 export async function testMailSender(page,url) {
   let accounts=[{id:'mail-a',label:'Account A',type:'imap'},{id:'mail-b',label:'Account B',type:'google'},{id:'calendar',label:'Calendar only',type:'caldav'}];
   let preferences={defaultMailAccount:'mail-b'}, sequence=0;
-  const message={id:'received',kind:'mail',title:'Sender selection fixture',body:'Hello',revision:1,meta:{folder:'Inbox',remote:true,account:'mail-a',from:'sender@example.com'}};
+  const message={id:'received',kind:'mail',title:'Sender selection fixture',body:'Hello',revision:1,meta:{read:true,folder:'Inbox',remote:true,account:'mail-a',from:'sender@example.com'}};
   let records=[message];
   const routes=target=>target.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{

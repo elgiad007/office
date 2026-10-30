@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 export async function testMailDeleteSelection(page,url) {
   let messages=[],rejectId=null,active=0;
   const held=new Map();
-  const fixture=(id,remote=true)=>({id,kind:'mail',title:'Queue '+id,body:'Message '+id,revision:1,updated:new Date().toISOString(),meta:{folder:'Inbox',from:'sender@example.com',...(remote?{remote:true,account:'queue-account'}:{})}});
+  const fixture=(id,remote=true)=>({id,kind:'mail',title:'Queue '+id,body:'Message '+id,revision:1,updated:new Date().toISOString(),meta:{read:true,folder:'Inbox',from:'sender@example.com',...(remote?{remote:true,account:'queue-account'}:{})}});
   const routes=target=>target.pathname.endsWith('/api.php')&&['records','accounts','mail-action','delete'].includes(target.searchParams.get('r'));
   await page.route(routes,async route=>{
     const target=new URL(route.request().url()),action=target.searchParams.get('r');

@@ -59,6 +59,7 @@ export function installItemMenus(env) {
       const reload=env.mailDeletionReload(),removed=[];
       try{
         for(const row of rows){
+          await env.waitForMailRead(row.id);
           if(id==='delete')await env.api('delete',{id:row.id,revision:row.revision});
           else if(row.meta.remote)await env.api('mail-action',{id:row.id,revision:row.revision,action:id});
           else{

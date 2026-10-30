@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export async function testMailArchive(page, url) {
-  const message={id:'archive-fixture',kind:'mail',title:'Archive verification fixture',body:'Fixture body',revision:1,updated:new Date().toISOString(),meta:{remote:true,account:'archive-account',folder:'Inbox',from:'sender@example.com'}};
+  const message={id:'archive-fixture',kind:'mail',title:'Archive verification fixture',body:'Fixture body',revision:1,updated:new Date().toISOString(),meta:{read:true,remote:true,account:'archive-account',folder:'Inbox',from:'sender@example.com'}};
   let messages=[message],reject=true,recover=false,providerWrites=0,repairs=0;
   const routes=target=>target.pathname.endsWith('/api.php') && ['records','accounts','sync','mail-action'].includes(target.searchParams.get('r'));
   await page.route(routes,async route=>{
@@ -39,7 +39,7 @@ export async function testMailArchive(page, url) {
     await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
     assert.equal(await page.locator('#mail-folder').inputValue(),'Inbox');
     await select(message.title);
-    assert.deepEqual(await page.locator('.item .badge').allTextContents(),['Inbox','Cached']);
+    assert.deepEqual(await page.locator('#detail .badge').allTextContents(),['Inbox','Cached']);
     await page.getByRole('button',{name:'Archive',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Archive could not be confirmed'}).waitFor();
     assert.equal(await page.locator('.item').count(),1);
@@ -50,7 +50,7 @@ export async function testMailArchive(page, url) {
     await folder('Archive');await sync();
     assert.equal(await page.locator('#mail-folder').inputValue(),'Archive');
     await select(message.title);
-    assert.deepEqual(await page.locator('.item .badge').allTextContents(),['Archive','Cached']);
+    assert.deepEqual(await page.locator('#detail .badge').allTextContents(),['Archive','Cached']);
     await page.locator('#main').focus();await page.keyboard.press('d');
     await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
     assert.equal(await page.locator('.item').count(),0);
@@ -74,8 +74,8 @@ export async function testMailArchive(page, url) {
     await page.getByRole('button',{name:'Save locally',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Saved in Local mail.'}).waitFor();
     await folder('Local mail');await select(message.title);
-    assert.deepEqual(await page.locator('.item .badge').allTextContents(),['Local mail']);
-    messages.push({...message,id:'discard-fixture',title:'Discard recovery fixture',meta:{remote:true,account:'archive-account',folder:'Recovery copies'}});
+    assert.deepEqual(await page.locator('#detail .badge').allTextContents(),['Local mail']);
+    messages.push({...message,id:'discard-fixture',title:'Discard recovery fixture',meta:{read:true,remote:true,account:'archive-account',folder:'Recovery copies'}});
     await sync();await folder('Recovery copies');await select('Discard recovery fixture');
     await page.getByRole('button',{name:'Discard copy',exact:true}).click();
     await page.locator('#dialog').getByRole('button',{name:'Discard copy',exact:true}).click();

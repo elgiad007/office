@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export async function testScrolling(page, url) {
-  const records = Array.from({length:80}, (_, i) => ({id:`scroll-${i}`, kind:'mail', title:`Scroll message ${i}`, body:Array.from({length:150}, (_, n) => `Message line ${n}`).join('\n'), revision:1, meta:{folder:'Inbox', from:'sender@example.com'}}));
+  const records = Array.from({length:80}, (_, i) => ({id:`scroll-${i}`, kind:'mail', title:`Scroll message ${i}`, body:Array.from({length:150}, (_, n) => `Message line ${n}`).join('\n'), revision:1, meta:{read:true,folder:'Inbox', from:'sender@example.com'}}));
   let density = 'comfortable';
   const routes = target => target.pathname.endsWith('/api.php');
   await page.route(routes, async route => {

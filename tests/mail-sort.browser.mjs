@@ -31,7 +31,6 @@ export async function testMailSort(page,url) {
     await page.goto(url+'#mail');await page.reload();await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
     await selected('newest');assert.deepEqual(await order(),expected);
     await page.locator('[data-id="tie-a"]').click();
-    await page.getByRole('button',{name:'Mark read',exact:true}).click();
     await page.getByRole('button',{name:'Mark unread',exact:true}).waitFor();
     assert.deepEqual(await order(),expected);await selected('tie-a');
     await page.getByRole('button',{name:'Mark unread',exact:true}).click();

@@ -82,9 +82,9 @@ export async function testItemMenus(page,url) {
   await page.keyboard.press('Escape');
   // Provider fixtures are intercepted: these checks never contact a mail server.
   const remote=[
-    {id:'remote-menu-1',kind:'mail',revision:1,title:'Menu remote',body:'',meta:{remote:true,account:'test',folder:'Inbox',from:'sender@example.com'}},
-    {id:'remote-menu-2',kind:'mail',revision:1,title:'Menu recovery',body:'',meta:{remote:true,account:'test',folder:'Recovery copies'}},
-    {id:'remote-menu-3',kind:'mail',revision:1,title:'Menu trash',body:'',meta:{remote:true,account:'test',folder:'Trash'}},
+    {id:'remote-menu-1',kind:'mail',revision:1,title:'Menu remote',body:'',meta:{read:true,remote:true,account:'test',folder:'Inbox',from:'sender@example.com'}},
+    {id:'remote-menu-2',kind:'mail',revision:1,title:'Menu recovery',body:'',meta:{read:true,remote:true,account:'test',folder:'Recovery copies'}},
+    {id:'remote-menu-3',kind:'mail',revision:1,title:'Menu trash',body:'',meta:{read:true,remote:true,account:'test',folder:'Trash'}},
   ];
   const calls=[];
   const route='**/api.php?r=*';

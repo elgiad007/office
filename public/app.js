@@ -23,6 +23,8 @@ let selectionAnchor=null,keyboardSelection=false;
 let sendingMail=false;
 const pendingMailDeletes=new Set();
 let mailDeleteVersion=0;
+const pendingMailReads=new Map();
+let mailReadVersion=0, displayedMailId=null;
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
 const keys = () => ({...defaultKeys,...state.prefs.keys});
 const editable = node => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName);
@@ -31,6 +33,11 @@ const field = (label,name,value='',type='text',extra='') => `<label>${e(label)}<
 const busyButton = (button,busy) => { if (button) button.disabled=busy; };
 function notice(text,error=false) { const n=document.querySelector('#notice'); n.textContent=text; n.className='show'; n.setAttribute('role',error?'alert':'status'); clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>n.className='',error?10000:4500); }
 async function api(route,data) {
+  // Let an in-flight read update finish before another mutation uses its revision.
+  if(data?.id && ['save','delete','mail-action'].includes(route) && pendingMailReads.has(data.id)) {
+    const result=await pendingMailReads.get(data.id);
+    if(result && data.revision===result.previousRevision)data={...data,revision:result.record.revision};
+  }
   const response=await fetch('api.php?r='+route,{method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':state.csrf},body:data===undefined?undefined:JSON.stringify(data),cache:'no-store'});
   let result; try { result=await response.json(); } catch { throw Error('The server did not return JSON. Check PHP configuration and upload limits.'); }
   if (!response.ok) { if (response.status===401 && route!=='login') { state.dirty=false; await boot(); } throw Error(result.error || 'Request failed.'); }
@@ -136,6 +143,7 @@ function mailDeletionReload() {
   };
 }
 async function load(preferId,{selectFirst=true}={}) {
+  if(state.app!=='mail')displayedMailId=null;
   itemMenus.close();selectionAnchor=null;keyboardSelection=false;
   document.querySelectorAll('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   document.querySelector('#crumb').textContent=apps[state.app]?.name||'Settings';
@@ -144,9 +152,9 @@ async function load(preferId,{selectFirst=true}={}) {
   document.querySelector('#mail-folders-toggle').hidden=state.app!=='mail';
   if(state.app!=='mail')setMailFolderPanel(false);
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
-  // Retry snapshots taken across a deletion/rollback, and hide requests still pending.
+  // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
-  do{version=mailDeleteVersion;records=(await api('records&kind='+app)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion);
+  do{version=mailDeleteVersion+mailReadVersion;records=(await api('records&kind='+app)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   state.rows=records.filter(r=>!pendingMailDeletes.has(r.id));
   if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
@@ -194,6 +202,8 @@ function renderList() {
 }
 function renderDetail() {
   const panel=document.querySelector('#detail'), r=state.current, a=apps[state.app];
+  const openedMail=state.app==='mail'&&r?r.id:null, newlyOpened=openedMail!==displayedMailId;
+  displayedMailId=openedMail;
   if (!r) {
     const emptyMail=state.app==='mail'&&!filteredRows().length;
     const heading=emptyMail?(state.search?'No matching messages.':'No messages in this folder.'):(state.rows.length?'Select a '+a.singular:a.empty);
@@ -206,6 +216,7 @@ function renderDetail() {
   panel.innerHTML=`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':'Saved'}</span>${['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?'<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>':''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>${detailContent(r)}`;
   const form=panel.querySelector('#record-form');
   if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail);
+  if(newlyOpened && openedMail)markOpenedMailRead(r);
   if (form) { form.oninput=()=>markDirty(); form.onsubmit=async ev=>{ev.preventDefault(); await attempt(()=>commit());}; }
   if (fillSender) markDirty();
   panel.querySelectorAll('[data-format]').forEach(button=>{
@@ -439,7 +450,7 @@ async function sendMail() {
 async function archiveLocal() {
   if(state.app!=='mail')return;await commit();const ids=state.selected.size?[...state.selected]:[state.current?.id].filter(Boolean);let count=0;
   try {
-    for(const id of ids){const r=state.rows.find(r=>r.id===id);if(r.meta.remote)await api('mail-action',{id:r.id,revision:r.revision,action:'archive'});else{r.meta.folder='Archive';await api('save',r);}count++;}
+    for(const id of ids){const r=state.rows.find(r=>r.id===id);await pendingMailReads.get(id);if(r.meta.remote)await api('mail-action',{id:r.id,revision:r.revision,action:'archive'});else{r.meta.folder='Archive';await api('save',r);}count++;}
   } catch(error) {
     // The provider check may have corrected cached membership even when the move failed.
     try { await load(); } catch {}
@@ -465,8 +476,32 @@ async function repairMail(accountId,button) {
   catch(error){notice(error.message,true);}
   finally {state.syncing=false;busyButton(button,false);busyButton(document.querySelector('#sync-button'),false);state.accounts=(await api('accounts')).accounts;if(state.app==='settings')renderSettings();else await load();}
 }
+function markOpenedMailRead(record) {
+  if(record.meta.read || ['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(record.meta.folder) || pendingMailReads.has(record.id))return;
+  const previousRevision=record.revision;
+  mailReadVersion++;
+  // Rendering and navigation remain synchronous; only mutations of this message wait.
+  const pending=(async()=>{
+    try {
+      const result=await api(record.meta.remote?'mail-action':'save',record.meta.remote?{id:record.id,revision:previousRevision,action:'read'}:{...record,meta:{...record.meta,read:true}});
+      const update=row=>{if(row?.id===record.id && row.revision===previousRevision){row.meta.read=result.record.meta.read;row.revision=result.record.revision;row.updated=result.record.updated;}};
+      update(record);
+      if(state.app==='mail'){
+        state.rows.forEach(update);update(state.current);
+        const focused=document.activeElement?.closest('#items [data-id]')?.dataset.id;
+        renderList();
+        if(focused)document.querySelector(`#items [data-id="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
+        if(state.current?.id===record.id){const button=document.querySelector('#detail [data-action="read"]');if(button)button.textContent=`Mark ${state.current.meta.read?'unread':'read'}`;}
+      }
+      return {...result,previousRevision};
+    } catch(error) { notice('Could not mark message as read: '+error.message,true); }
+    finally { pendingMailReads.delete(record.id);mailReadVersion++; }
+  })();
+  pendingMailReads.set(record.id,pending);
+}
 async function readMail() {
   if(state.app!=='mail'||!state.current)return;await commit();const r=state.current;
+  if(pendingMailReads.has(r.id))await pendingMailReads.get(r.id);
   if(r.meta.remote)await api('mail-action',{id:r.id,revision:r.revision,action:r.meta.read?'unread':'read'});
   else{r.meta.read=!r.meta.read;await api('save',r);}await load(r.id);
 }
@@ -505,7 +540,7 @@ function accountDialog() {
     renderSettings();
   }});
 }
-const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
   state.lastActivity=Date.now();if(dialog.open)return;

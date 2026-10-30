@@ -12,6 +12,7 @@ import {testMailReply} from './mail-reply.browser.mjs';
 import {testMailSend} from './mail-send.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
+import {testMailRead} from './mail-read.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
@@ -78,6 +79,7 @@ try{
  await testMailArchive(page,url);
  await testMailSender(page,url);
  await testMailFolder(page,url);
+ await testMailRead(page,url);
  await testAccountFolders(page,url);
  await testMailHtml(page,url);
  await testItemMenus(page,url);

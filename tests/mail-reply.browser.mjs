@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export async function testMailReply(page,url) {
-  const message=(id,folder,serverFolder)=>({id,kind:'mail',title:'Received '+id,body:'Original body '+id,revision:1,meta:{remote:true,account:'reply-account',folder,serverFolder,from:'Sender <sender@example.com>',date:'Thu, 29 Oct 2026 12:00:00 +0000',source:'source-only-marker'}});
+  const message=(id,folder,serverFolder)=>({id,kind:'mail',title:'Received '+id,body:'Original body '+id,revision:1,meta:{read:true,remote:true,account:'reply-account',folder,serverFolder,from:'Sender <sender@example.com>',date:'Thu, 29 Oct 2026 12:00:00 +0000',source:'source-only-marker'}});
   let records=[message('inbox-a','Inbox','INBOX'),message('inbox-b','Inbox','INBOX'),message('custom-a','Custom folder','Travel')],sequence=0,reject=false;
   const routes=target=>target.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
