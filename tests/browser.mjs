@@ -8,6 +8,7 @@ import {testScrolling} from './scrolling.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
 import {testMailDeleteSelection} from './mail-delete-selection.browser.mjs';
 import {testMailSort} from './mail-sort.browser.mjs';
+import {testMailReply} from './mail-reply.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
@@ -71,6 +72,7 @@ try{
  await testDeleteHotkey(page,url);
  await testMailDeleteSelection(page,url);
  await testMailSort(page,url);
+ await testMailReply(page,url);
  await testMailArchive(page,url);
  await testMailSender(page,url);
  await testMailFolder(page,url);

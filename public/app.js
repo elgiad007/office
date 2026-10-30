@@ -103,7 +103,8 @@ async function load(preferId,{selectFirst=true}={}) {
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
   state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null;
   if(state.app==='mail'){
-    if(state.mailScope&&state.current&&!matchesMailScope(state.current,state.mailScope,state.accounts))state.current=null;
+    const editingDraft=state.current&&!state.current.meta.remote&&state.current.meta.folder==='Drafts';
+    if(state.mailScope&&state.current&&!editingDraft&&!matchesMailScope(state.current,state.mailScope,state.accounts))state.current=null;
     if(!state.current&&selectFirst)state.current=filteredRows()[0]||null;
   }
   state.selected.clear();renderWorkspace();
@@ -239,7 +240,7 @@ function draftAccount(context) {
   const accounts=mailAccounts();
   return [context?.meta.sendAccount,context?.meta.account,state.prefs.defaultMailAccount,accounts.length===1?accounts[0].id:''].find(id=>accounts.some(a=>a.id===id)) || '';
 }
-async function createRecord(initial={}) {
+async function createRecord(initial={}, {keepMailList=false}={}) {
   await commit(); const kind=state.app;
   if (!apps[kind]) return;
   // Remove the previous editor before the network round-trip, so fast typing cannot overwrite it.
@@ -249,8 +250,16 @@ async function createRecord(initial={}) {
   if(kind==='mail' && !record.meta.sendAccount)record.meta.sendAccount=draftAccount(previous);
   if(kind==='calendar') { const start=new Date(); start.setMinutes(0,0,0); record.meta.start=start.toISOString(); record.meta.end=new Date(+start+3600000).toISOString(); }
   if(kind==='sheets')record.meta.workbook={sheets:[{name:'Sheet 1',cells:{}}]};
-  if(kind==='mail'){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
-  try { const result=await api('save',record); state.wikiPreview=false; await load(result.record.id); enterEdit(true); }
+  if(kind==='mail'&&!keepMailList){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
+  try {
+    const result=await api('save',record);state.wikiPreview=false;
+    if(kind==='mail'&&keepMailList){
+      state.rows.push(result.record);state.rows.sort(compareMail);state.current=result.record;
+      state.selected.clear();selectionAnchor=null;keyboardSelection=false;
+      renderList();renderDetail();
+    }else await load(result.record.id);
+    enterEdit(true);
+  }
   catch(error) { state.current=previous;renderDetail();throw error; }
 }
 function enterEdit(preferTitle=false) {
@@ -340,7 +349,7 @@ async function handleClick(event) {
     if(action==='original-ics')download(state.current.title+'.ics',state.current.meta.rawIcs||state.current.meta.raw,'text/calendar');
     if(action==='read')await readMail();
     if(action==='archive')await archiveLocal();
-    if(action==='reply'){const r=state.current;const match=(r.meta.from||'').match(/<([^>]+)>/);await createRecord({title:/^Re:/i.test(r.title)?r.title:'Re: '+r.title,body:'\n\nOn '+(r.meta.date||'')+', '+(r.meta.from||'')+' wrote:\n'+r.body.split('\n').map(l=>'> '+l).join('\n'),meta:{to:match?match[1]:r.meta.from}});}
+    if(action==='reply'){const r=state.current;const match=(r.meta.from||'').match(/<([^>]+)>/);await createRecord({title:/^Re:/i.test(r.title)?r.title:'Re: '+r.title,body:'\n\nOn '+(r.meta.date||'')+', '+(r.meta.from||'')+' wrote:\n'+r.body.split('\n').map(l=>'> '+l).join('\n'),meta:{to:match?match[1]:r.meta.from}},{keepMailList:true});}
     if(action==='send'){await commit();if(!state.current.meta.sendAccount)throw Error('Choose a sending account first.');confirmation('Send message',`Send this saved draft to ${state.current.meta.to}?`,async()=>{button.disabled=true;try{await api('send',{id:state.current.id,revision:state.current.revision,account:state.current.meta.sendAccount});notice('Message accepted by the provider.');}finally{await load();}});}
     if(action==='add-sheet'){await commit();const w=workbook(state.current);if(w.sheets.length>=10)throw Error('Up to 10 sheets per workbook.');w.sheets.push({name:'Sheet '+(w.sheets.length+1),cells:{}});state.sheet=w.sheets.length-1;state.cell='A1';renderDetail();markDirty();}
     if(action==='rename-sheet'){modal('Rename sheet',`<form id="rename-form">${field('Name','name',workbook(state.current).sheets[state.sheet].name,'text','required maxlength="60"')}<button class="primary">Rename</button></form>`);dialog.querySelector('form').onsubmit=ev=>{ev.preventDefault();collect();workbook(state.current).sheets[state.sheet].name=new FormData(ev.target).get('name');dialog.close();renderDetail();markDirty();};}
