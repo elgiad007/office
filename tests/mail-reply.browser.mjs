@@ -33,10 +33,14 @@ export async function testMailReply(page,url) {
       assert.equal(await page.locator('[name="to"]').inputValue(),'sender@example.com');
       assert.equal(await page.getByLabel('Send using',{exact:true}).inputValue(),'reply-account');
       assert.match(await body.inputValue(),/> Original body inbox-a/);
-      await body.fill('Saved reply '+trigger);
+      const quotedBody=await body.inputValue(),replyText='Saved reply '+trigger;
+      assert.equal(await body.evaluate(el=>el===document.activeElement),true,'Reply focuses the body immediately');
+      await page.keyboard.type(replyText);
+      assert.equal(await body.inputValue(),replyText+quotedBody,'Typing starts above the intact quoted email');
+      assert.equal(await page.locator('.title-input').inputValue(),'Re: Received inbox-a','Typing leaves the subject intact');
       // Selecting another message must save the reply without losing the list.
       await page.locator('[data-id="inbox-b"]').click();
-      assert.equal(records.find(r=>r.id==='reply-'+sequence).body,'Saved reply '+trigger);
+      assert.equal(records.find(r=>r.id==='reply-'+sequence).body,replyText+quotedBody);
       assert.equal(records.find(r=>r.id==='reply-'+sequence).meta.folder,'Drafts');
       assert.deepEqual(await ids(),before);
     }
