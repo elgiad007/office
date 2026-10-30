@@ -15,6 +15,11 @@
 .folder-link[aria-current="location"] { background: var(--wash); font-weight: 650; }
 .folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
 .item .badge { max-width: 125px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.item.mail-read strong, .item.mail-read small { font-weight: 400; }
+.item.mail-unread strong, .item.mail-unread small { font-weight: 700; }
+.item.mail-unread small { color: var(--text); }
+.mail-read-status { flex: 0 0 8px; width: 8px; height: 8px; align-self: center; border-radius: 50%; }
+.mail-unread .mail-read-status { background: var(--accent); }
 .detail-toolbar .mail-detail-heading { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .mail-detail-heading .badge { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 .folder-children { padding-left: 12px; }
