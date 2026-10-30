@@ -33,6 +33,8 @@ function set_setting(string $key, mixed $value): void {
 function fail(string $message, int $code = 400): never { throw new HttpError($message, $code); }
 class HttpError extends RuntimeException {}
 function json_response(mixed $value, int $code = 200): never {
+    if(function_exists('activity_finish'))activity_finish($code<400 && ($value['status']??'')!=='failed');
+    if(!empty($GLOBALS['office_activity_stream'])){echo json_encode(['type'=>'result','status'=>$code,'body'=>$value],JSON_THROW_ON_ERROR|JSON_INVALID_UTF8_SUBSTITUTE)."\n";exit;}
     http_response_code($code); header('Content-Type: application/json; charset=utf-8');
     echo json_encode($value, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE); exit;
 }

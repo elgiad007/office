@@ -28,7 +28,7 @@ function imap_folder_catalog(array $a,mixed $s): array {
     $folders=imap_list_folders(imap_command($s,'LIST "" "*"'.($special?' RETURN (SPECIAL-USE)':'')));
     $protected=['INBOX']; $roles=['INBOX'=>'Inbox'];
     foreach (['archive','trash'] as $role) {
-        $path=imap_resolve_folder($folders,$a['config'][$role.'Folder']??ucfirst($role),$role,false);
+        $path=imap_resolve_folder($folders,$a['config'][$role.'Folder']??ucfirst($role),$role,false,imap_is_gmail($a));
         if ($path!==null) { $protected[]=$path; $roles[$path]=ucfirst($role); }
     }
     $result=[];
@@ -57,12 +57,7 @@ function mail_folder_cache(array $a,array $folders): array {
     set_setting('mail-folders:'.$a['id'],$folders); return $folders;
 }
 function with_imap_folders(array $a,callable $run): mixed {
-    $s=socket_connection($a['config']['host'],993);
-    try {
-        if (!str_starts_with((string)fgets($s,65536),'* OK')) fail('Unexpected IMAP greeting.');
-        imap_command($s,'LOGIN '.imap_quote($a['credentials']['username']).' '.imap_quote($a['credentials']['password']));
-        return $run($s);
-    } finally { fclose($s); }
+    return imap_with_connection($a,$run);
 }
 function discover_mail_folders(array $a): array {
     if ($a['type']==='imap') $folders=with_imap_folders($a,fn($s)=>imap_folder_catalog($a,$s));
@@ -210,11 +205,13 @@ function file_remote_mail(array $r,string $action,string $folder): array {
             if (!preg_match('/\b(?:MOVE|IMAP4REV2)\b/i',implode('',$cap['lines']))) fail('This IMAP server does not support MOVE.');
             $validity=imap_validity(imap_command($s,'SELECT '.imap_quote($path)));
             if (mail_row_source($r)!==mail_source($path,$validity,$uid)) fail('Mailbox identifiers changed. Sync before moving this message.',409);
+            $gmail=imap_is_gmail($a);
+            $gmailId=null;$relatedIds=$gmail?imap_gmail_move_copies($a,$s,$r,$path,$uid,$gmailId):[];
             imap_command($s,'STATUS '.imap_quote($folder).' (MESSAGES)');
-            $location=imap_move_verified($s,$uid,$folder);
+            $location=imap_move_verified($s,$uid,$folder,'Move',$path,$gmail,$a,$gmailId);
             $r['meta']=array_merge($r['meta'],$location,['folder'=>$destination['role']]);
-            return $r;
+            return $gmail?save_imap_gmail_move($r,$relatedIds):$r;
         });
     } else fail('Choose a mail account.');
-    return save_record($r,true);
+    return ($a['type']==='imap' && imap_is_gmail($a))?$r:save_record($r,true);
 }

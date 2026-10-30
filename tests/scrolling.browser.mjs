@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 export async function testScrolling(page, url) {
   const records = Array.from({length:80}, (_, i) => ({id:`scroll-${i}`, kind:'mail', title:`Scroll message ${i}`, body:Array.from({length:150}, (_, n) => `Message line ${n}`).join('\n'), revision:1, meta:{read:true,folder:'Inbox', from:'sender@example.com'}}));
   let density = 'comfortable';
-  const routes = target => target.pathname.endsWith('/api.php');
+  const routes = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r')!=='activity';
   await page.route(routes, async route => {
     const action = new URL(route.request().url()).searchParams.get('r');
     const responses = {status:{authenticated:true, csrf:'fixture', preferences:{density}}, accounts:{accounts:[]}, records:{records}, 'google-settings':{configured:false}};
@@ -24,7 +24,8 @@ export async function testScrolling(page, url) {
         await page.reload();
         await page.locator('#items .item').first().click();
         await page.locator('.mail-body').waitFor();
-        assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth + 1), 'Workspace must fit the viewport');
+        const dimensions=await page.evaluate(()=>({height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth,viewportHeight:innerHeight,viewportWidth:innerWidth,elements:['.shell','.workspace','#main','.work-grid','.detail'].map(selector=>{const node=document.querySelector(selector),style=getComputedStyle(node);return {selector,height:node.getBoundingClientRect().height,overflow:style.overflow,minHeight:style.minHeight,display:style.display};})}));
+        assert.ok(dimensions.height<=dimensions.viewportHeight+1 && dimensions.width<=dimensions.viewportWidth+1, 'Workspace must fit the viewport: '+JSON.stringify(dimensions));
         await wheel('#detail', 400);
         await page.waitForFunction(() => document.querySelector('#detail').scrollTop > 0);
         const detailScrolled = await positions();

@@ -6,8 +6,16 @@ require dirname(__DIR__).'/app/bootstrap.php';
 require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/mail-html.php';
 require dirname(__DIR__).'/app/connectors.php';
+require dirname(__DIR__).'/app/account-setup.php';
 function check(bool $condition,string $message): void { if (!$condition) throw new RuntimeException($message); echo "PASS $message\n"; }
 try {
+    $gmail=validate_account_input(['type'=>'gmail','label'=>'Personal Gmail','email'=>'person@example.com','password'=>'abcd efgh ijkl mnop','host'=>'wrong.invalid','username'=>'wrong']);
+    check($gmail['type']==='imap' && $gmail['config']['host']==='imap.gmail.com' && $gmail['config']['smtp']==='smtp.gmail.com','Gmail preset enforces mail servers and stores IMAP type');
+    check($gmail['credentials']===['username'=>'person@example.com','password'=>'abcdefghijklmnop'] && $gmail['config']['archiveFolder']==='Archive' && $gmail['config']['trashFolder']==='Trash','Gmail preset normalizes grouped app password and uses email and automatic folders');
+    foreach (['normal-password', '', [], "abcdefghijklmnop\nINJECT"] as $badPassword) {
+        try { validate_account_input(['type'=>'gmail','label'=>'Gmail','email'=>'person@example.com','password'=>$badPassword]); throw new RuntimeException('Invalid app password accepted'); }
+        catch (HttpError) { check(true,'invalid Gmail app password rejected'); }
+    }
     $r=save_record(['kind'=>'wiki','title'=>'home:start','body'=>'Hello','meta'=>[]]);
     $r['body']='Second'; $next=save_record($r); check($next['revision']===2,'revision increments');
     try { save_record($r); throw new RuntimeException('stale write accepted'); } catch(HttpError $e) {check($e->getCode()===409,'stale write rejected');}

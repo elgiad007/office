@@ -2,6 +2,7 @@ import {escapeHtml as escape} from './formats.js';
 
 const providers = {
   imap: 'IMAP + SMTP',
+  gmail: 'Gmail — app password',
   google: 'Gmail (optional Google Calendar)',
   caldav: 'CalDAV calendar',
 };
@@ -10,6 +11,7 @@ const providers = {
 export function openAccountSetup({dialog, request, onSaved}) {
   const drafts = {
     imap: {label:'', email:'', host:'', smtp:'', username:'', password:'', archiveFolder:'Archive', trashFolder:'Trash'},
+    gmail: {label:'', email:'', password:''},
     google: {label:'', email:'', calendar:false},
     caldav: {label:'', url:'', username:'', password:''},
   };
@@ -56,6 +58,9 @@ export function openAccountSetup({dialog, request, onSaved}) {
   }
 
   function credentials() {
+    if (provider === 'gmail') return `<p>Office fills in Gmail’s mail servers and detects All Mail and Trash automatically. This connects email only; Google Calendar uses the separate Google sign-in option.</p>
+      <p>Turn on 2-Step Verification in your Google Account, then <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">create an app password</a> for Office. Paste that password below. Your normal Google password will not work. App passwords may be unavailable for work or school accounts, security-key-only verification, or Advanced Protection.</p>`
+      + input('Google app password', 'password', {type:'password', help:'Enter the 16-letter app password. Spaces between groups are removed automatically. No Google integration setup is needed.'});
     if (provider === 'imap') {
       return `<p>Find these settings in your email provider’s mail-client instructions. Office currently supports implicit TLS on ports 993 and 465.</p>`
         + input('IMAP server (TLS 993)', 'host', {placeholder:'imap.example.com', help:'Enter the hostname only, without a protocol or port.'})
@@ -86,6 +91,7 @@ export function openAccountSetup({dialog, request, onSaved}) {
     const fields = [['Connection',providers[provider]],['Account label',data.label]];
     if (provider !== 'caldav') fields.push(['Sender email',data.email]);
     if (provider === 'imap') fields.push(['IMAP',data.host+' · TLS 993'],['SMTP',data.smtp+' · TLS 465'],['Username',data.username],['Password','Entered · hidden'],['Archive folder',data.archiveFolder],['Trash folder',data.trashFolder]);
+    if (provider === 'gmail') fields.push(['IMAP','imap.gmail.com · TLS 993'],['SMTP','smtp.gmail.com · TLS 465'],['Username',data.email],['App password','Entered · hidden'],['Archive folder','Automatic · Gmail All Mail'],['Trash folder','Automatic']);
     if (provider === 'caldav') fields.push(['Calendar collection',data.url],['Username',data.username],['Password','Entered · hidden']);
     return `<p>Review these settings before saving. Secrets are hidden and will be encrypted on disk.</p>
       <dl class="setup-review">${fields.map(([name,value]) => `<div><dt>${escape(name)}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>

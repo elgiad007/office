@@ -5,7 +5,7 @@ export async function testMailFolder(page,url) {
   const draft={id:'folder-draft',kind:'mail',title:'Folder draft fixture',body:'Original draft',revision:1,meta:{folder:'Drafts'}};
   const second={...message,id:'second-inbox-message',title:'Second inbox fixture'};
   let records=[message,second,draft], failSave=false;
-  const routes=target=>target.pathname.endsWith('/api.php');
+  const routes=target=>target.pathname.endsWith('/api.php') && target.searchParams.get('r')!=='activity';
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');
     let json;

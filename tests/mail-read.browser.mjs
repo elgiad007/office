@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 
 export async function testMailRead(page,url) {
+  await page.goto('about:blank');
   const mail=(id,extra={})=>({id,kind:'mail',title:'Read fixture '+id,body:'Body '+id,revision:1,meta:{folder:'Inbox',from:'sender@example.com',date:'2026-10-29T12:00:00Z',read:false,...extra}});
   let records=[mail('a',{remote:true,account:'imap'}),mail('b',{remote:true,account:'google'}),mail('c'),mail('d'),mail('draft',{folder:'Drafts'}),mail('recovery',{remote:true,account:'imap',folder:'Recovery copies'})];
   const calls=[],held=new Map();let reject=null;
   const hold=id=>{let release;const promise=new Promise(resolve=>release=resolve);held.set(id,{promise,release});};
   const release=id=>{held.get(id)?.release();held.delete(id);};
-  const routes=target=>target.pathname.endsWith('/api.php');
+  const routes=target=>target.pathname.endsWith('/api.php') && target.searchParams.get('r')!=='activity';
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',preferences:{}};

@@ -3,6 +3,15 @@ declare(strict_types=1);
 
 /** Shared by manual save and the guided connection check. Never returns secrets to the browser. */
 function validate_account_input(array $input): array {
+    // A setup preset, stored as an ordinary encrypted IMAP/SMTP account.
+    $gmail = ($input['type'] ?? null) === 'gmail';
+    if ($gmail) {
+        if (!is_string($input['password'] ?? null)) fail('Enter a valid Google app password.');
+        $password = str_replace(' ', '', trim($input['password']));
+        if (!preg_match('/^[a-zA-Z]{16}$/D', $password)) fail('Enter the 16-letter Google app password, not your normal Google password.');
+        $input = array_merge($input, ['type'=>'imap', 'host'=>'imap.gmail.com', 'smtp'=>'smtp.gmail.com',
+            'username'=>$input['email'] ?? '', 'password'=>$password, 'archiveFolder'=>'Archive', 'trashFolder'=>'Trash']);
+    }
     $text = static function (string $key, string $default = '') use ($input): string {
         $value = $input[$key] ?? $default;
         if (!is_string($value)) fail('Invalid account field: '.$key.'.');
@@ -71,13 +80,16 @@ function check_account_connection(array $account): array {
         }
     };
     if ($account['type'] === 'imap') {
-        $probe('IMAP inbox and archive · TLS 993', static function () use ($account): void {
+        $probe('IMAP inbox, archive and trash · TLS 993', static function () use ($account): void {
             $socket = socket_connection($account['config']['host'], 993);
             try {
                 if (!str_starts_with((string)fgets($socket,65536), '* OK')) fail('Unexpected IMAP greeting.');
                 imap_command($socket, 'LOGIN '.imap_quote($account['credentials']['username']).' '.imap_quote($account['credentials']['password']));
                 imap_command($socket, 'EXAMINE INBOX');
                 imap_archive_folder($socket, $account['config']['archiveFolder']);
+                $folders = imap_list_folders(imap_command($socket, 'LIST "" "*"'));
+                $trash = imap_resolve_folder($folders, $account['config']['trashFolder'], 'trash', true, imap_is_gmail($account));
+                imap_command($socket, 'STATUS '.imap_quote($trash).' (MESSAGES)');
             } finally { fclose($socket); }
         });
         $probe('SMTP login · TLS 465', static function () use ($account): void {

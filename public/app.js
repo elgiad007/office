@@ -5,6 +5,7 @@ import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail} from './m
 import {mailBody, bindMailReader} from './mail-reader.js';
 import {installItemMenus} from './item-menus.js';
 import {compareMail} from './mail-sort.js';
+import {createActivity} from './activity.js';
 
 const apps = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -18,12 +19,14 @@ const apps = {
 const defaultKeys = {down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',read:'m',delete:'d'};
 const state = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const root=document.querySelector('#app'), dialog=document.querySelector('#dialog');
-let noticeTimer, saveTimer, keySequence='', sequenceTime=0;
+const activity=createActivity({csrf:()=>state.csrf});
+let saveTimer, keySequence='', sequenceTime=0;
 let selectionAnchor=null,keyboardSelection=false;
 let sendingMail=false;
 const pendingMailDeletes=new Set();
 let mailDeleteVersion=0;
 const pendingMailReads=new Map();
+const mailAccountQueue=new Map(),mailSnapshots=new Map(),mailLatest=new Map(),trashedMailCopies=new Map();
 let mailReadVersion=0, displayedMailId=null;
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
 const keys = () => ({...defaultKeys,...state.prefs.keys});
@@ -31,17 +34,85 @@ const editable = node => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.
 const dateLabel = value => { const date=new Date(value); return Number.isNaN(+date)?value:date.toLocaleDateString(undefined,{month:'short',day:'numeric'}); };
 const field = (label,name,value='',type='text',extra='') => `<label>${e(label)}<input type="${type}" name="${name}" value="${e(value)}" ${extra}></label>`;
 const busyButton = (button,busy) => { if (button) button.disabled=busy; };
-function notice(text,error=false) { const n=document.querySelector('#notice'); n.textContent=text; n.className='show'; n.setAttribute('role',error?'alert':'status'); clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>n.className='',error?10000:4500); }
+function notice(text,error=false) { activity.notice(text,error); }
+function rememberMail(record) {
+  if(record?.kind!=='mail')return;
+  let revisions=mailSnapshots.get(record.id);
+  if(!revisions){revisions=new Map();mailSnapshots.set(record.id,revisions);}
+  const fields=['remote','account','source','serverFolder','uidValidity','providerId','folder','rawBase64'];
+  revisions.set(record.revision,{id:record.id,kind:record.kind,meta:Object.fromEntries(fields.map(key=>[key,record.meta[key]]))});
+  if(!mailLatest.has(record.id)||mailLatest.get(record.id).revision<=record.revision)mailLatest.set(record.id,structuredClone(record));
+  if(revisions.size>16)revisions.delete(revisions.keys().next().value);
+}
+function latestMail(id) {
+  return mailLatest.get(id);
+}
+function sameMailTarget(a,b) {
+  if(!a||!b||a.id!==b.id||a.kind!=='mail'||b.kind!=='mail')return false;
+  const x=a.meta,y=b.meta;
+  return !!x.remote && !!y.remote && x.account===y.account && !!x.source && x.source===y.source
+    && x.serverFolder===y.serverFolder && x.uidValidity===y.uidValidity && x.providerId===y.providerId
+    && x.folder===y.folder && x.rawBase64===y.rawBase64;
+}
+function refreshMailRecord(record) {
+  rememberMail(record);
+  if(state.app!=='mail'||pendingMailDeletes.has(record.id))return;
+  state.rows=state.rows.map(row=>row.id===record.id?structuredClone(record):row);
+  if(state.current?.id===record.id)state.current=state.rows.find(row=>row.id===record.id)||null;
+}
+async function requestApi(route,data) {
+  const response=await fetch('api.php?r='+route,{method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':state.csrf,'X-Office-Progress':'1'},body:data===undefined?undefined:JSON.stringify(data),cache:'no-store'});
+  let result,status=response.status;
+  if(response.headers.get('Content-Type')?.includes('application/x-ndjson')){
+    const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',finished=false;
+    const consume=line=>{if(!line.trim())return;const event=JSON.parse(line);if(event.type==='activity')activity.receive(event.entry);if(event.type==='result'){result=event.body;status=event.status;finished=true;}};
+    while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});let newline;while((newline=buffer.indexOf('\n'))!==-1){consume(buffer.slice(0,newline));buffer=buffer.slice(newline+1);}if(done){if(buffer.trim())consume(buffer);break;}}
+    if(!finished)throw Error('The connection ended before the operation was confirmed. Check recent activity and sync before retrying.');
+  }else try { result=await response.json(); } catch { throw Error('The server did not return JSON. Check PHP configuration and upload limits.'); }
+  if (status>=400) {
+    if(status===409&&result.code==='mail_revision_conflict'&&result.record)refreshMailRecord(result.record);
+    if (status===401 && route!=='login') { state.dirty=false; await boot(); }
+    throw Object.assign(Error(result.error || 'Request failed.'),{status,code:result.code,record:result.record});
+  }
+  for(const record of result.records||[])rememberMail(record);
+  rememberMail(result.record);
+  if(route==='mail-action'&&data?.action==='trash'&&result.record?.meta?.folder==='Trash'){
+    for(const id of result.removedIds||[])trashedMailCopies.set(id,result.record);
+  }
+  return result;
+}
 async function api(route,data) {
+  const expected=mailSnapshots.get(data?.id)?.get(data?.revision);
   // Let an in-flight read update finish before another mutation uses its revision.
   if(data?.id && ['save','delete','mail-action'].includes(route) && pendingMailReads.has(data.id)) {
     const result=await pendingMailReads.get(data.id);
     if(result && data.revision===result.previousRevision)data={...data,revision:result.record.revision};
   }
-  const response=await fetch('api.php?r='+route,{method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':state.csrf},body:data===undefined?undefined:JSON.stringify(data),cache:'no-store'});
-  let result; try { result=await response.json(); } catch { throw Error('The server did not return JSON. Check PHP configuration and upload limits.'); }
-  if (!response.ok) { if (response.status===401 && route!=='login') { state.dirty=false; await boot(); } throw Error(result.error || 'Request failed.'); }
-  return result;
+  const account=route==='mail-action'?expected?.meta.account||latestMail(data?.id)?.meta.account
+    :route==='sync'?data?.id:['mail-folder-sync','mail-folders','mail-folder-manage'].includes(route)?data?.account:null;
+  const names={'mail-action':({trash:'Moving mail to Trash',archive:'Archiving mail',restore:'Restoring mail to Inbox',read:'Marking mail read',unread:'Marking mail unread',move:'Moving mail',discard:'Discarding cached copy','keep-local':'Saving local copy'})[data?.action]||'Updating mail',sync:'Synchronizing mail','mail-folders':'Discovering folders','mail-folder-sync':'Refreshing folder','mail-folder-manage':'Updating folders','account-test':'Testing connection',save:'Saving item',delete:'Deleting item',send:'Sending mail',backup:'Preparing backup',restore:'Restoring backup',import:'Importing items','import-items':'Importing items'};
+  const label=state.accounts.find(row=>row.id===account)?.label;
+  const tracking=activity.queued(names[route]?(label?label+': ':'')+names[route]+'…':null);
+  const run=async()=>{
+    const moved=trashedMailCopies.get(data?.id);
+    if(route==='mail-action'&&data.action==='trash'&&moved&&latestMail(moved.id)?.meta.folder==='Trash')return {record:moved,removedIds:[data.id]};
+    const latest=latestMail(data?.id);
+    if(route==='mail-action'&&sameMailTarget(expected,latest))data={...data,revision:latest.revision};
+    try{return await requestApi(route,data);}
+    catch(error){
+      // A revision rejection happens before any provider write. Never retry
+      // transport errors or uncertain moves, nor a message whose source changed.
+      if(route!=='mail-action'||error.status!==409||error.code!=='mail_revision_conflict'||!sameMailTarget(expected,error.record))throw error;
+      return requestApi(route,{...data,revision:error.record.revision});
+    }
+  };
+  const trackedRun=async()=>{activity.running(tracking);try{return await run();}finally{activity.done(tracking);}};
+  if(!account)return trackedRun();
+  const previous=mailAccountQueue.get(account)||Promise.resolve();
+  const pending=previous.catch(()=>{}).then(trackedRun);
+  mailAccountQueue.set(account,pending);
+  try{return await pending;}
+  finally{if(mailAccountQueue.get(account)===pending)mailAccountQueue.delete(account);}
 }
 function applyTheme() {
   let theme=state.prefs.theme||'system'; if (theme==='system') theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
@@ -55,12 +126,13 @@ function applyTheme() {
   });
 }
 function authView(status) {
+  mailSnapshots.clear();mailLatest.clear();trashedMailCopies.clear();
   const setup=status.setup;
   root.innerHTML=`<main class="auth"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><h1>${setup?'Set up Office':'Sign in'}</h1><p>${setup?'Create your owner password to get started. Retrieve the setup token from <code>data/setup-token.txt</code> using your local file manager or cPanel File Manager.':'Enter your password.'}</p><form id="auth-form">${setup?field('Setup token','token','','text','required autocomplete="off"'):''}${field(setup?'Create password (at least 12 characters)':'Password','password','','password',`required ${setup?'minlength="12" autocomplete="new-password"':'autocomplete="current-password"'}`)}<button class="primary">${setup?'Create workspace':'Open workspace'}</button><p id="auth-error" class="error" role="alert"></p></form><p class="foot">PHP / SQLite · no scheduled jobs required</p></main>`;
   document.querySelector('#auth-form').onsubmit=async event=>{event.preventDefault(); const button=event.target.querySelector('button'); busyButton(button,true); try { const r=await api(setup?'setup':'login',Object.fromEntries(new FormData(event.target))); state.csrf=r.csrf; await boot(); } catch(error) { document.querySelector('#auth-error').textContent=error.message; } finally { busyButton(button,false); } };
 }
 async function boot() {
-  try { const status=await api('status'); state.csrf=status.csrf; if (!status.authenticated) { authView(status); return; }
+  try { const status=await api('status'); state.csrf=status.csrf;activity.configure(!!status.authenticated&&!!status.activity); if (!status.authenticated) { authView(status); return; }
     state.prefs=status.preferences||{}; applyTheme(); state.accounts=(await api('accounts')).accounts;
     const hash=location.hash.slice(1); state.app=apps[hash]||hash==='settings'?hash:'mail'; shell(); await load();
     if (state.accounts.length) void syncAccounts(false);
@@ -99,6 +171,7 @@ async function deleteMailImmediately(rows,operation) {
     document.querySelector('#selected-item')?.scrollIntoView({block:'nearest'});
   }
   let count=0;
+  const reconciled=new Set();
   const refresh=()=>{
     if(state.app!=='mail')return;
     const focused=document.activeElement?.closest('#items [data-id]')?.dataset.id;
@@ -107,16 +180,26 @@ async function deleteMailImmediately(rows,operation) {
   };
   try{
     for(const row of rows){
+      if(reconciled.has(row.id)){count++;pendingMailDeletes.delete(row.id);continue;}
       const result=await operation(row);count++;pendingMailDeletes.delete(row.id);mailDeleteVersion++;
+      for(const id of result?.removedIds||[])reconciled.add(id);
+      if(state.app==='mail' && result?.removedIds?.length){
+        state.rows=state.rows.filter(r=>!reconciled.has(r.id));
+        for(const id of reconciled)state.selected.delete(id);
+        if(reconciled.has(state.current?.id)){
+          state.current=filteredRows()[0]||null;renderList();renderDetail();
+          (document.querySelector('#selected-item')||document.querySelector('#main'))?.focus({preventScroll:true});
+        }
+      }
       // Keep the provider's returned Trash copy available when switching folders.
-      if(state.app==='mail'&&row.meta.remote&&result?.record?.meta?.folder==='Trash'){state.rows=state.rows.filter(r=>r.id!==row.id);state.rows.push(result.record);state.rows.sort(compareMail);}
+      if(state.app==='mail'&&row.meta.remote&&result?.record?.meta?.folder==='Trash'){state.rows=state.rows.filter(r=>r.id!==row.id&&r.id!==result.record.id);state.rows.push(result.record);state.rows.sort(compareMail);}
     }
   }catch(error){
     const remaining=rows.slice(count);
     for(const row of remaining)pendingMailDeletes.delete(row.id);
     mailDeleteVersion++;
     if(state.app==='mail'){
-      for(const row of remaining)if(!state.rows.some(r=>r.id===row.id))state.rows.push(row);
+      for(const row of remaining)if(!state.rows.some(r=>r.id===row.id))state.rows.push(structuredClone(latestMail(row.id)||row));
       state.rows.sort(compareMail);
       if(!state.current&&context===JSON.stringify([state.mailFolder,state.mailScope,state.search])){
         state.current=filteredRows()[0]||null;renderDetail();
@@ -449,8 +532,9 @@ async function sendMail() {
 }
 async function archiveLocal() {
   if(state.app!=='mail')return;await commit();const ids=state.selected.size?[...state.selected]:[state.current?.id].filter(Boolean);let count=0;
+  const reconciled=new Set();
   try {
-    for(const id of ids){const r=state.rows.find(r=>r.id===id);await pendingMailReads.get(id);if(r.meta.remote)await api('mail-action',{id:r.id,revision:r.revision,action:'archive'});else{r.meta.folder='Archive';await api('save',r);}count++;}
+    for(const id of ids){if(reconciled.has(id)){count++;continue;}const r=state.rows.find(r=>r.id===id);await pendingMailReads.get(id);if(r.meta.remote){const result=await api('mail-action',{id:r.id,revision:r.revision,action:'archive'});for(const related of result.removedIds||[])reconciled.add(related);}else{r.meta.folder='Archive';await api('save',r);}count++;}
   } catch(error) {
     // The provider check may have corrected cached membership even when the move failed.
     try { await load(); } catch {}
@@ -484,7 +568,7 @@ function markOpenedMailRead(record) {
   const pending=(async()=>{
     try {
       const result=await api(record.meta.remote?'mail-action':'save',record.meta.remote?{id:record.id,revision:previousRevision,action:'read'}:{...record,meta:{...record.meta,read:true}});
-      const update=row=>{if(row?.id===record.id && row.revision===previousRevision){row.meta.read=result.record.meta.read;row.revision=result.record.revision;row.updated=result.record.updated;}};
+      const update=row=>{if(row?.id===record.id && (row.revision===previousRevision || (row.revision<=result.record.revision&&sameMailTarget(row,result.record)))){row.meta.read=result.record.meta.read;row.revision=result.record.revision;row.updated=result.record.updated;}};
       update(record);
       if(state.app==='mail'){
         state.rows.forEach(update);update(state.current);
@@ -520,7 +604,7 @@ function insertLink() {
 }
 function renderSettings() {
   const p=state.prefs;
-  document.querySelector('#main').innerHTML=`<section class="view-head"><div><h1>Settings</h1><p>Preferences, connected accounts, and backups.</p></div></section><div class="settings"><div class="settings-grid"><section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences"><label>Theme<select name="theme" aria-label="Theme">${['system','light','dark'].map(x=>`<option ${p.theme===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Accent<select name="accent" aria-label="Accent">${['green','blue','plum'].map(x=>`<option ${p.accent===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Density<select name="density" aria-label="Density"><option value="comfortable">Comfortable</option><option value="compact" ${p.density==='compact'?'selected':''}>Compact</option></select></label><button class="primary">Save preferences</button></form></section><section class="card"><h2>Data and backups</h2><p>Your database and content live inside this application folder. Backups include local records, cached messages, revisions and preferences. Account credentials and your password are excluded.</p><button id="backup">↓ Download full backup</button><p>Restore into an empty installation. Synced copies become local archives; reconnect providers separately. Never copy a live SQLite file as a backup.</p><button id="restore">↑ Restore backup</button><p>Documents: basic formatting and HTML/text. Calendar: agenda, no local recurrence expansion or invitations. Sheets: simple formulas. See README for version limits.</p></section><section class="card full"><h2>Mail</h2><form id="mail-preferences"><label>Default email display<select name="mailDisplay" aria-label="Default email display"><option value="html" ${p.mailDisplay!=='text'?'selected':''}>HTML</option><option value="text" ${p.mailDisplay==='text'?'selected':''}>Text only</option></select></label><label>Default mail account<select name="defaultMailAccount" aria-label="Default mail account"><option value="">Automatic (only account, when available)</option>${mailAccounts().map(a=>`<option value="${e(a.id)}" ${p.defaultMailAccount===a.id?'selected':''}>${e(a.label)}</option>`).join('')}</select></label><p>New drafts use the selected message’s account first, then this default. Saved drafts keep their chosen account.</p><button class="primary">Save mail preferences</button></form></section><section class="card full" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section><section class="card full"><h2>Connected accounts</h2><p>Only checked while this page is visible and you have used it within two minutes. Automatic checks every two minutes; Sync now is always available. Inbox, Archive and Trash: up to 10 recent messages per folder, plus previously cached mail. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. These are cached windows, not complete archives.</p><div>${state.accounts.map(a=>`<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync?'Last checked '+e(new Date(a.last_sync).toLocaleString()):'Not checked yet'}${a.error?' · '+e(a.error):''}</small></div><div class="actions">${['imap','google'].includes(a.type)?`<button data-repair-account="${a.id}">Repair / resync</button>`:''}${a.type==='google'?`<button data-google="${a.id}">Authorize</button>`:''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('')||'<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button><label class="check-label"><input id="keep-recovery" type="checkbox" ${p.keepRecoveryCopies!==false?'checked':''}> Keep recovery copies of messages absent from synchronized folders</label><p>Recovery copies are excluded from All cached mail. Save them in Local mail or discard them. Turning this off removes absent cached copies on the next successful sync; local mail is kept.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. Configure Google integration once above, then connect each Gmail account through Google sign-in.</p></section><section class="card full"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action,key])=>field(action,'key_'+action,keys()[action],'text','required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section></div></div>`;
+  document.querySelector('#main').innerHTML=`<section class="view-head"><div><h1>Settings</h1><p>Preferences, connected accounts, and backups.</p></div></section><div class="settings"><div class="settings-grid"><section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences"><label>Theme<select name="theme" aria-label="Theme">${['system','light','dark'].map(x=>`<option ${p.theme===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Accent<select name="accent" aria-label="Accent">${['green','blue','plum'].map(x=>`<option ${p.accent===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Density<select name="density" aria-label="Density"><option value="comfortable">Comfortable</option><option value="compact" ${p.density==='compact'?'selected':''}>Compact</option></select></label><button class="primary">Save preferences</button></form></section><section class="card"><h2>Data and backups</h2><p>Your database and content live inside this application folder. Backups include local records, cached messages, revisions and preferences. Account credentials and your password are excluded.</p><button id="backup">↓ Download full backup</button><p>Restore into an empty installation. Synced copies become local archives; reconnect providers separately. Never copy a live SQLite file as a backup.</p><button id="restore">↑ Restore backup</button><p>Documents: basic formatting and HTML/text. Calendar: agenda, no local recurrence expansion or invitations. Sheets: simple formulas. See README for version limits.</p></section><section class="card full"><h2>Mail</h2><form id="mail-preferences"><label>Default email display<select name="mailDisplay" aria-label="Default email display"><option value="html" ${p.mailDisplay!=='text'?'selected':''}>HTML</option><option value="text" ${p.mailDisplay==='text'?'selected':''}>Text only</option></select></label><label>Default mail account<select name="defaultMailAccount" aria-label="Default mail account"><option value="">Automatic (only account, when available)</option>${mailAccounts().map(a=>`<option value="${e(a.id)}" ${p.defaultMailAccount===a.id?'selected':''}>${e(a.label)}</option>`).join('')}</select></label><p>New drafts use the selected message’s account first, then this default. Saved drafts keep their chosen account.</p><button class="primary">Save mail preferences</button></form></section><section class="card full" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section><section class="card full"><h2>Connected accounts</h2><p>Only checked while this page is visible and you have used it within two minutes. Automatic checks every two minutes; Sync now is always available. Inbox, Archive and Trash: up to 10 recent messages per folder, plus previously cached mail. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. These are cached windows, not complete archives.</p><div>${state.accounts.map(a=>`<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync?'Last checked '+e(new Date(a.last_sync).toLocaleString()):'Not checked yet'}${a.error?' · '+e(a.error):''}</small></div><div class="actions">${['imap','google'].includes(a.type)?`<button data-repair-account="${a.id}">Repair / resync</button>`:''}${a.type==='google'?`<button data-google="${a.id}">Authorize</button>`:''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('')||'<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button><label class="check-label"><input id="keep-recovery" type="checkbox" ${p.keepRecoveryCopies!==false?'checked':''}> Keep recovery copies of messages absent from synchronized folders</label><p>Recovery copies are excluded from All cached mail. Save them in Local mail or discard them. Turning this off removes absent cached copies on the next successful sync; local mail is kept.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, configure Google integration once above.</p></section><section class="card full"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action,key])=>field(action,'key_'+action,keys()[action],'text','required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section></div></div>`;
   document.querySelector('#mail-preferences button').insertAdjacentHTML('beforebegin',`<label class="check-label"><input type="checkbox" name="confirmBeforeSend" ${p.confirmBeforeSend!==false?'checked':''}> Confirm before sending</label>`);
   void renderGoogleSettings(document.querySelector('#google-integration'),api);
   document.querySelector('#preferences').onsubmit=ev=>{ev.preventDefault();void attempt(async()=>{state.prefs={...state.prefs,...Object.fromEntries(new FormData(ev.target))};await api('preferences',{preferences:state.prefs});applyTheme();notice('Preferences saved.');});};
@@ -543,7 +627,7 @@ function accountDialog() {
 const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
-  state.lastActivity=Date.now();if(dialog.open)return;
+  state.lastActivity=Date.now();if(document.querySelector('dialog[open]'))return;
   if(event.key==='Enter'&&event.ctrlKey&&!event.altKey&&!event.metaKey&&!event.shiftKey&&!event.isComposing&&state.app==='mail'&&state.current?.meta.folder==='Drafts'&&!state.current.meta.remote){
     event.preventDefault();if(!event.repeat)void attempt(sendMail);return;
   }

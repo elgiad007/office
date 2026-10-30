@@ -49,7 +49,10 @@ function publish_mail_snapshot(array $a,array $membership,array $downloads,?call
             // ambiguous duplicates or copies still present in the source folder.
             if (!$old && count($hashes[$hash]??[])===1 && count($incomingHashes[$hash]??[])===1) $old=$missing[$hashes[$hash][0]]??null;
             $r['id']=$old['id']??remote_id($a['id'],$source);
-            save_record($r,true); unset($missing[$r['id']]);
+            validate_record($r);
+            // Re-downloading unchanged mail must not invalidate an open reader.
+            if (!$old || $old['kind']!==$r['kind'] || $old['title']!==$r['title'] || $old['body']!==$r['body'] || $old['meta']!==$r['meta']) save_record($r,true);
+            unset($missing[$r['id']]);
         }
         foreach ($rows as $r) {
             $source=mail_row_source($r);
@@ -100,16 +103,28 @@ function imap_list_folders(array $list): array {
         $decode=static fn(string $v):string=>preg_replace('/\\\\(["\\\\])/','$1',substr($v,1,-1));
         $name=str_starts_with($m[3],'{')?$literal:(str_starts_with($m[3],'"')?$decode($m[3]):$m[3]);
         if (!is_string($name) || $name==='' || preg_match('/[\r\n\x00]/',$name)) fail('The IMAP server returned an invalid folder name. The previous mail view was kept.');
-        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'trash'=>in_array('\\TRASH',$flags,true),'protected'=>(bool)array_intersect($flags,['\\ARCHIVE','\\TRASH','\\SENT','\\DRAFTS','\\JUNK','\\ALL','\\IMPORTANT','\\FLAGGED']),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
+        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'all'=>in_array('\\ALL',$flags,true),'trash'=>in_array('\\TRASH',$flags,true),'protected'=>(bool)array_intersect($flags,['\\ARCHIVE','\\TRASH','\\SENT','\\DRAFTS','\\JUNK','\\ALL','\\IMPORTANT','\\FLAGGED']),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
     }
     return $folders;
 }
-function imap_resolve_folder(array $folders,string $configured,string $role,bool $required=true): ?string {
+function imap_resolve_folder(array $folders,string $configured,string $role,bool $required=true,bool $gmail=false): ?string {
+    // Gmail permits user labels called Trash/Archive. Defaults mean system roles,
+    // never those labels. Explicit non-default paths still resolve exactly.
+    if ($gmail && $configured===ucfirst($role)) {
+        $candidates=[];
+        foreach ($folders as $name=>$info) if ($info[$role]??false) $candidates[]=(string)$name;
+        if (!$candidates && $role==='archive') foreach ($folders as $name=>$info) if ($info['all']??false) $candidates[]=(string)$name;
+        if (count($candidates)!==1) fail('Gmail '.$role.' system folder was not found or is ambiguous. Refresh folders and check Gmail IMAP access.');
+        if (strcasecmp($candidates[0],'INBOX')===0) fail('The IMAP '.$role.' folder must be different from Inbox.');
+        return $candidates[0];
+    }
     if (isset($folders[$configured])) $folder=$configured;
     else {
         $candidates=[]; $default=ucfirst($role);
         if ($configured===$default) {
             foreach ($folders as $name=>$info) if ($info[$role]??false) $candidates[]=(string)$name;
+            // Gmail designates All Mail as \\All rather than \\Archive, in any language.
+            if (!$candidates && $role==='archive') foreach ($folders as $name=>$info) if ($info['all']??false) $candidates[]=(string)$name;
             if (!$candidates) foreach ($folders as $name=>$info) if ($info['delimiter']!=='' && str_ends_with((string)$name,$info['delimiter'].$default)) $candidates[]=(string)$name;
         }
         if (!$candidates && !$required && $configured===$default) return null;
@@ -126,12 +141,13 @@ function imap_validity(array $response): string {
 function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath=null,int $limit=10): int {
     $deadline=microtime(true)+45;
     $cap=imap_command($s,'CAPABILITY');
+    $gmail=(bool)preg_match('/\bX-GM-EXT-1\b/i',implode('',$cap['lines']));
     $special=(bool)preg_match('/\bSPECIAL-USE\b/i',implode('',$cap['lines']));
     $folders=imap_list_folders(imap_command($s,'LIST "" "*"'.($special?' RETURN (SPECIAL-USE)':'')));
     if (!$folders) fail('The IMAP server did not return selectable folders. The previous mail view was kept.');
     $paths=['Inbox'=>'INBOX'];
     foreach (['Archive'=>'archive','Trash'=>'trash'] as $label=>$role) {
-        $path=imap_resolve_folder($folders,$a['config'][$role.'Folder']??$label,$role,false);
+        $path=imap_resolve_folder($folders,$a['config'][$role.'Folder']??$label,$role,false,$gmail);
         if ($path!==null) $paths[$label]=$path;
     }
     if (count(array_unique($paths))!==count($paths)) fail('Inbox, Archive and Trash must use different server folders.');
@@ -145,6 +161,7 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         : static fn($r)=>in_array($r['meta']['folder']??'',MAIL_FOLDERS,true) || (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true) && in_array($r['meta']['recoveryFrom']??'Inbox',MAIL_FOLDERS,true));
     $membership=[]; $scans=[]; $downloads=[]; $cached=array_values(array_filter(mail_cache_rows($a['id']),$scope));
     foreach ($paths as $label=>$path) {
+        if(function_exists('activity_step'))activity_step('IMAP: refreshing folder '.$path.'.');
         mail_deadline($deadline);
         $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($path)));
         $ids=imap_search_ids($s,'ALL');
@@ -167,8 +184,12 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         }
         foreach (array_chunk($flagIds,100) as $chunk) {
             mail_deadline($deadline);
-            $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS)');
-            foreach ($chunk as $uid) $membership[mail_source($scan['path'],$scan['validity'],$uid)]['read']=imap_fetch_flags($response,$uid);
+            $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS'.($gmail?' X-GM-MSGID':'').')');
+            foreach ($chunk as $uid) {
+                $source=mail_source($scan['path'],$scan['validity'],$uid);
+                $membership[$source]['read']=imap_fetch_flags($response,$uid);
+                if ($gmail) $membership[$source]['gmailMessageId']=imap_gmail_message_id($response,$uid);
+            }
         }
         // A moved message can be older than the recent download window. Locate
         // candidates by Message-ID, but only accept byte-identical message bodies.
@@ -182,11 +203,12 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         }
         foreach (array_unique($ids) as $uid) {
             mail_deadline($deadline);
-            $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS BODY.PEEK[])');
+            $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK[])');
             $raw=imap_fetch_content($response,$uid);
             if ($raw===null) fail('A message changed during synchronization. The previous mail view was kept; retry sync.');
             $source=mail_source($scan['path'],$scan['validity'],$uid);
             $meta=$membership[$source]; $meta['read']=imap_fetch_flags($response,$uid);
+            if ($gmail) $meta['gmailMessageId']=imap_gmail_message_id($response,$uid);
             $downloads[$source]=mail_download($a,$source,$raw,$meta);
         }
     }

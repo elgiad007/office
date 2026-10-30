@@ -13,6 +13,8 @@ import {testMailSend} from './mail-send.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
 import {testMailRead} from './mail-read.browser.mjs';
+import {testMailOperationQueue} from './mail-operation-queue.browser.mjs';
+import {testActivity} from './activity.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
@@ -80,6 +82,8 @@ try{
  await testMailSender(page,url);
  await testMailFolder(page,url);
  await testMailRead(page,url);
+ await testMailOperationQueue(page,url);
+ await testActivity(page,url);
  await testAccountFolders(page,url);
  await testMailHtml(page,url);
  await testItemMenus(page,url);

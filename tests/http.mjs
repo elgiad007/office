@@ -23,9 +23,28 @@ async function start(){
 }
 async function setup(c){const before=c.cookie;const result=await c.call('setup',{token:(await readFile(c.dir+'/setup-token.txt','utf8')).trim(),password:'test-password-only-123'});c.csrf=result.csrf;assert.notEqual(c.cookie,before);}
 try{
- const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ await a.call('activity',{action:'clear'},403,'bad-token');
+ await a.call('activity',{action:'notice',message:'Activity visibility fixture',error:true});
+ assert.ok((await a.call('activity')).entries.some(entry=>entry.message==='Activity visibility fixture'&&entry.level==='error'));
+ const stream=await fetch(a.url+'preferences',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf,'Content-Type':'application/json','X-Office-Progress':'1'},body:JSON.stringify({preferences:{}})});
+ assert.ok(stream.headers.get('content-type').includes('application/x-ndjson'));
+ const events=(await stream.text()).trim().split('\n').map(line=>JSON.parse(line));
+ assert.equal(events[0].type,'activity');assert.equal(events.at(-1).type,'result');assert.equal(events.at(-1).body.ok,true);
+ const failedStream=await fetch(a.url+'preferences',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf,'Content-Type':'application/json','X-Office-Progress':'1'},body:JSON.stringify({preferences:'invalid'})});
+ const failureEvents=(await failedStream.text()).trim().split('\n').map(line=>JSON.parse(line));assert.equal(failureEvents.at(-1).status,400);
+ assert.ok(!JSON.stringify(await a.call('backup')).includes('Activity visibility fixture'));
+ await a.call('activity',{action:'clear'});assert.equal((await a.call('activity')).entries.length,0);
  await a.call('google-settings',{},403,'bad-token');
  await a.call('google-connect',{email:'person@example.com'},400);
+ // App-password Gmail can be saved without any Google OAuth installation settings.
+ const gmailDraft={type:'gmail',label:'Gmail preset',email:'fixture@gmail.com',password:'abcd efgh ijkl mnop'};
+ await a.call('account-save',{...gmailDraft,password:'normal-password'},400);
+ const gmailSaved=await a.call('account-save',gmailDraft);
+ const gmailAccount=(await a.call('accounts')).accounts.find(account=>account.id===gmailSaved.id);
+ assert.equal(gmailAccount.type,'imap');
+ assert.ok(!JSON.stringify(gmailAccount).includes('abcdefghijklmnop'));
+ await a.call('account-delete',{id:gmailSaved.id});
  const integration={client_id:'shared.apps.googleusercontent.com',client_secret:'shared-secret-not-exported',redirect:a.url.replace('api.php?r=','api.php?r=oauth-callback')};
  await a.call('google-settings',integration);
  const config=await a.call('google-settings');assert.equal(config.configured,true);assert.equal(config.client_id,integration.client_id);assert.ok(!JSON.stringify(config).includes(integration.client_secret));
@@ -62,7 +81,8 @@ try{
  const recoveries=(await a.call('records&kind=mail')).records.filter(r=>r.meta.remote);
  const recovery=recoveries[0],other=recoveries[1];
  await a.call('mail-action',{id:recovery.id,revision:recovery.revision,action:'discard'},403,'bad-token');
- await a.call('mail-action',{id:recovery.id,revision:0,action:'discard'},409);
+ const revisionConflict=await a.call('mail-action',{id:recovery.id,revision:0,action:'discard'},409);
+ assert.equal(revisionConflict.code,'mail_revision_conflict');assert.equal(revisionConflict.record.id,recovery.id);assert.equal(revisionConflict.record.revision,recovery.revision);
  await a.call('mail-action',{id:mail.id,revision:mail.revision,action:'discard'},400);
  await a.call('mail-action',{id:recovery.id,revision:recovery.revision,action:'discard'});
  const kept=(await a.call('mail-action',{id:other.id,revision:other.revision,action:'keep-local'})).record;

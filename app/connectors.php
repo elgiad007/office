@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__.'/mail-sync.php';
+require_once __DIR__.'/activity.php';
 
 function public_host(string $host): string {
     if (!preg_match('/^[a-zA-Z0-9.-]{1,253}$/D',$host)) fail('Use a public DNS hostname.');
@@ -74,21 +75,47 @@ function sync_caldav(array $a): int {
 function socket_connection(string $host,int $port): mixed {
     if (!in_array($port,[993,465],true)) fail('Only implicit TLS IMAP (993) and SMTP (465) are supported initially.');
     $ip=public_host($host); $context=stream_context_create(['ssl'=>['peer_name'=>$host,'verify_peer'=>true,'verify_peer_name'=>true,'SNI_enabled'=>true]]);
-    $s=@stream_socket_client('tls://'.$ip.':'.$port,$errno,$error,5,STREAM_CLIENT_CONNECT,$context);
-    if (!$s) fail('TLS connection failed. Check hostname, port and hosting permissions.'); stream_set_timeout($s,8); return $s;
+    activity_step(($port===993?'IMAP':'SMTP').': connecting securely to '.$host.':'.$port.'.');
+    $s=@stream_socket_client('tls://'.$ip.':'.$port,$errno,$error,10,STREAM_CLIENT_CONNECT,$context);
+    if (!$s) throw new ImapTransportError('Secure connection could not be established.'); stream_set_timeout($s,20);
+    activity_step($port===993?'IMAP: secure connection established.':'SMTP: secure connection established.');return $s;
+}
+class ImapTransportError extends HttpError {}
+function imap_stage(string $command): string {
+    preg_match('/^(UID\s+)?([A-Z]+)/i',$command,$m);
+    return match(strtoupper($m[2]??'')) {
+        'LOGIN','AUTHENTICATE'=>'signing in','CAPABILITY'=>'checking server capabilities','LIST','XLIST'=>'listing folders',
+        'SELECT','EXAMINE'=>'opening folder','STATUS'=>'checking folder status','SEARCH'=>'finding messages',
+        'FETCH'=>'reading message data','MOVE'=>'moving message','COPY'=>'copying message','STORE'=>'updating message flags',
+        'CREATE'=>'creating folder','RENAME'=>'renaming folder','DELETE'=>'removing folder',default=>'waiting for server',
+    };
+}
+function imap_transport_failure(mixed $s,string $stage): never {
+    $meta=stream_get_meta_data($s);
+    $reason=!empty($meta['timed_out'])?'timed out':(!empty($meta['eof'])?'connection closed':'connection interrupted');
+    activity_step('IMAP: '.$reason.' while '.$stage.'.','error');
+    throw new ImapTransportError('IMAP '.$reason.' while '.$stage.'.');
 }
 function write_all(mixed $s,string $data): void {
     while ($data!=='') { $n=fwrite($s,$data); if ($n===false || $n===0) fail('Provider connection interrupted.'); $data=substr($data,$n); }
 }
 function imap_quote(string $value): string { if (preg_match('/[\r\n\x00]/',$value)) fail('Invalid account credential.'); return '"'.addcslashes($value,'\\"').'"'; }
 function imap_command(mixed $s,string $command): array {
-    static $sequence=0; $tag='A'.(++$sequence); write_all($s,$tag.' '.$command."\r\n"); $lines=[]; $literals=[]; $total=0;
+    static $sequence=0;$stage=imap_stage($command);$started=microtime(true);
+    activity_step('IMAP: '.$stage.'.');
+    if(preg_match('/^(?:UID\s+)?(?:MOVE|COPY|STORE|CREATE|DELETE|RENAME|EXPUNGE|APPEND)\b/i',$command))$GLOBALS['office_imap_mutated']=true;
+    $remaining=($GLOBALS['office_imap_deadline']??(microtime(true)+50))-microtime(true);
+    if($remaining<=0)throw new ImapTransportError('IMAP operation exceeded its time limit while '.$stage.'.');
+    $tag='A'.(++$sequence);
+    try{write_all($s,$tag.' '.$command."\r\n");}catch(HttpError){imap_transport_failure($s,$stage);}
+    if(str_contains(stream_get_meta_data($s)['stream_type']??'','tcp_socket'))stream_set_timeout($s,max(1,min(20,(int)$remaining)));
+    $lines=[]; $literals=[]; $total=0;
     while (($line=fgets($s,65536))!==false) {
         $total+=strlen($line); if ($total>3*1024*1024) fail('Email exceeds the initial download limit.');
         $lines[]=$line;
         if (preg_match('/\{(\d+)\}\r\n$/',$line,$m)) {
             $remaining=(int)$m[1]; if ($remaining>1400000) fail('Email exceeds the initial 1.4 MB download limit.'); $literal='';
-            while ($remaining>0) { $part=fread($s,min(65536,$remaining)); if ($part===false || $part==='') fail('Incomplete email download.'); $literal.=$part; $remaining-=strlen($part); }
+            while ($remaining>0) { $part=fread($s,min(65536,$remaining)); if ($part===false || $part==='') imap_transport_failure($s,$stage); $literal.=$part; $remaining-=strlen($part); }
             $literals[]=$literal; $total+=strlen($literal);
         }
         if (str_starts_with($line,$tag.' ')) {
@@ -107,12 +134,37 @@ function imap_command(mixed $s,string $command): array {
                     'AUTHENTICATIONFAILED'=>'Sign-in failed. Check the username and password or app password.',
                     default=>$name==='LOGIN'?'Check the username and password or app password.':($name==='UID MOVE'?'Check archive folder permissions and available mailbox storage.':'Check the account settings and server permissions.'),
                 };
+                activity_step('IMAP: server refused '.$stage.'.','error');
                 fail('IMAP '.$name.' refused'.(isset($status[1])?' ('.strtoupper($status[1]).($code!==''?' / '.$code:'').')':'').'. '.$hint);
             }
+            activity_step('IMAP: finished '.$stage.'.','success',(int)round((microtime(true)-$started)*1000));
             return ['lines'=>$lines,'literals'=>$literals];
         }
     }
-    fail('IMAP connection timed out.');
+    imap_transport_failure($s,$stage);
+}
+function imap_open_connection(array $a): mixed {
+    $s=socket_connection($a['config']['host'],993);
+    try {
+        $greeting=fgets($s,65536);if($greeting===false)imap_transport_failure($s,'receiving server greeting');
+        if(!str_starts_with($greeting,'* OK'))fail('Unexpected IMAP greeting.');
+        imap_command($s,'LOGIN '.imap_quote($a['credentials']['username']).' '.imap_quote($a['credentials']['password']));return $s;
+    }catch(Throwable $e){fclose($s);throw $e;}
+}
+/** Retry a broken connection once, only if no mutating command was attempted. */
+function imap_with_connection(array $a,callable $operation,?callable $connect=null): mixed {
+    $oldMutation=$GLOBALS['office_imap_mutated']??false;$oldDeadline=$GLOBALS['office_imap_deadline']??null;
+    $GLOBALS['office_imap_deadline']=$oldDeadline??microtime(true)+50;
+    try {
+        for($attempt=0;;$attempt++) {
+            $s=null;$GLOBALS['office_imap_mutated']=false;
+            try{$s=$connect?$connect($a):imap_open_connection($a);return $operation($s);}
+            catch(ImapTransportError $e){
+                if($attempt || $GLOBALS['office_imap_mutated'] || microtime(true)>$GLOBALS['office_imap_deadline']-5)throw $e;
+                activity_step('IMAP: reconnecting once; no message change has been attempted.','warning');
+            }finally{if(is_resource($s))fclose($s);}
+        }
+    }finally{$GLOBALS['office_imap_mutated']=$oldMutation;if($oldDeadline===null)unset($GLOBALS['office_imap_deadline']);else $GLOBALS['office_imap_deadline']=$oldDeadline;}
 }
 /** Read-only preflight shared by setup and archive. Never create folders or expunge mail. */
 function imap_archive_folder(mixed $s,string $configured): string {
@@ -121,7 +173,7 @@ function imap_archive_folder(mixed $s,string $configured): string {
     if (!in_array('MOVE',$tokens,true) && !in_array('IMAP4REV2',$tokens,true)) fail('This IMAP server does not support MOVE. Office cannot archive messages on this server.');
     $list=imap_command($s,'LIST "" "*"'.(in_array('SPECIAL-USE',$tokens,true)?' RETURN (SPECIAL-USE)':''));
     $folders=imap_list_folders($list);
-    $folder=imap_resolve_folder($folders,$configured,'archive');
+    $folder=imap_resolve_folder($folders,$configured,'archive',true,in_array('X-GM-EXT-1',$tokens,true));
     imap_command($s,'STATUS '.imap_quote($folder).' (MESSAGES)');
     return $folder;
 }
@@ -161,33 +213,102 @@ function imap_fetch_content(array $response,string $id): ?string {
     return null;
 }
 class ImapMessageMissing extends HttpError {}
-function imap_archive(mixed $s,string $id,string $configured): array {
+function imap_archive(mixed $s,string $id,string $configured,?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $gmailId=null): array {
     if (!ctype_digit($id) || (int)$id<1) fail('Invalid IMAP message identifier.');
     $folder=imap_archive_folder($s,$configured);
-    return imap_move_verified($s,$id,$folder,'Archive');
+    return imap_move_verified($s,$id,$folder,'Archive',$sourceFolder,$gmail,$account,$gmailId);
 }
-function imap_move_verified(mixed $s,string $id,string $folder,string $operation='Move'): array {
+/** Gmail's account-wide ID is distinct from a folder UID. Never compare thread IDs. */
+function imap_gmail_message_id(array $response,string $uid): string {
+    $tuple='';
+    foreach ($response['lines'] as $line) {
+        if (preg_match('/^\* \d+ FETCH\s*\(/i',$line) || preg_match('/^A\d+ /',$line)) {
+            if (preg_match('/\bUID '.preg_quote($uid,'/').'(?=\s|\))/i',$tuple) && preg_match('/\bX-GM-MSGID ([1-9][0-9]*)\b/i',$tuple,$m)) return $m[1];
+            $tuple='';
+        }
+        $tuple.=$line;
+    }
+    fail('Gmail did not confirm the message identifier. Sync before retrying.');
+}
+function imap_is_gmail(array $a): bool {
+    return in_array(strtolower($a['config']['host']??''),['imap.gmail.com','imap.googlemail.com'],true);
+}
+/** Identify cached appearances before moving, including caches from older versions.
+ * Body equality only selects candidates; Gmail's ID proves they are the same mail. */
+function imap_gmail_move_copies(array $a,mixed $s,array $r,string $path,string $uid,?string &$identity=null): array {
+    $identity=imap_gmail_message_id(imap_command($s,'UID FETCH '.$uid.' (UID X-GM-MSGID)'),$uid);
+    $ids=[];
+    foreach (mail_cache_rows($a['id']) as $copy) {
+        $m=$copy['meta'];
+        if ($copy['id']===$r['id']) continue;
+        if (($m['gmailMessageId']??null)===$identity) { $ids[]=$copy['id']; continue; }
+        if (!isset($m['rawBase64'],$r['meta']['rawBase64'],$m['serverFolder'],$m['uidValidity'],$m['providerId']) || $m['rawBase64']!==$r['meta']['rawBase64']) continue;
+        $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($m['serverFolder'])));
+        if ($validity!==$m['uidValidity']) continue;
+        $response=imap_command($s,'UID FETCH '.$m['providerId'].' (UID X-GM-MSGID)');
+        if (!preg_match('/\bX-GM-MSGID\b/i',implode('',$response['lines']))) continue;
+        if (imap_gmail_message_id($response,(string)$m['providerId'])===$identity) $ids[]=$copy['id'];
+    }
+    $validity=imap_validity(imap_command($s,'SELECT '.imap_quote($path)));
+    if (mail_row_source($r)!==mail_source($path,$validity,$uid)) fail('Mailbox identifiers changed. Sync before moving this message.',409);
+    return $ids;
+}
+function save_imap_gmail_move(array $r,array $relatedIds): array {
+    $db=db(); $db->beginTransaction();
+    try {
+        $saved=save_record($r,true);
+        foreach ($relatedIds as $id) if ($id!==$r['id']) $db->prepare('DELETE FROM records WHERE id=?')->execute([$id]);
+        $db->commit(); return $saved;
+    } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+}
+function imap_verify_gmail_move(mixed $s,string $sourceFolder,string $gmailId,string $folder,string $raw): array {
+    activity_step('IMAP: checking source and destination after an interrupted move.','warning');
+    imap_command($s,'EXAMINE '.imap_quote($sourceFolder));
+    if(imap_search_ids($s,'X-GM-MSGID '.$gmailId))fail('The move remains unconfirmed: the message is still in its source folder. Sync before retrying.');
+    $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($folder)));
+    $ids=imap_search_ids($s,'X-GM-MSGID '.$gmailId);
+    if(count($ids)!==1)fail('The move remains unconfirmed: the message was not uniquely located in the destination. Sync before retrying.');
+    $body=imap_message_content($s,$ids[0]);
+    if($body===null||!hash_equals(hash('sha256',$raw),hash('sha256',$body)))fail('The move remains unconfirmed: destination contents could not be verified. Sync before retrying.');
+    activity_step('IMAP: interrupted move confirmed in the destination; no second move was sent.','success');
+    return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$ids[0],'source'=>mail_source($folder,$validity,$ids[0]),'gmailMessageId'=>$gmailId];
+}
+function imap_move_verified(mixed $s,string $id,string $folder,string $operation='Move',?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $knownGmailId=null): array {
     if (!ctype_digit($id) || (int)$id<1) fail('Invalid IMAP message identifier.');
     $raw=imap_message_content($s,$id);
     if ($raw===null) {
         if (in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('The message is in its source server folder, but its content could not be read. No message was moved.');
         throw new ImapMessageMissing('This message is no longer in its server folder. Use Sync now or Repair / resync to update its location.',409);
     }
+    $gmailId=$gmail?($knownGmailId??imap_gmail_message_id(imap_command($s,'UID FETCH '.$id.' (UID X-GM-MSGID)'),$id)):null;
     // Bound destination verification to UIDs allocated after this snapshot, including concurrent deliveries.
-    $status=imap_command($s,'STATUS '.imap_quote($folder).' (UIDNEXT)'); $next='';
-    foreach ($status['lines'] as $line) if (preg_match('/^\* STATUS .*\bUIDNEXT (\d+)\b/i',$line,$m)) $next=$m[1];
-    if ($next==='' || (int)$next<1) fail('The IMAP server did not provide the destination folder UIDNEXT. No message was moved.');
-    imap_command($s,'UID MOVE '.$id.' '.imap_quote($folder));
+    $next='';
+    if(!$gmail){
+        $status=imap_command($s,'STATUS '.imap_quote($folder).' (UIDNEXT)');
+        foreach ($status['lines'] as $line) if (preg_match('/^\* STATUS .*\bUIDNEXT (\d+)\b/i',$line,$m)) $next=$m[1];
+        if ($next==='' || (int)$next<1) fail('The IMAP server did not provide the destination folder UIDNEXT. No message was moved.');
+    }
     try {
+        activity_step('IMAP: moving message to '.$folder.'.');
+        imap_command($s,'UID MOVE '.$id.' '.imap_quote($folder));
+        // Reopen Gmail's source to discard its session's previous label view.
+        if ($gmail && $sourceFolder!==null) imap_command($s,'EXAMINE '.imap_quote($sourceFolder));
         if (in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('The message is still in its source server folder.');
+        activity_step('IMAP: verifying destination folder '.$folder.'.');
         $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($folder)));
-        $candidates=array_values(array_filter(imap_search_ids($s,'UID '.$next.':*'),static fn($uid)=>(int)$uid>=(int)$next));
+        $candidates=$gmail?imap_search_ids($s,'X-GM-MSGID '.$gmailId):array_values(array_filter(imap_search_ids($s,'UID '.$next.':*'),static fn($uid)=>(int)$uid>=(int)$next));
         if (count($candidates)>10) fail('Too many new destination messages to verify this move.');
         foreach ($candidates as $uid) {
             $archived=imap_message_content($s,$uid);
-            if ($archived!==null && hash_equals(hash('sha256',$raw),hash('sha256',$archived))) return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$uid,'source'=>mail_source($folder,$validity,$uid)];
+            if ($archived!==null && hash_equals(hash('sha256',$raw),hash('sha256',$archived))) return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$uid,'source'=>mail_source($folder,$validity,$uid)]+($gmail?['gmailMessageId'=>$gmailId]:[]);
         }
         fail('The message could not be found in the destination folder.');
+    } catch (ImapTransportError $error) {
+        if($gmail && $account!==null && $sourceFolder!==null) {
+            try{return imap_with_connection($account,fn($fresh)=>imap_verify_gmail_move($fresh,$sourceFolder,$gmailId,$folder,$raw));}
+            catch(HttpError $recovery){fail($operation.' could not be confirmed. '.$recovery->getMessage().' Sync before retrying.');}
+        }
+        fail($operation.' could not be confirmed. '.$error->getMessage().' Sync before retrying; the server may have completed the move.');
     } catch (HttpError $error) {
         fail($operation.' could not be confirmed. '.$error->getMessage().' Check the server source and destination folders, then use Sync now before retrying.');
     }
@@ -203,12 +324,7 @@ function with_account_mail_lock(string $accountId,callable $operation): mixed {
     } finally { fclose($lock); }
 }
 function sync_imap(array $a,bool $repair=false): int {
-    $s=socket_connection($a['config']['host'],993);
-    try {
-        if (!str_starts_with((string)fgets($s,65536),'* OK')) fail('Unexpected IMAP greeting.');
-        imap_command($s,'LOGIN '.imap_quote($a['credentials']['username']).' '.imap_quote($a['credentials']['password']));
-        return imap_sync_stream($a,$s,$repair);
-    } finally { fclose($s); }
+    return imap_with_connection($a,fn($s)=>imap_sync_stream($a,$s,$repair));
 }
 function smtp_expect(mixed $s,array $allowed): void {
     $line=''; $count=0;
@@ -221,6 +337,7 @@ function remote_mail_action(array $r,string $action): array {
     if (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('This is a recovery copy. Save it locally or discard it.');
     $a=account($r['meta']['account']); $id=(string)$r['meta']['providerId'];
     $destination=match($action) { 'archive'=>'Archive','trash'=>'Trash','restore'=>'Inbox',default=>null };
+    $relatedIds=[];
     if ($destination!==null && $r['meta']['folder']===$destination) return $r;
     if ($a['type']==='google') {
         $base='https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($id);
@@ -240,15 +357,15 @@ function remote_mail_action(array $r,string $action): array {
         if (!ctype_digit($id)) fail('Invalid IMAP message identifier.');
         $path=$r['meta']['serverFolder']??(($r['meta']['folder']==='Inbox')?'INBOX':null);
         if ($path===null) fail('This cached message needs Repair / resync before processing.');
-        $s=socket_connection($a['config']['host'],993);
-        try {
-            if (!str_starts_with((string)fgets($s,65536),'* OK')) fail('Unexpected IMAP greeting.');
-            imap_command($s,'LOGIN '.imap_quote($a['credentials']['username']).' '.imap_quote($a['credentials']['password']));
+        $r=imap_with_connection($a,function($s) use($a,$r,$path,$id,$destination,$action,&$relatedIds) {
+            activity_step('IMAP: opening source folder '.$path.'.');
             $validity=imap_validity(imap_command($s,'SELECT '.imap_quote($path)));
             if (mail_row_source($r)!==mail_source($path,$validity,$id)) fail('Mailbox identifiers changed. Use Repair / resync before processing this message.',409);
             if ($destination!==null) {
+                $gmail=imap_is_gmail($a);
+                $gmailId=null;if ($gmail) $relatedIds=imap_gmail_move_copies($a,$s,$r,$path,$id,$gmailId);
                 // The archive preflight checks MOVE and never creates or expunges folders.
-                if ($destination==='Archive') $location=imap_archive($s,$id,$a['config']['archiveFolder']??'Archive');
+                if ($destination==='Archive') $location=imap_archive($s,$id,$a['config']['archiveFolder']??'Archive',$path,$gmail,$a,$gmailId);
                 else {
                     $cap=imap_command($s,'CAPABILITY');
                     if (!preg_match('/\b(?:MOVE|IMAP4REV2)\b/i',implode('',$cap['lines']))) fail('This IMAP server does not support MOVE.');
@@ -256,11 +373,11 @@ function remote_mail_action(array $r,string $action): array {
                     else {
                         $special=(bool)preg_match('/\bSPECIAL-USE\b/i',implode('',$cap['lines']));
                         $folders=imap_list_folders(imap_command($s,'LIST "" "*"'.($special?' RETURN (SPECIAL-USE)':'')));
-                        $target=imap_resolve_folder($folders,$a['config']['trashFolder']??'Trash','trash');
+                        $target=imap_resolve_folder($folders,$a['config']['trashFolder']??'Trash','trash',true,$gmail);
                     }
                     if ($target===$path) fail('Source and destination folders must be different.');
                     imap_command($s,'STATUS '.imap_quote($target).' (MESSAGES)');
-                    $location=imap_move_verified($s,$id,$target);
+                    $location=imap_move_verified($s,$id,$target,'Move',$path,$gmail,$a,$gmailId);
                 }
                 $r['meta']=array_merge($r['meta'],$location,['folder'=>$destination]);
             } else {
@@ -268,9 +385,10 @@ function remote_mail_action(array $r,string $action): array {
                 imap_command($s,'UID STORE '.$id.' '.($action==='read'?'+':'-').'FLAGS.SILENT (\\Seen)');
                 $r['meta']['read']=$action==='read';
             }
-        } finally { fclose($s); }
+            return $r;
+        });
     } else fail('This connector does not support email actions.');
-    return save_record($r,true);
+    return $relatedIds?save_imap_gmail_move($r,$relatedIds):save_record($r,true);
 }
 function send_mail(array $a,string $to,string $subject,string $body): string {
     $from=$a['config']['email']??'';

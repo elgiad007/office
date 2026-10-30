@@ -36,6 +36,13 @@ try {
     check($moved['meta']['folder']==='Archive' && $moved['meta']['serverFolder']==='Saved' && $moved['meta']['providerId']==='1','external move retains identity with destination folder and UID');
     check($moved['meta']['source']===mail_source('Saved','100','1') && $moved['meta']['read']===true && $moved['body']==='Preserve exact original','UID-after-body and flags decoded into synchronized destination');
     check(count(mail_cache_rows($a['id']))===11,'external move leaves no duplicate or stranded recovery copy');
+    $unchanged=get_record($old);
+    $same=mail_download($a,$unchanged['meta']['source'],$raw,array_diff_key($unchanged['meta'],array_flip(['rawBase64','remote','account','accountLabel','source'])));
+    publish_mail_snapshot($a,[$unchanged['meta']['source']=>$unchanged['meta']],[$unchanged['meta']['source']=>$same],fn($r)=>$r['id']===$old);
+    check(get_record($old)['revision']===$unchanged['revision'],'unchanged download preserves the open message revision');
+    $same['meta']['read']=false;
+    publish_mail_snapshot($a,[$unchanged['meta']['source']=>$same['meta']],[$unchanged['meta']['source']=>$same],fn($r)=>$r['id']===$old);
+    check(get_record($old)['revision']===$unchanged['revision']+1,'changed provider read flag still increments the revision');
     $before=mail_cache_rows($a['id']);
     fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),['EXAMINE "Saved"',"{tag} NO [NOPERM] denied\r\n"]],function($s) use($a) { refused(fn()=>imap_sync_stream($a,$s),'EXAMINE refused'); });
     check(mail_cache_rows($a['id'])===$before,'failed folder scan does not publish partial deletions or membership');

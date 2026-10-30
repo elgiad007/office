@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 
 export async function testMailDeleteSelection(page,url) {
-  let messages=[],rejectId=null,active=0;
+  await page.goto('about:blank');
+  let messages=[],rejectId=null,active=0,reconcileIds=[];
   const held=new Map();
   const fixture=(id,remote=true)=>({id,kind:'mail',title:'Queue '+id,body:'Message '+id,revision:1,updated:new Date().toISOString(),meta:{read:true,folder:'Inbox',from:'sender@example.com',...(remote?{remote:true,account:'queue-account'}:{})}});
   const routes=target=>target.pathname.endsWith('/api.php')&&['records','accounts','mail-action','delete'].includes(target.searchParams.get('r'));
@@ -17,7 +18,9 @@ export async function testMailDeleteSelection(page,url) {
     const record=messages.find(r=>r.id===input.id);assert.ok(record);
     if(action==='delete')messages=messages.filter(r=>r.id!==input.id);
     else {assert.equal(input.action,'trash');record.meta.folder='Trash';record.revision++;}
-    return route.fulfill({json:{record}});
+    const removedIds=[...reconcileIds];reconcileIds=[];
+    messages=messages.filter(r=>!removedIds.includes(r.id));
+    return route.fulfill({json:{record,removedIds}});
     }finally{active--;}
   });
   const reset=async (ids,remote=true)=>{for(let i=0;active&&i<100;i++)await new Promise(r=>setTimeout(r,20));assert.equal(active,0);messages=ids.map(id=>fixture(id,remote));rejectId=null;await page.goto(url+'#mail');await page.reload();await page.locator('#mail-folder').selectOption('Inbox');await page.locator('.item').first().waitFor();};
@@ -31,6 +34,22 @@ export async function testMailDeleteSelection(page,url) {
   const trash=async()=>{await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();};
   const menuTrash=async id=>{await item(id).click({button:'right'});await page.getByRole('menuitem',{name:'Move to Trash',exact:true}).click();};
   try {
+    await reset(['gmail-inbox','gmail-all','next']);
+    await item('gmail-inbox').click();reconcileIds=['gmail-all'];await trash();
+    assert.equal(await item('gmail-all').count(),0);
+    await page.reload();assert.equal(await item('gmail-all').count(),0);
+    await reset(['a','b','c']);await item('a').click();await item('b').click({modifiers:['Control']});
+    reconcileIds=['b'];await menuTrash('a');
+    await page.locator('#notice').filter({hasText:'2 items updated.'}).waitFor();await selected('c');
+    assert.equal(await item('b').count(),0);
+
+    // Separate rapid deletions may target two cached appearances of one Gmail message.
+    await reset(['a','b','c']);hold('a');await item('a').click();
+    await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await selected('b');
+    await page.keyboard.press('d');await selected('c');reconcileIds=['b'];release('a');
+    await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
+    await page.reload();assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
+
     await reset(['a','b','c']);await item('b').click();await trash();await selected('c');
     // Repeated keyboard processing works directly from the newly focused row.
     await page.keyboard.press('d');await selected('a');await page.keyboard.press('d');
@@ -59,8 +78,9 @@ export async function testMailDeleteSelection(page,url) {
     // A refresh while requests are pending must keep both messages hidden.
     await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'Mail',exact:true}).click();
     assert.equal(await item('b').count(),0);assert.equal(await item('c').count(),0);
-    await item('d').click();rejectId='b';release('c');await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();release('b');
+    await item('d').click();rejectId='b';release('b');
     await page.locator('#notice').filter({hasText:'Deletion rejected for test'}).waitFor();assert.equal(await item('b').count(),1);assert.equal(await item('c').count(),0);
+    release('c');await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'d');
 
     await reset(['a','b','c','d']);hold('b');await item('b').click();await item('c').click({modifiers:['Control']});await menuTrash('b');
@@ -73,6 +93,6 @@ export async function testMailDeleteSelection(page,url) {
     await page.keyboard.press('d');await page.locator('#confirm').click();await selected('c');
     await item('c').click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await page.locator('#confirm').click();await selected('a');
     console.log('PASS mail deletion selection: next, previous, empty list, focus, repeated shortcut, search, bulk, partial failure, rejection, local deletion and cancellation.');
-  } finally {for(const gate of held.values())gate.release();await page.unroute(routes);await page.reload();}
+  } finally {for(const gate of held.values())gate.release();for(let i=0;active&&i<100;i++)await new Promise(resolve=>setTimeout(resolve,20));await page.unroute(routes);await page.reload();}
   async function trashFailure(){await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await page.locator('#notice').filter({hasText:'Deletion rejected for test'}).waitFor();}
 }

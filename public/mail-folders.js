@@ -87,8 +87,8 @@ export async function fileMail(env) {
   if(!folders.length)throw Error('Create a custom folder or label first using the account’s folder list.');
   env.modal(account.type==='google'?'Organize with labels':'Move to folder',`<form id="file-mail-form"><p>${rows.length} selected message(s) · ${e(account.label)}</p><label>Destination<select name="folder" required>${folders.map(f=>`<option value="${e(f.id)}">${e(f.name)}</option>`).join('')}</select></label>${account.type==='google'?'<label>Action<select name="action"><option value="label">Add label (keep Inbox and other labels)</option><option value="unlabel">Remove label</option><option value="move">Move here (remove Inbox and Trash, keep other labels)</option></select></label>':''}<button class="primary">Apply</button></form>`);
   env.dialog.querySelector('form').onsubmit=event=>{event.preventDefault();const form=new FormData(event.target),button=event.target.querySelector('button');button.disabled=true;void env.attempt(async()=>{
-    let count=0;
-    try {await busy(env,async()=>{for(const row of rows){await env.api('mail-action',{id:row.id,revision:row.revision,action:form.get('action')||'move',folder:form.get('folder')});count++;}});env.dialog.close();env.notice(`Organized ${count} message(s).`);}
+    let count=0;const removed=new Set();
+    try {await busy(env,async()=>{for(const row of rows){if(!removed.has(row.id)){const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:form.get('action')||'move',folder:form.get('folder')});for(const id of result.removedIds||[])removed.add(id);}count++;}});env.dialog.close();env.notice(`Organized ${count} message(s).`);}
     catch(error){throw Error(`${count} of ${rows.length} messages organized. ${error.message}`);}
     finally{button.disabled=false;await reloadMail(env);}
   });};

@@ -9,7 +9,7 @@ export async function testMailSort(page,url) {
     mail('sent','',{sentAt:'2026-10-29T14:00:00Z'}),
   ],syncs=0;
   const expected=['newest','sent','tie-a','tie-b','old','undated-a','undated-b'];
-  const routes=target=>target.pathname.endsWith('/api.php');
+  const routes=target=>target.pathname.endsWith('/api.php') && target.searchParams.get('r')!=='activity';
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',preferences:{}};

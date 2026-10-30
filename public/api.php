@@ -14,7 +14,7 @@ try {
     $route=$_GET['r']??'status'; $method=$_SERVER['REQUEST_METHOD'];
     if ($route==='status' && $method==='GET') {
         $ready=setting('owner')!==null; if (!$ready) setup_token();
-        json_response(['setup'=>!$ready,'authenticated'=>!empty($_SESSION['owner']),'csrf'=>$_SESSION['csrf'],'extensions'=>['sqlite'=>true,'openssl'=>extension_loaded('openssl'),'curl'=>extension_loaded('curl'),'dom'=>extension_loaded('dom')],'preferences'=>!empty($_SESSION['owner'])?setting('preferences',[]):[]]);
+        json_response(['setup'=>!$ready,'authenticated'=>!empty($_SESSION['owner']),'activity'=>!empty($_SESSION['owner']),'csrf'=>$_SESSION['csrf'],'extensions'=>['sqlite'=>true,'openssl'=>extension_loaded('openssl'),'curl'=>extension_loaded('curl'),'dom'=>extension_loaded('dom')],'preferences'=>!empty($_SESSION['owner'])?setting('preferences',[]):[]]);
     }
     if ($route==='oauth-callback' && $method==='GET') {
         owner(); $oauth=$_SESSION['oauth']??null; unset($_SESSION['oauth']);
@@ -47,6 +47,20 @@ try {
         session_regenerate_id(true); $_SESSION['owner']=true; $_SESSION['csrf']=bin2hex(random_bytes(32)); json_response(['ok'=>true,'csrf'=>$_SESSION['csrf']]);
     }
     owner();
+    if($route==='activity' && $method==='GET') { session_write_close();json_response(['entries'=>activity_rows((int)($_GET['after']??0))]); }
+    if($route==='activity' && $method==='POST') {
+        if(($input['action']??'')==='clear'){activity_db()->exec('DELETE FROM activity');json_response(['ok'=>true]);}
+        if(($input['action']??'')!=='notice'||!is_string($input['message']??null)||strlen($input['message'])>1000)fail('Invalid activity message.');
+        activity_event($input['message'],!empty($input['error'])?'error':'info','notice');json_response(['ok'=>true]);
+    }
+    $activityNames=['save'=>'Save item','delete'=>'Delete item','preferences'=>'Save preferences','account-save'=>'Save account','account-delete'=>'Remove account','account-test'=>'Test connection','google-settings'=>'Save Google integration','google-connect'=>'Connect Google account','sync'=>'Synchronize account','send'=>'Send mail','mail-folders'=>'Discover folders','mail-folder-sync'=>'Refresh folder','mail-folder-manage'=>'Manage folder','mail-action'=>'Update mail','backup'=>'Download backup','restore'=>'Restore backup','import'=>'Import items','import-items'=>'Import items'];
+    if(isset($activityNames[$route]) && ($method==='POST'||$route==='backup')) {
+        $label='';$accountId=$input['account']??($route==='sync'?($input['id']??null):null);
+        if($route==='mail-action'){$mail=get_record((string)($input['id']??''));$accountId=$mail['meta']['account']??null;}
+        if(is_string($accountId)&&$accountId!=='')$label=account($accountId)['label'];
+        $operation=$route==='mail-action'?(['trash'=>'Move to Trash','archive'=>'Archive mail','restore'=>'Restore to Inbox','read'=>'Mark mail read','unread'=>'Mark mail unread','move'=>'Move mail','discard'=>'Discard cached copy','keep-local'=>'Save local copy','label'=>'Add label','unlabel'=>'Remove label'][$input['action']??'']??'Update mail'):$activityNames[$route];
+        activity_begin($operation,$label);
+    }
     if ($route==='logout' && $method==='POST') { $_SESSION=[]; session_destroy(); json_response(['ok'=>true]); }
     if ($route==='records' && $method==='GET') {
         $kind=$_GET['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
@@ -174,16 +188,19 @@ try {
         catch(Throwable $e) { $r['meta']['folder']='Delivery uncertain'; save_record($r); fail($e->getMessage().' Check the recipient/provider before creating another send attempt.'); }
     }
     if ($route==='mail-action' && $method==='POST') {
-        $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])fail('Message changed. Reopen it.',409);
+        $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$r],409);
         $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard','move','label','unlabel'],true))fail('Unknown mail action.');
         session_write_close();
-        $record=with_account_mail_lock((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
+        $result=with_account_mail_lock((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
             $current=get_record($r['id']);
-            if ((int)($input['revision']??0)!==$current['revision']) fail('Message changed. Reopen it.',409);
-            if (in_array($action,['move','label','unlabel'],true)) return file_remote_mail($current,$action,(string)($input['folder']??''));
-            return in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action);
+            if ((int)($input['revision']??0)!==$current['revision']) json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$current],409);
+            $accountId=(string)($current['meta']['account']??'');
+            $before=array_column(mail_cache_rows($accountId),'id');
+            $record=in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''))
+                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action));
+            return ['record'=>$record,'removedIds'=>array_values(array_diff($before,array_column(mail_cache_rows($accountId),'id')))];
         });
-        json_response(['record'=>$record]);
+        json_response($result);
     }
     fail('Route not found.',404);
 } catch (HttpError $e) { json_response(['error'=>$e->getMessage()],$e->getCode() ?: 400); }

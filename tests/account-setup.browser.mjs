@@ -11,7 +11,7 @@ export async function testAccountSetup(page, url) {
   const authPredicate = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r') === 'google-connect';
   let imapChecks = 0;
   await page.route(testPredicate, async route => {
-    if (route.request().postDataJSON().type !== 'imap') return route.continue();
+    if (!['imap','gmail'].includes(route.request().postDataJSON().type)) return route.continue();
     imapChecks++;
     await route.fulfill({json:{status:imapChecks === 1 ? 'failed' : 'ok',checks:[
       {label:'IMAP inbox · TLS 993',status:'ok',message:'Connection and authentication succeeded.'},
@@ -96,8 +96,34 @@ export async function testAccountSetup(page, url) {
     await page.screenshot({path:'test-results/account-manual.png',fullPage:true});
     await modal.getByRole('button',{name:'Save account',exact:true}).click();
     await modal.getByRole('heading',{name:'Account saved',exact:true}).waitFor(); await done();
+    await open(); await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
+    await selectProvider('gmail');
+    await modal.getByLabel('Account label',{exact:true}).fill('Gmail app password fixture');
+    await modal.getByLabel('Sender email',{exact:true}).fill('fixture@gmail.com');
+    await next();
+    assert.equal(await modal.getByLabel('IMAP server (TLS 993)',{exact:true}).count(),0);
+    assert.equal(await modal.locator('a[href="https://myaccount.google.com/apppasswords"]').count(),1);
+    await modal.getByLabel('Google app password',{exact:true}).fill('abcd efgh ijkl mnop');
+    await modal.getByRole('button',{name:'Manual setup',exact:true}).click();
+    assert.equal(await modal.getByLabel('Google app password',{exact:true}).inputValue(),'abcd efgh ijkl mnop');
+    await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
+    await next();
+    assert.ok(!(await modal.innerHTML()).includes('abcd efgh ijkl mnop'));
+    await modal.getByRole('button',{name:'Test connection',exact:true}).click();
+    await modal.getByText('Connection checks passed',{exact:true}).waitFor();
+    await back(); await back();
+    await modal.getByLabel('Sender email',{exact:true}).fill('updated@gmail.com');
+    await next(); await next();
+    assert.equal(await modal.locator('.setup-checks').count(),0);
+    const savedGmailRequest=page.waitForRequest(request=>request.url().endsWith('api.php?r=account-save') && request.postDataJSON().type==='gmail');
+    await modal.getByRole('button',{name:'Save account',exact:true}).click();
+    assert.equal((await savedGmailRequest).postDataJSON().email,'updated@gmail.com');
+    await modal.getByRole('heading',{name:'Account saved',exact:true}).waitFor(); await done();
     const accounts = (await (await page.request.get(url+'api.php?r=accounts')).json()).accounts;
-    assert.equal(accounts.length,2);
+    assert.equal(accounts.length,3);
+    const gmail=accounts.find(account=>account.label==='Gmail app password fixture');
+    assert.equal(gmail.type,'imap');
+    assert.ok(!JSON.stringify(accounts).includes('abcdefghijklmnop'));
     // Mobile and Escape close work without retaining the last draft's secrets.
     await page.setViewportSize({width:390,height:844});
     await open(); await modal.getByRole('button',{name:'Guided setup',exact:true}).click();

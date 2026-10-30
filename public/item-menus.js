@@ -56,12 +56,13 @@ export function installItemMenus(env) {
         await env.deleteMailImmediately(rows,row=>id==='delete'?env.api('delete',{id:row.id,revision:row.revision}):env.api('mail-action',{id:row.id,revision:row.revision,action:id}));
         env.notice(`${rows.length} ${rows.length===1?'item':'items'} updated.`);return;
       }
-      const reload=env.mailDeletionReload(),removed=[];
+      const reload=env.mailDeletionReload(),removed=[],reconciled=new Set();
       try{
         for(const row of rows){
+          if(reconciled.has(row.id)){count++;continue;}
           await env.waitForMailRead(row.id);
           if(id==='delete')await env.api('delete',{id:row.id,revision:row.revision});
-          else if(row.meta.remote)await env.api('mail-action',{id:row.id,revision:row.revision,action:id});
+          else if(row.meta.remote){const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:id});for(const related of result.removedIds||[])reconciled.add(related);}
           else{
             const copy=structuredClone(row);
             // PHP encodes empty metadata as []; named array properties are lost in JSON.

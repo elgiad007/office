@@ -60,4 +60,6 @@ MBOX/ZIP content archives, bulk attachment import/export, external calendar writ
 
 ### Installation-level Google integration
 
+Gmail app-password alternative: offer a guided/manual setup preset with label, email and a masked app password; normalize grouped passwords and store an ordinary encrypted IMAP account using Gmail TLS servers and the address as username. Resolve localized All Mail through the server's `\\All` flag when no archive role exists, and detect Trash through its server flag. Check Inbox, archive/MOVE support, Trash and SMTP login without sending or moving mail. Verify setup without OAuth configuration, validation, masked review, draft retention, result invalidation and mobile layout with isolated fixtures. Live Gmail sign-in, send, archive and trash acceptance remains required. All Mail can overlap Inbox in the IMAP cache; Calendar remains a separate OAuth connection.
+
 Configure the owner’s Google web OAuth application once per installation, with an explicit registered callback for that host. Connect Gmail accounts using email and browser consent, with optional Calendar access. Verify granted scopes and Gmail profile before creating an account; reject duplicate addresses and wrong-account reconnects. Keep legacy account credentials working. Installation secrets are encrypted and excluded from JSON backups.

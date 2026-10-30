@@ -44,7 +44,7 @@ Shared-host filesystem locking, outbound connections, PHP extensions and request
 
 Choose **Settings → Add account**, then select either:
 
-- **Account setup:** Gmail connects through Google sign-in after one-time installation configuration in Settings → Google integration, with optional read-only Calendar access. IMAP and CalDAV offer guided and manual setup, optional checks, and a masked review before saving.
+- **Account setup:** Gmail offers an app-password option without Google integration setup, or Google sign-in after one-time installation configuration in Settings → Google integration with optional read-only Calendar access. IMAP and CalDAV offer guided and manual setup, optional checks, and a masked review before saving.
 - **Manual setup:** all configuration fields on one screen, with the same validation and optional checks.
 
 Switching between these paths, going Back, or temporarily choosing another provider preserves entered values while the dialog remains open. Each provider has a separate draft. Secrets stay masked in inputs and are omitted from the review. Drafts are kept only in memory, never localStorage; closing the dialog clears them. Saving stores credentials encrypted on disk. Neither path automatically synchronizes or sends mail.
@@ -55,7 +55,9 @@ All connections require public DNS hostnames and verified TLS; private LAN endpo
 
 For CalDAV, supply the actual calendar **collection URL**, username and password/app password. Discovery from a service's home URL is not implemented. Redirects are not followed; use the final HTTPS endpoint. Only ports 443/8443 are accepted.
 
-In **Settings → Google integration**, configure your own Google Cloud web OAuth client once per installation. Enable Gmail API and optionally Calendar API. Register the **exact callback URL** shown there, including `api.php?r=oauth-callback`. Configure the consent screen and test users as needed. Save the client ID, secret, and callback. A blank secret retains the saved secret only for the same client ID. These settings are encrypted and excluded from JSON backups.
+For email without Google Cloud setup, choose **Add account → Guided setup (or Manual setup) → Gmail — app password**. Enter a label, your full Gmail or Google Workspace address, and a Google app password. Enable 2-Step Verification in Google, then create a password at [Google App passwords](https://myaccount.google.com/apppasswords). Use the 16-letter app password rather than your normal account password; spaces between groups are removed. Some managed accounts, security-key-only verification, and Advanced Protection do not offer app passwords. This option connects email only. Office supplies `imap.gmail.com` on TLS 993 and `smtp.gmail.com` on TLS 465, uses your email as the username, detects the server-designated All Mail and Trash folders, and encrypts the password. **Test connection** checks Inbox, archive/MOVE support, Trash access, and SMTP login without sending or moving mail. Gmail's All Mail includes Inbox and sent mail, so the IMAP Archive view can overlap Inbox. Real-account archive/trash behavior still requires verification.
+
+For Google sign-in and optional Calendar access, in **Settings → Google integration**, configure your own Google Cloud web OAuth client once per installation. Enable Gmail API and optionally Calendar API. Register the **exact callback URL** shown there, including `api.php?r=oauth-callback`. Configure the consent screen and test users as needed. Save the client ID, secret, and callback. A blank secret retains the saved secret only for the same client ID. These settings are encrypted and excluded from JSON backups.
 
 You can register both your hosted HTTPS callback and your local callback in the same web client. The Windows launcher defaults to `http://127.0.0.1:8765/api.php?r=oauth-callback`; use the address actually shown by your installation. Keep its hostname and port fixed. Enter the client credentials once in each installation and authorize accounts separately there. Do not copy a live database to transfer connections.
 
@@ -111,6 +113,8 @@ No frontend build step is needed. Run:
 node --test tests/formats.test.mjs
 php tests/backend.php
 php tests/mail-sync.php
+php tests/gmail-imap.php
+php tests/activity.php
 php tests/google.php
 node tests/http.mjs
 ```
@@ -140,3 +144,11 @@ For a Windows ZIP, download an official PHP x64 NTS distribution, compare its ha
 The packaging script copies only release sources and an empty data directory. It never includes your live `data/`, `.runtime/` or test output. Release ZIPs and clean extracted build folders go into ignored `dist/`.
 
 See [the implementation plan](docs/implementation-plan.md) for staged work and acceptance criteria. No real-account or shared-host compatibility is implied by local tests.
+
+Gmail IMAP uses the server-designated Trash and All Mail folders for the default Trash/Archive actions, even when custom labels named `Trash` or `Archive` also exist. Moves reopen the source to verify removal and locate the destination through Gmail's account-wide message ID. Proven cached appearances of the moved message are reconciled together; unrelated messages with identical content are kept. After upgrading from the earlier app-password connector, refresh Office, choose **Refresh folders** for the Gmail account and use **Repair / resync** to refresh previously cached locations. An earlier custom `Trash` label is retained; messages filed there can be selected and moved to the actual Trash using the mail action. Live Gmail deletion acceptance remains separate from fixture checks.
+
+Rapid mail actions keep the list responsive while provider operations are queued separately for each account, including automatic read updates and synchronization. Unchanged downloads keep their current revision. If an action is rejected before any provider write because its cached revision changed, Office refreshes the copy and retries once only when the account, source message and location still match. Changed sources and uncertain provider failures are not retried automatically. Failed deletions restore the latest cached copy, and multiple queued deletions of proven Gmail appearances share the confirmed Trash result.
+
+The bottom status bar shows current and queued work with a slow accent band sweeping left to right. The sweep stops when work ends; after a brief quiet interval the status becomes Ready. Routine log polling does not count as activity. Reduced-motion preferences replace the sweep with a steady highlight. **View activity** opens the latest 500 events with timestamps, account labels, operation stages, elapsed times and errors; filter by account or level, **Copy visible log**, or **Clear log**. The private `data/activity.sqlite` store survives refreshes and is excluded from content backups. Logs contain summaries, not passwords, OAuth tokens, message contents or raw protocol commands. Sign-in and CSRF protection apply to activity access and clearing. IMAP progress is streamed during requests where hosting allows streaming; retained history is also refreshed periodically.
+
+IMAP waits up to 20 seconds for a read (previously 8), with a 10-second connection timeout and a bounded request recovery window. Errors distinguish interrupted/closed connections from timeouts and identify the failing stage. Broken pre-write connections can reconnect once. If a Gmail move is interrupted after being sent, Office opens a fresh connection and checks the unique message in the source and destination; a verified destination updates the cache without sending another move. An unresolved result reports uncertainty and requires sync before retrying. Generic IMAP moves and other writes are not blindly repeated. Local fixtures cover recovery; a live outage during Gmail deletion has not been induced.

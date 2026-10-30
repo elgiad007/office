@@ -4,7 +4,7 @@ export async function testMailSend(page,url) {
   let preferences={},sequence=0,sends=[],rejectSave=false,failSend=false,holdSend=false,releaseSend;
   const received={id:'send-received',kind:'mail',title:'Received fixture',body:'Received body',revision:1,meta:{read:true,remote:true,account:'send-account',folder:'Inbox',from:'sender@example.com'}};
   let records=[received];
-  const routes=target=>target.pathname.endsWith('/api.php');
+  const routes=target=>target.pathname.endsWith('/api.php') && target.searchParams.get('r')!=='activity';
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r'),input=route.request().method()==='POST'?route.request().postDataJSON():{};let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',preferences};

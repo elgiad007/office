@@ -10,7 +10,7 @@ export async function testAccountFolders(page,url) {
   const mail=(id,account,path,extra={})=>({id,kind:'mail',title:id,body:'Cached fixture body',revision:1,meta:{read:true,account,remote:true,folder:'Custom folder',serverFolder:path,providerId:id,from:'sender@example.com',...extra}});
   let records=[mail('Personal trip','imap-a','Travel'),mail('Personal booking','imap-a','Travel'),mail('Nested receipt','imap-a','Travel/Orders'),mail('Work trip','imap-b','Travel'),mail('Label message','gmail-a','',{folder:'Inbox',labelIds:['INBOX','Label_travel','Label_orders']})];
   let failed=false,requests=[],holdNext=false,releaseSync;
-  const routes=t=>t.pathname.endsWith('/api.php');
+  const routes=t=>t.pathname.endsWith('/api.php') && t.searchParams.get('r')!=='activity';
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r'),input=route.request().postDataJSON();let json;
     requests.push({action,input});

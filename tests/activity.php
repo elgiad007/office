@@ -1,0 +1,32 @@
+<?php
+declare(strict_types=1);
+$testDir=sys_get_temp_dir().'/office-activity-'.bin2hex(random_bytes(8));putenv('OFFICE_DATA_DIR='.$testDir);
+require __DIR__.'/imap.php';
+try {
+    activity_begin('Test connection','Fixture account');
+    fixture([['LOGIN "private-user" "secret-password"',"{tag} OK private-server-text\r\n"]],fn($s)=>imap_command($s,'LOGIN "private-user" "secret-password"'));
+    activity_finish(true);$entries=activity_rows();$json=json_encode($entries);
+    check(!str_contains($json,'secret-password')&&!str_contains($json,'private-user')&&!str_contains($json,'private-server-text'),'activity excludes credentials, raw commands and server text');
+    check(count($entries)===4 && $entries[0]['phase']==='start' && $entries[3]['phase']==='complete' && $entries[3]['duration_ms']!==null,'activity records stages and completion duration');
+    $attempts=0;
+    $connect=function() use(&$attempts){$attempts++;ArchiveFixture::$script=[['CAPABILITY',$attempts===1?'':"* CAPABILITY IMAP4rev1\r\n{tag} OK done\r\n"]];return fopen('archivefixture://retry','r+');};
+    activity_begin('Recover connection','Fixture account');
+    imap_with_connection([],fn($s)=>imap_command($s,'CAPABILITY'),$connect);
+    activity_finish(true);check($attempts===2,'pre-write interruption reconnects once');
+    $attempts=0;$connect=function() use(&$attempts){$attempts++;ArchiveFixture::$script=[['UID MOVE 42 "Trash"','']];return fopen('archivefixture://uncertain','r+');};
+    try{imap_with_connection([],fn($s)=>imap_command($s,'UID MOVE 42 "Trash"'),$connect);throw new RuntimeException('Expected interrupted move');}
+    catch(ImapTransportError $e){check($attempts===1&&str_contains($e->getMessage(),'moving message'),'interrupted move is not blindly retried and identifies the failing stage');}
+    fixture([
+        ['EXAMINE "INBOX"',"* OK [UIDVALIDITY 3] valid\r\n{tag} OK done\r\n"],
+        ['UID SEARCH X-GM-MSGID 9001',"* SEARCH\r\n{tag} OK done\r\n"],
+        ['EXAMINE "[Gmail]/Trash"',"* OK [UIDVALIDITY 8] valid\r\n{tag} OK done\r\n"],
+        ['UID SEARCH X-GM-MSGID 9001',"* SEARCH 70\r\n{tag} OK done\r\n"],
+        ['UID FETCH 70 (UID BODY.PEEK[])',message_response('70')],
+    ],function($s){$location=imap_verify_gmail_move($s,'INBOX','9001','[Gmail]/Trash','Original message');check($location['providerId']==='70'&&!array_filter(ArchiveFixture::$commands,fn($command)=>str_contains($command,' MOVE ')),'read-only recovery confirms completed Gmail move without repeating it');});
+    fixture([['EXAMINE "INBOX"',"* OK [UIDVALIDITY 3] valid\r\n{tag} OK done\r\n"],['UID SEARCH X-GM-MSGID 9001',"* SEARCH 42\r\n{tag} OK done\r\n"]],function($s){refused(fn()=>imap_verify_gmail_move($s,'INBOX','9001','[Gmail]/Trash','Original message'),'still in its source folder');});
+    for($i=0;$i<505;$i++)activity_event('Event '.$i);
+    $entries=activity_rows();check(count($entries)===500&&$entries[0]['message']==='Event 5','activity retention is bounded to latest 500 entries');
+    check(count(activity_rows((int)$entries[498]['id']))===1,'activity cursor returns only new events');
+    activity_db()->exec('DELETE FROM activity');check(activity_rows()===[],'activity can be cleared');
+    echo "PASS private activity store and IMAP recovery fixtures.\n";
+} finally {foreach(glob($testDir.'/*')?:[] as $file)@unlink($file);@rmdir($testDir);}

@@ -6,7 +6,7 @@ export async function renderGoogleSettings(container, request) {
     if (!container.isConnected) return;
     const callback = new URL('api.php?r=oauth-callback', location.href).href;
     container.innerHTML = `<h2>Google integration</h2>
-      <p>Configure once for this Office installation. Then add each Gmail account using Connect with Google.</p>
+      <p>Configure once to use Connect with Google and optional Google Calendar. For email using a Google app password, choose Gmail — app password in Add account; these integration settings are not required.</p>
       <details ${settings.configured ? '' : 'open'}><summary>One-time Google Cloud setup</summary>
         <ol><li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> and create or select your project.</li>
         <li>Enable Gmail API, and Calendar API if you want calendars.</li>
