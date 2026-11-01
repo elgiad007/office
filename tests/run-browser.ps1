@@ -1,6 +1,8 @@
 param([string]$PhpBinary='php',[string]$PhpExtensionDir,[string]$NodeModuleManifest,[string]$BrowserChannel,[int]$Port=8787,[switch]$Apache)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+& node (Join-Path $officeRoot 'scripts/frontend.mjs') --check
+if($LASTEXITCODE -ne 0){throw 'Frontend checks failed. Run pnpm build before browser tests.'}
 $officeTestData=Join-Path $officeRoot ('.runtime\browser-'+[Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $officeTestData -Force | Out-Null
 $officeArgs=@()

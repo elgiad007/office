@@ -3,6 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/formats.test.mjs"
+    "build": "node scripts/frontend.mjs",
+    "build:check": "node scripts/frontend.mjs --check",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/frontend.mjs --check && node --test tests/formats.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

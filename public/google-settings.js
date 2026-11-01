@@ -1,11 +1,13 @@
-import {escapeHtml as e} from './formats.js';
-
+// Generated from frontend/google-settings.ts by pnpm build. Do not edit.
+import { asError } from './utils.js';
+import { escapeHtml as e } from './formats.js';
 export async function renderGoogleSettings(container, request) {
-  try {
-    const settings = await request('google-settings');
-    if (!container.isConnected) return;
-    const callback = new URL('api.php?r=oauth-callback', location.href).href;
-    container.innerHTML = `<h2>Google integration</h2>
+    try {
+        const settings = await request('google-settings');
+        if (!container.isConnected)
+            return;
+        const callback = new URL('api.php?r=oauth-callback', location.href).href;
+        container.innerHTML = `<h2>Google integration</h2>
       <p>Configure once to use Connect with Google and optional Google Calendar. For email using a Google app password, choose Gmail — app password in Add account; these integration settings are not required.</p>
       <details ${settings.configured ? '' : 'open'}><summary>One-time Google Cloud setup</summary>
         <ol><li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> and create or select your project.</li>
@@ -25,25 +27,46 @@ export async function renderGoogleSettings(container, request) {
         <button class="primary">Save Google integration</button>
         <p role="status" id="google-settings-status"></p>
       </form><p id="google-connection-result" role="${settings.notice?.error ? 'alert' : 'status'}" class="${settings.notice?.error ? 'error' : ''}">${e(settings.notice?.message || '')}</p>`;
-    const form = container.querySelector('form');
-    const status = container.querySelector('#google-settings-status');
-    container.querySelector('#copy-google-callback').onclick = async () => {
-      try { await navigator.clipboard.writeText(callback); status.textContent = 'Callback copied.'; }
-      catch { const input = form.elements.redirect; input.value = callback; input.focus(); input.select(); status.textContent = 'Press Ctrl+C or Cmd+C to copy the selected callback.'; }
-    };
-    form.onsubmit = async event => {
-      event.preventDefault();
-      const submit = form.querySelector('button.primary'); submit.disabled = true;
-      status.textContent = 'Saving…';
-      try {
-        await request('google-settings', Object.fromEntries(new FormData(form)));
-        form.elements.client_secret.value = '';
-        form.elements.client_secret.required = false;
-        container.querySelector('details').open = false;
-        container.querySelector('#google-configuration-summary').textContent = 'Configured. A blank secret keeps the saved secret for the same client ID. Existing accounts keep their own connection credentials when these settings change.';
-        status.textContent = 'Google integration saved. You can now add a Gmail account.';
-      } catch (error) { status.textContent = error.message; }
-      finally { submit.disabled = false; }
-    };
-  } catch (error) { if (container.isConnected) container.textContent = error.message; }
+        const form = container.querySelector('form');
+        const status = container.querySelector('#google-settings-status');
+        container.querySelector('#copy-google-callback').onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(callback);
+                status.textContent = 'Callback copied.';
+            }
+            catch {
+                const input = form.elements.namedItem('redirect');
+                input.value = callback;
+                input.focus();
+                input.select();
+                status.textContent = 'Press Ctrl+C or Cmd+C to copy the selected callback.';
+            }
+        };
+        form.onsubmit = async (event) => {
+            event.preventDefault();
+            const submit = form.querySelector('button.primary');
+            submit.disabled = true;
+            status.textContent = 'Saving…';
+            try {
+                await request('google-settings', Object.fromEntries(new FormData(form)));
+                form.elements.namedItem('client_secret').value = '';
+                form.elements.namedItem('client_secret').required = false;
+                container.querySelector('details').open = false;
+                container.querySelector('#google-configuration-summary').textContent = 'Configured. A blank secret keeps the saved secret for the same client ID. Existing accounts keep their own connection credentials when these settings change.';
+                status.textContent = 'Google integration saved. You can now add a Gmail account.';
+            }
+            catch (cause) {
+                const error = asError(cause);
+                status.textContent = error.message;
+            }
+            finally {
+                submit.disabled = false;
+            }
+        };
+    }
+    catch (cause) {
+        const error = asError(cause);
+        if (container.isConnected)
+            container.textContent = error.message;
+    }
 }

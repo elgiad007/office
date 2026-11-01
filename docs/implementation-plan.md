@@ -15,7 +15,7 @@
 
 ## Architecture
 
-Use PHP 8.2+ with PDO SQLite, OpenSSL, cURL and DOM for live connectors. Serve browser-native JavaScript modules and CSS; a frontend build/runtime is unnecessary for this first version. This replaces the earlier provisional React/Node/Docker architecture and minimizes deployment dependencies.
+Use PHP 8.2+ with PDO SQLite, OpenSSL, cURL and DOM for live connectors. Develop the frontend as strict TypeScript in `frontend/`, compiled into browser-native JavaScript modules in `public/`. Commit generated assets and verify them before packaging. Node and pnpm are needed only for development; deployed installations require no frontend build or Node runtime. This retains the portable PHP architecture without React or Docker.
 
 `public/` contains only the browser assets and PHP entry points. `app/` contains backend code. `data/` contains the SQLite database, the encryption key and a setup token. All are within the parent folder; only `public/` is web accessible. Credentials are encrypted at rest with a key outside the public directory. A full backup excludes credentials by default; account reconnection is required after restoring elsewhere.
 

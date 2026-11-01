@@ -1,6 +1,8 @@
 param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256,[string]$ApacheRuntimeArchive,[string]$ApacheExpectedSha256)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+& node (Join-Path $PSScriptRoot 'frontend.mjs') --check
+if($LASTEXITCODE -ne 0){throw 'Frontend checks failed. Install development dependencies with pnpm install, then run pnpm build.'}
 $officeDist=Join-Path $officeRoot 'dist'
 $officeBuild=Join-Path $officeDist ('build-'+[Guid]::NewGuid().ToString('N'))
 $officePackage=Join-Path $officeBuild 'office'

@@ -109,10 +109,24 @@ Alternatively stop the local server (or put hosted access into maintenance) and 
 
 ## Development and packaging
 
-No frontend build step is needed. Run:
+The frontend source is TypeScript in `frontend/`. Browser-ready ES modules in `public/` are generated and committed so a checkout or release ZIP runs directly with PHP. Edit the TypeScript source, not the generated JavaScript. The PHP backend, database format and hosting requirements are unchanged; Node and pnpm are development tools only.
+
+Install development dependencies using Node.js and pnpm, then build and check the frontend:
 
 ```sh
-node --test tests/formats.test.mjs
+pnpm install --frozen-lockfile
+pnpm build
+pnpm typecheck
+pnpm test
+```
+
+`pnpm build` compiles TypeScript without bundling or a framework. `pnpm build:check` checks types and verifies that the committed JavaScript matches the source. Packaging and the Windows browser test runner perform that same check and stop if the output is stale. Commit updated `public/*.js` alongside frontend changes. To rebuild automatically while editing, use `pnpm exec tsc --watch`, then run `pnpm build` before committing to restore the generated-file headers.
+
+Shared contracts for records, accounts, preferences and route-specific API responses live in `frontend/types.ts`. Types are checked during development; PHP still validates requests and imported data at runtime. Type checking does not replace provider or browser acceptance tests.
+
+Additional checks:
+
+```sh
 php tests/backend.php
 php tests/mail-sync.php
 php tests/gmail-imap.php
