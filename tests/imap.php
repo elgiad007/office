@@ -15,6 +15,17 @@ class ArchiveFixture {
     public function stream_write($data):int {
         if (!preg_match('/^(A\d+) (.*)\r\n$/s',$data,$m)) throw new RuntimeException('Invalid command framing');
         self::$commands[]=$m[2];
+        // Existing body fixtures supply sizes from their scripted literal. Tests
+        // for oversized messages provide explicit size responses instead.
+        if(preg_match('/^UID FETCH ([0-9,]+) \(UID RFC822\.SIZE\)$/',$m[2],$sizeRequest) && (self::$script[0][0]??null)!==$m[2]){
+            $response='';
+            foreach(explode(',',$sizeRequest[1]) as $uid){
+                $size=null;foreach(self::$script as $candidate)if(preg_match('/^UID FETCH '.preg_quote($uid,'/').' /',$candidate[0]) && preg_match('/\{(\d+)\}/',$candidate[1],$literal)){$size=$literal[1];break;}
+                if($size===null)throw new RuntimeException('Missing fixture size for UID '.$uid);
+                $response.='* 1 FETCH (UID '.$uid.' RFC822.SIZE '.$size.")\r\n";
+            }
+            $this->buffer=$response.$m[1]." OK done\r\n";$this->position=0;return strlen($data);
+        }
         $step=array_shift(self::$script);
         if (!$step || $m[2]!==$step[0]) throw new RuntimeException('Unexpected command: '.$m[2]);
         $this->buffer=str_replace('{tag}',$m[1],$step[1]); $this->position=0;

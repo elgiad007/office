@@ -2,6 +2,10 @@ import {escapeHtml as e} from './formats.js';
 
 const modes=new Map(), imageConsent=new Set(), originalColors=new Set();
 export function mailBody(record,prefs) {
+  if(record.meta.headerOnly===true){
+    const size=Number(record.meta.messageSize),label=Number.isFinite(size)?(size/1000000).toFixed(1)+' MB':'larger than the download limit';
+    return `<div class="mail-body"><p class="recurrence-note">This message is ${e(label)}. Office downloaded its headers; the body and attachments exceed the 1.4 MB download limit. Open the message in your email provider to read the full content.${record.meta.remote&&record.meta.gmailMessageId?' You can still mark it read, move it, or move it to Trash in Office.':''}</p></div>`;
+  }
   const hasHtml=record.meta.hasHtml===true;
   const mode=hasHtml ? modes.get(record.id)||(prefs.mailDisplay==='text'?'text':'html') : 'text';
   const theme=document.documentElement.dataset.theme==='dark'?'dark':'light';

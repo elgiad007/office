@@ -33,6 +33,7 @@ try{
  assert.equal(events[0].type,'activity');assert.equal(events.at(-1).type,'result');assert.equal(events.at(-1).body.ok,true);
  const failedStream=await fetch(a.url+'preferences',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf,'Content-Type':'application/json','X-Office-Progress':'1'},body:JSON.stringify({preferences:'invalid'})});
  const failureEvents=(await failedStream.text()).trim().split('\n').map(line=>JSON.parse(line));assert.equal(failureEvents.at(-1).status,400);
+ assert.ok(failureEvents.some(event=>event.type==='activity'&&event.entry.phase==='error'&&/Stopped: Save preferences.*Invalid preferences/.test(event.entry.message)),'Stopped activity preserves the specific failure reason');
  assert.ok(!JSON.stringify(await a.call('backup')).includes('Activity visibility fixture'));
  await a.call('activity',{action:'clear'});assert.equal((await a.call('activity')).entries.length,0);
  await a.call('google-settings',{},403,'bad-token');

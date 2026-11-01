@@ -37,9 +37,9 @@ function activity_begin(string $operation,string $account=''): void {
 function activity_step(string $message,string $level='info',?int $duration=null): void {
     if(isset($GLOBALS['office_activity']))activity_event($message,$level,'progress',$duration);
 }
-function activity_finish(bool $ok): void {
+function activity_finish(bool $ok,?string $reason=null): void {
     $context=$GLOBALS['office_activity']??null;if(!$context)return;
-    activity_event(($ok?'Completed: ':'Stopped: ').$context['operation'],$ok?'success':'error',$ok?'complete':'error',(int)round((microtime(true)-$context['started'])*1000));
+    activity_event(($ok?'Completed: ':'Stopped: ').$context['operation'].(!$ok&&$reason!==null?' — '.$reason:''),$ok?'success':'error',$ok?'complete':'error',(int)round((microtime(true)-$context['started'])*1000));
     unset($GLOBALS['office_activity']);
 }
 function activity_rows(int $after=0): array {

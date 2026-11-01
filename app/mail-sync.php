@@ -2,6 +2,26 @@
 declare(strict_types=1);
 
 const MAIL_FOLDERS = ['Inbox','Archive','Trash'];
+const IMAP_BODY_LIMIT = 1400000;
+const IMAP_HEADER_SECTION = 'HEADER.FIELDS (SUBJECT FROM TO DATE MESSAGE-ID)';
+function imap_download_sizes(mixed $s,array $ids): array {
+    $sizes=[];
+    foreach(array_chunk($ids,100) as $chunk){
+        $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID RFC822.SIZE)');
+        $tuples=preg_split('/(?=^\* \d+ FETCH)/mi',implode('',$response['lines']));
+        foreach($chunk as $uid){
+            foreach($tuples as $tuple)if(preg_match('/\bUID\s+'.preg_quote((string)$uid,'/').'(?=\s|\))/i',$tuple)&&preg_match('/\bRFC822\.SIZE\s+(\d+)\b/i',$tuple,$m)){$sizes[$uid]=(int)$m[1];break;}
+            if(!isset($sizes[$uid]))fail('The server did not return a message size. The previous mail view was kept; retry sync.');
+        }
+    }
+    return $sizes;
+}
+function imap_header_download(array $a,string $source,string $headers,array $meta,int $size): array {
+    $parsed=parse_eml($headers);
+    return ['kind'=>'mail','title'=>$parsed['title']?:'(Untitled)','body'=>'','meta'=>array_merge($parsed['meta'],$meta,[
+        'headerOnly'=>true,'messageSize'=>$size,'headersBase64'=>base64_encode($headers),'remote'=>true,
+        'account'=>$a['id'],'accountLabel'=>$a['label'],'source'=>$source])];
+}
 function mail_cache_rows(string $account): array {
     $q=db()->prepare("SELECT * FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
     $q->execute([$account]); return array_map('record_row',$q->fetchAll());
@@ -41,13 +61,13 @@ function publish_mail_snapshot(array $a,array $membership,array $downloads,?call
             }
         }
         $incomingHashes=[];
-        foreach ($downloads as $source=>$r) if (!isset($bySource[$source])) $incomingHashes[hash('sha256',$r['meta']['rawBase64'])][]=$source;
+        foreach ($downloads as $source=>$r) if (!isset($bySource[$source]) && isset($r['meta']['rawBase64'])) $incomingHashes[hash('sha256',$r['meta']['rawBase64'])][]=$source;
         foreach ($downloads as $source=>$r) {
             $old=$bySource[$source]??null;
-            $hash=hash('sha256',$r['meta']['rawBase64']);
+            $hash=isset($r['meta']['rawBase64'])?hash('sha256',$r['meta']['rawBase64']):null;
             // A unique byte-identical destination proves a move. Do not merge
             // ambiguous duplicates or copies still present in the source folder.
-            if (!$old && count($hashes[$hash]??[])===1 && count($incomingHashes[$hash]??[])===1) $old=$missing[$hashes[$hash][0]]??null;
+            if (!$old && $hash!==null && count($hashes[$hash]??[])===1 && count($incomingHashes[$hash]??[])===1) $old=$missing[$hashes[$hash][0]]??null;
             $r['id']=$old['id']??remote_id($a['id'],$source);
             validate_record($r);
             // Re-downloading unchanged mail must not invalidate an open reader.
@@ -201,13 +221,25 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
             if (count($candidates)>10) fail('Too many matching messages to reconcile safely. The previous mail view was kept.');
             foreach ($candidates as $uid) if (in_array($uid,$scan['ids'],true)) $ids[]=$uid;
         }
-        foreach (array_unique($ids) as $uid) {
+        $ids=array_values(array_unique($ids));$sizes=imap_download_sizes($s,$ids);
+        foreach ($ids as $uid) {
             mail_deadline($deadline);
+            $source=mail_source($scan['path'],$scan['validity'],$uid);
+            if($sizes[$uid]>IMAP_BODY_LIMIT){
+                $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)');
+                $headers=imap_fetch_content($response,(string)$uid,IMAP_HEADER_SECTION);
+                if($headers===null)fail('Message headers changed during synchronization. The previous mail view was kept; retry sync.');
+                $meta=$membership[$source];$meta['read']=imap_fetch_flags($response,(string)$uid);
+                if($gmail)$meta['gmailMessageId']=imap_gmail_message_id($response,(string)$uid);
+                $downloads[$source]=imap_header_download($a,$source,$headers,$meta,$sizes[$uid]);
+                if(function_exists('activity_step'))activity_step('IMAP: retained headers for a '.$sizes[$uid].'-byte message; body exceeds the '.IMAP_BODY_LIMIT.'-byte download limit.','warning');
+                continue;
+            }
             $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK[])');
             $raw=imap_fetch_content($response,$uid);
             if ($raw===null) fail('A message changed during synchronization. The previous mail view was kept; retry sync.');
             $source=mail_source($scan['path'],$scan['validity'],$uid);
-            $meta=$membership[$source]; $meta['read']=imap_fetch_flags($response,$uid);
+            $meta=$membership[$source]; $meta['read']=imap_fetch_flags($response,$uid);$meta['messageSize']=$sizes[$uid];
             if ($gmail) $meta['gmailMessageId']=imap_gmail_message_id($response,$uid);
             $downloads[$source]=mail_download($a,$source,$raw,$meta);
         }

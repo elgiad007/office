@@ -15,6 +15,7 @@ import {testMailFolder} from './mail-folder.browser.mjs';
 import {testMailRead} from './mail-read.browser.mjs';
 import {testMailOperationQueue} from './mail-operation-queue.browser.mjs';
 import {testActivity} from './activity.browser.mjs';
+import {testLargeMail} from './large-mail.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
@@ -84,6 +85,7 @@ try{
  await testMailRead(page,url);
  await testMailOperationQueue(page,url);
  await testActivity(page,url);
+ await testLargeMail(page,url);
  await testAccountFolders(page,url);
  await testMailHtml(page,url);
  await testItemMenus(page,url);

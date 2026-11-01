@@ -191,7 +191,7 @@ function imap_message_content(mixed $s,string $id): ?string {
     $response=imap_command($s,'UID FETCH '.$id.' (UID BODY.PEEK[])');
     return imap_fetch_content($response,$id);
 }
-function imap_fetch_content(array $response,string $id): ?string {
+function imap_fetch_content(array $response,string $id,string $section=''): ?string {
     // UID can follow the body literal. Keep unsolicited FETCH literals separate.
     $header=''; $body=null; $literalIndex=0; $seen=false;
     $matches=static fn(string $line):bool=>(bool)preg_match('/\bUID\s+'.preg_quote($id,'/').'(?=\s|\))/i',$line);
@@ -206,7 +206,7 @@ function imap_fetch_content(array $response,string $id): ?string {
         $header.=$line;
         if (preg_match('/\{\d+\}\r\n$/',$line)) {
             $literal=$response['literals'][$literalIndex++]??null;
-            if (preg_match('/\bBODY\[\](?:<\d+>)?\s+\{\d+\}\r\n$/i',$line)) $body=$literal;
+            if (preg_match('/\bBODY\['.preg_quote($section,'/').'\](?:<\d+>)?\s+\{\d+\}\r\n$/i',$line)) $body=$literal;
         }
     }
     if ($seen) fail('The IMAP server returned the message without readable content.');
@@ -261,22 +261,22 @@ function save_imap_gmail_move(array $r,array $relatedIds): array {
         $db->commit(); return $saved;
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
 }
-function imap_verify_gmail_move(mixed $s,string $sourceFolder,string $gmailId,string $folder,string $raw): array {
+function imap_verify_gmail_move(mixed $s,string $sourceFolder,string $gmailId,string $folder): array {
     activity_step('IMAP: checking source and destination after an interrupted move.','warning');
     imap_command($s,'EXAMINE '.imap_quote($sourceFolder));
     if(imap_search_ids($s,'X-GM-MSGID '.$gmailId))fail('The move remains unconfirmed: the message is still in its source folder. Sync before retrying.');
     $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($folder)));
     $ids=imap_search_ids($s,'X-GM-MSGID '.$gmailId);
     if(count($ids)!==1)fail('The move remains unconfirmed: the message was not uniquely located in the destination. Sync before retrying.');
-    $body=imap_message_content($s,$ids[0]);
-    if($body===null||!hash_equals(hash('sha256',$raw),hash('sha256',$body)))fail('The move remains unconfirmed: destination contents could not be verified. Sync before retrying.');
+    $identity=imap_gmail_message_id(imap_command($s,'UID FETCH '.$ids[0].' (UID X-GM-MSGID)'),$ids[0]);
+    if($identity!==$gmailId)fail('The move remains unconfirmed: destination identity could not be verified. Sync before retrying.');
     activity_step('IMAP: interrupted move confirmed in the destination; no second move was sent.','success');
     return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$ids[0],'source'=>mail_source($folder,$validity,$ids[0]),'gmailMessageId'=>$gmailId];
 }
 function imap_move_verified(mixed $s,string $id,string $folder,string $operation='Move',?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $knownGmailId=null): array {
     if (!ctype_digit($id) || (int)$id<1) fail('Invalid IMAP message identifier.');
-    $raw=imap_message_content($s,$id);
-    if ($raw===null) {
+    $raw=$gmail?null:imap_message_content($s,$id);
+    if (!$gmail && $raw===null) {
         if (in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('The message is in its source server folder, but its content could not be read. No message was moved.');
         throw new ImapMessageMissing('This message is no longer in its server folder. Use Sync now or Repair / resync to update its location.',409);
     }
@@ -299,13 +299,18 @@ function imap_move_verified(mixed $s,string $id,string $folder,string $operation
         $candidates=$gmail?imap_search_ids($s,'X-GM-MSGID '.$gmailId):array_values(array_filter(imap_search_ids($s,'UID '.$next.':*'),static fn($uid)=>(int)$uid>=(int)$next));
         if (count($candidates)>10) fail('Too many new destination messages to verify this move.');
         foreach ($candidates as $uid) {
+            if($gmail){
+                $identity=imap_gmail_message_id(imap_command($s,'UID FETCH '.$uid.' (UID X-GM-MSGID)'),$uid);
+                if($identity===$gmailId)return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$uid,'source'=>mail_source($folder,$validity,$uid),'gmailMessageId'=>$gmailId];
+                continue;
+            }
             $archived=imap_message_content($s,$uid);
             if ($archived!==null && hash_equals(hash('sha256',$raw),hash('sha256',$archived))) return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$uid,'source'=>mail_source($folder,$validity,$uid)]+($gmail?['gmailMessageId'=>$gmailId]:[]);
         }
         fail('The message could not be found in the destination folder.');
     } catch (ImapTransportError $error) {
         if($gmail && $account!==null && $sourceFolder!==null) {
-            try{return imap_with_connection($account,fn($fresh)=>imap_verify_gmail_move($fresh,$sourceFolder,$gmailId,$folder,$raw));}
+            try{return imap_with_connection($account,fn($fresh)=>imap_verify_gmail_move($fresh,$sourceFolder,$gmailId,$folder));}
             catch(HttpError $recovery){fail($operation.' could not be confirmed. '.$recovery->getMessage().' Sync before retrying.');}
         }
         fail($operation.' could not be confirmed. '.$error->getMessage().' Sync before retrying; the server may have completed the move.');

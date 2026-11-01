@@ -21,9 +21,9 @@ try {
         ['UID SEARCH X-GM-MSGID 9001',"* SEARCH\r\n{tag} OK done\r\n"],
         ['EXAMINE "[Gmail]/Trash"',"* OK [UIDVALIDITY 8] valid\r\n{tag} OK done\r\n"],
         ['UID SEARCH X-GM-MSGID 9001',"* SEARCH 70\r\n{tag} OK done\r\n"],
-        ['UID FETCH 70 (UID BODY.PEEK[])',message_response('70')],
-    ],function($s){$location=imap_verify_gmail_move($s,'INBOX','9001','[Gmail]/Trash','Original message');check($location['providerId']==='70'&&!array_filter(ArchiveFixture::$commands,fn($command)=>str_contains($command,' MOVE ')),'read-only recovery confirms completed Gmail move without repeating it');});
-    fixture([['EXAMINE "INBOX"',"* OK [UIDVALIDITY 3] valid\r\n{tag} OK done\r\n"],['UID SEARCH X-GM-MSGID 9001',"* SEARCH 42\r\n{tag} OK done\r\n"]],function($s){refused(fn()=>imap_verify_gmail_move($s,'INBOX','9001','[Gmail]/Trash','Original message'),'still in its source folder');});
+        ['UID FETCH 70 (UID X-GM-MSGID)',"* 1 FETCH (UID 70 X-GM-MSGID 9001)\r\n{tag} OK done\r\n"],
+    ],function($s){$location=imap_verify_gmail_move($s,'INBOX','9001','[Gmail]/Trash');check($location['providerId']==='70'&&!array_filter(ArchiveFixture::$commands,fn($command)=>str_contains($command,' MOVE ')),'read-only recovery confirms completed Gmail move without repeating it');});
+    fixture([['EXAMINE "INBOX"',"* OK [UIDVALIDITY 3] valid\r\n{tag} OK done\r\n"],['UID SEARCH X-GM-MSGID 9001',"* SEARCH 42\r\n{tag} OK done\r\n"]],function($s){refused(fn()=>imap_verify_gmail_move($s,'INBOX','9001','[Gmail]/Trash'),'still in its source folder');});
     for($i=0;$i<505;$i++)activity_event('Event '.$i);
     $entries=activity_rows();check(count($entries)===500&&$entries[0]['message']==='Event 5','activity retention is bounded to latest 500 entries');
     check(count(activity_rows((int)$entries[498]['id']))===1,'activity cursor returns only new events');

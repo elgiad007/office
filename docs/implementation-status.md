@@ -37,3 +37,5 @@
 ## Deliberate first-version limits
 
 No complete mailbox synchronization or deletion reconciliation, external calendar edits/invitations, CalDAV recurrence expansion, MIME attachment viewer, MBOX, full DokuWiki/CommonMark compatibility, offline editing, or DOCX/ODT/XLSX/ODS conversion. Sync is a bounded recent snapshot. Embedded raster document images are supported; external images are omitted. See README for exact behavior and next phases in implementation-plan.md.
+
+- Large-message IMAP sync checks sizes in batches, retains up to 32 KB of selected headers above 1.4 MB, and continues downloading normal mail. Header-only copies carry an explicit reader notice and no fabricated original EML. Gmail moves and interrupted-move recovery verify its unique message ID without body downloads; generic IMAP retains byte-content move verification. Stopped activity entries include the safe API failure reason. Fixtures cover an 8.1 MB message followed by normal mail, body-free Gmail Trash, and streamed failure reasons. A read-only live Gmail sync refreshed 30 messages in 27.3 seconds and retained the 8.1 MB message as headers only; no live move was performed.
