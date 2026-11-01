@@ -4,13 +4,15 @@ A personal office suite for a folder on your own computer or a PHP shared-hostin
 
 ## Run on Windows
 
-Extract **the Windows release ZIP** into a writable folder, then double-click **Start Office.bat**. It starts the bundled PHP executable as a hidden web server on `127.0.0.1:8765` and opens your browser. The console displays a one-time setup token. Create your owner password in the browser. Use **Stop Office.bat** before moving the folder or removing a USB drive. Save work before stopping it. No Apache, Docker, database service or PHP installation is needed in this release bundle.
+Extract **the Windows release ZIP** into a writable folder, then double-click **Start Office.bat**. It starts the bundled local server on `127.0.0.1:8765` and opens your browser. Releases with portable Apache use four PHP FastCGI workers; other releases use PHP's built-in development server. The console displays a one-time setup token. Create your owner password in the browser. Use **Stop Office.bat** before moving the folder or removing a USB drive. Save work before stopping it. No Windows service, Docker, database server or system PHP installation is needed.
 
 The executable has companion DLLs/extensions; keep the `runtime/windows/` files together. The bundle includes Mozilla CA certificates distributed by curl for verified TLS connections. Windows x64 is targeted. A missing Microsoft Visual C++ runtime can prevent PHP starting; see [runtime notes](runtime/windows/README.md). The development server is for localhost only, never public network hosting.
 
 Optional: `Start Office.bat -Port 8766` or `Start Office.bat -NoBrowser`. Starting again reuses this folder's recorded process. It does not deliberately stop or reuse another application's server. The folder must be writable; Program Files is not a suitable default location.
 
 Source checkouts do not contain PHP binaries. Build the Windows release with the packaging instructions below. For development, an existing PHP installation can run `php -S 127.0.0.1:8765 -t public`.
+
+For concurrent local requests, use the [portable Apache development setup](docs/development-server.md). It uses the existing Windows PHP runtime with four FastCGI workers, requires no Windows service or WSL, and is selected automatically by Start Office when installed.
 
 ## Run locally on Linux
 

@@ -35,12 +35,14 @@ export async function testMailRead(page,url) {
   const readCalls=id=>calls.filter(c=>c.id===id&&(c.action==='read'||c.route==='save'));
   try {
     hold('a');await page.goto(url+'?read-test#mail');await selected('a');
+    await item('a').evaluate(el=>window.mailNavigationProbe=el);
     // Navigation must not wait for the IMAP read request.
     await item('a').focus();await page.keyboard.press('j');await selected('b');
     await button('Mark unread').waitFor();assert.equal(records.find(r=>r.id==='b').meta.read,true);
     release('a');await item('a').filter({has:page.locator('.mail-read-status',{hasText:'Read'})}).waitFor();
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'b','Late response does not steal selection');
     assert.equal(await item('b').evaluate(el=>el===document.activeElement),true,'Late response preserves keyboard focus');
+    assert.equal(await item('a').evaluate(el=>el===window.mailNavigationProbe),true,'Navigation and read responses preserve existing list rows');
     assert.equal(readCalls('a').length,1);assert.equal(readCalls('b').length,1);
 
     await button('Mark unread').click();await button('Mark read').waitFor();

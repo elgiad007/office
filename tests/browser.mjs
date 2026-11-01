@@ -13,6 +13,7 @@ import {testMailSend} from './mail-send.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
 import {testMailFolder} from './mail-folder.browser.mjs';
 import {testMailRead} from './mail-read.browser.mjs';
+import {testMailCache} from './mail-cache.browser.mjs';
 import {testMailOperationQueue} from './mail-operation-queue.browser.mjs';
 import {testActivity} from './activity.browser.mjs';
 import {testLargeMail} from './large-mail.browser.mjs';
@@ -83,6 +84,7 @@ try{
  await testMailSender(page,url);
  await testMailFolder(page,url);
  await testMailRead(page,url);
+ await testMailCache(page,url);
  await testMailOperationQueue(page,url);
  await testActivity(page,url);
  await testLargeMail(page,url);

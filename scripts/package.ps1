@@ -1,4 +1,4 @@
-param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256)
+param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256,[string]$ApacheRuntimeArchive,[string]$ApacheExpectedSha256)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $officeDist=Join-Path $officeRoot 'dist'
@@ -18,6 +18,11 @@ if ($WindowsRuntimeArchive) {
     if (-not $ExpectedSha256 -or (Get-FileHash -LiteralPath $WindowsRuntimeArchive -Algorithm SHA256).Hash -ne $ExpectedSha256) { throw 'A matching official SHA-256 is required for the Windows runtime archive.' }
     Expand-Archive -LiteralPath $WindowsRuntimeArchive -DestinationPath (Join-Path $officePackage 'runtime\windows') -Force
     $officeZipName='portable-office-windows.zip'
+}
+if($ApacheRuntimeArchive){
+    if(!$WindowsRuntimeArchive){throw 'Apache packaging requires the Windows PHP runtime too.'}
+    if(!$ApacheExpectedSha256 -or (Get-FileHash -LiteralPath $ApacheRuntimeArchive -Algorithm SHA256).Hash -ne $ApacheExpectedSha256){throw 'A matching publisher SHA-256 is required for the Apache archive.'}
+    Expand-Archive -LiteralPath $ApacheRuntimeArchive -DestinationPath (Join-Path $officePackage 'runtime\apache') -Force
 }
 Compress-Archive -LiteralPath $officePackage -DestinationPath (Join-Path $officeDist $officeZipName) -Force
 Write-Host (Join-Path $officeDist $officeZipName)

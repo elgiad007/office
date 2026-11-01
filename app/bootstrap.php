@@ -106,7 +106,18 @@ function record_row(array $row): array {
     }
     // Empty PHP maps otherwise serialize as [], which loses named cell edits in JavaScript.
     if ($row['kind']==='sheets') foreach ($row['meta']['workbook']['sheets'] as &$sheet) $sheet['cells']=(object)$sheet['cells'];
+    if($row['kind']==='mail' && !empty($row['meta']['remote']))$row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
     $row['revision']=(int)$row['revision']; return $row;
+}
+/** Keep originals on the server during normal browsing. Bodies remain available
+ * for instant text reading, replies and full-body search. */
+function mail_list_record(array $row): array {
+    if (empty($row['meta']['remote'])) return $row;
+    $row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
+    $row['hasOriginal']=isset($row['meta']['rawBase64']) || isset($row['meta']['raw']);
+    $row['summary']=true;
+    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64']);
+    return $row;
 }
 function get_record(string $id): array {
     $q=db()->prepare('SELECT * FROM records WHERE id=?'); $q->execute([$id]); $r=$q->fetch();

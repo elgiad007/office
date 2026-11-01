@@ -65,9 +65,8 @@ try {
         ['EXAMINE "[Gmail]/All Mail"',"* OK [UIDVALIDITY 1] valid\r\n{tag} OK done\r\n"],
         ['EXAMINE "[Gmail]/Trash"',"* OK [UIDVALIDITY 8] valid\r\n{tag} OK done\r\n"],
         ['UID FETCH 70 (UID FLAGS X-GM-MSGID)',"* 1 FETCH (UID 70 FLAGS (\\Seen) X-GM-MSGID 9001)\r\n{tag} OK done\r\n"],
-        ['UID FETCH 70 (UID FLAGS X-GM-MSGID BODY.PEEK[])','* 1 FETCH (UID 70 FLAGS (\\Seen) X-GM-MSGID 9001 BODY[] {'.strlen(base64_decode($raw))."}\r\n".base64_decode($raw).")\r\n{tag} OK done\r\n"],
     ],function($s) use($a,$rows) {
-        check(imap_sync_stream($a,$s)===1,'Gmail sync reads system Trash rather than custom Trash label');
+        check(imap_sync_stream($a,$s)===0,'Gmail sync refreshes system Trash flags without redownloading cached content');
         $cached=mail_cache_rows($a['id']);
         check(count($cached)===2 && get_record($rows['source']['id'])['meta']['folder']==='Trash' && get_record($rows['source']['id'])['meta']['gmailMessageId']==='9001','sync preserves verified Trash identity without resurrecting Inbox or All Mail copies');
     });

@@ -68,11 +68,30 @@ try {
     stream_wrapper_register('mailfixture',MailFixture::class);$stream=fopen('mailfixture://test','r+');$response=imap_command($stream,'UID FETCH 1 (BODY.PEEK[])');check($response['literals']===['hello'],'IMAP literal/tag fixture');fclose($stream);
     with_account_mail_lock('fixture-account',function() {
         try { with_account_mail_lock('fixture-account',fn()=>throw new RuntimeException('Overlapping sync acquired the lock')); throw new RuntimeException('Expected lock conflict'); }
-        catch(HttpError $e) { check($e->getCode()===409,'sync and archive on the same account cannot overlap'); }
+        catch(HttpError $e) { check($e->getCode()===409,'provider mutations on the same account cannot overlap'); }
         check(with_account_mail_lock('another-account',fn()=>true),'different accounts may run concurrently');
     });
     try { with_account_mail_lock('fixture-account',fn()=>throw new RuntimeException('fixture failure')); } catch(RuntimeException) {}
     check(with_account_mail_lock('fixture-account',fn()=>true),'account lock released after failure');
+    $guardAccount=['id'=>'guard-fixture','label'=>'Guard'];
+    db()->prepare('INSERT INTO accounts (id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute([$guardAccount['id'],'Guard','imap','{}','']);
+    $guardSource=mail_source('INBOX','1','1');$guardMeta=['folder'=>'Inbox','serverFolder'=>'INBOX','uidValidity'=>'1','providerId'=>'1','read'=>false];
+    $guardMail=mail_download($guardAccount,$guardSource,"Subject: Guard\r\n\r\nImmutable body",$guardMeta);
+    publish_mail_snapshot($guardAccount,[$guardSource=>$guardMeta],[$guardSource=>$guardMail]);
+    $guardId=remote_id($guardAccount['id'],$guardSource);
+    $guardResult=with_account_mail_sync($guardAccount['id'],function()use($guardAccount,$guardId,$guardSource,$guardMeta,$guardMail){
+        with_account_mail_mutation($guardAccount['id'],function()use($guardId){$r=get_record($guardId);$r['meta']['read']=true;save_record($r,true);});
+        return publish_mail_snapshot($guardAccount,[$guardSource=>$guardMeta],[$guardSource=>$guardMail]);
+    });
+    check($guardResult===0 && get_record($guardId)['meta']['read']===true,'interactive update proceeds during a scan and stale publication cannot undo it');
+    $guardResult=with_account_mail_sync($guardAccount['id'],function()use($guardAccount,$guardSource,$guardMeta,$guardMail){
+        return with_account_mail_mutation($guardAccount['id'],fn()=>publish_mail_snapshot($guardAccount,[$guardSource=>$guardMeta],[$guardSource=>$guardMail]));
+    });
+    check($guardResult===0 && get_record($guardId)['meta']['read']===true,'scan cannot publish while an interactive write holds the account lock');
+    $guardGeneration=mail_generation($guardAccount['id']);
+    try{with_account_mail_mutation($guardAccount['id'],fn()=>throw new RuntimeException('uncertain provider write'));}catch(RuntimeException){}
+    check(mail_generation($guardAccount['id'])===$guardGeneration+2,'failed or uncertain writes invalidate in-flight scans too');
+    check(with_account_mail_sync($guardAccount['id'],fn()=>publish_mail_snapshot($guardAccount,[$guardSource=>$guardMeta],[$guardSource=>$guardMail]))===1,'a later clean scan can publish normally');
 } finally {
     // This test-created directory has a fixed unique prefix, never user data.
     foreach (glob($testDir.'/*')?:[] as $file) @unlink($file); @rmdir($testDir);

@@ -213,10 +213,10 @@ function imap_fetch_content(array $response,string $id,string $section=''): ?str
     return null;
 }
 class ImapMessageMissing extends HttpError {}
-function imap_archive(mixed $s,string $id,string $configured,?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $gmailId=null): array {
+function imap_archive(mixed $s,string $id,string $configured,?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $gmailId=null,?string $cachedRaw=null): array {
     if (!ctype_digit($id) || (int)$id<1) fail('Invalid IMAP message identifier.');
     $folder=imap_archive_folder($s,$configured);
-    return imap_move_verified($s,$id,$folder,'Archive',$sourceFolder,$gmail,$account,$gmailId);
+    return imap_move_verified($s,$id,$folder,'Archive',$sourceFolder,$gmail,$account,$gmailId,$cachedRaw);
 }
 /** Gmail's account-wide ID is distinct from a folder UID. Never compare thread IDs. */
 function imap_gmail_message_id(array $response,string $uid): string {
@@ -273,9 +273,9 @@ function imap_verify_gmail_move(mixed $s,string $sourceFolder,string $gmailId,st
     activity_step('IMAP: interrupted move confirmed in the destination; no second move was sent.','success');
     return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$ids[0],'source'=>mail_source($folder,$validity,$ids[0]),'gmailMessageId'=>$gmailId];
 }
-function imap_move_verified(mixed $s,string $id,string $folder,string $operation='Move',?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $knownGmailId=null): array {
+function imap_move_verified(mixed $s,string $id,string $folder,string $operation='Move',?string $sourceFolder=null,bool $gmail=false,?array $account=null,?string $knownGmailId=null,?string $cachedRaw=null): array {
     if (!ctype_digit($id) || (int)$id<1) fail('Invalid IMAP message identifier.');
-    $raw=$gmail?null:imap_message_content($s,$id);
+    $raw=$gmail?null:($cachedRaw??imap_message_content($s,$id));
     if (!$gmail && $raw===null) {
         if (in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('The message is in its source server folder, but its content could not be read. No message was moved.');
         throw new ImapMessageMissing('This message is no longer in its server folder. Use Sync now or Repair / resync to update its location.',409);
@@ -290,12 +290,19 @@ function imap_move_verified(mixed $s,string $id,string $folder,string $operation
     }
     try {
         activity_step('IMAP: moving message to '.$folder.'.');
-        imap_command($s,'UID MOVE '.$id.' '.imap_quote($folder));
+        $moved=imap_command($s,'UID MOVE '.$id.' '.imap_quote($folder));
         // Reopen Gmail's source to discard its session's previous label view.
         if ($gmail && $sourceFolder!==null) imap_command($s,'EXAMINE '.imap_quote($sourceFolder));
         if (in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('The message is still in its source server folder.');
         activity_step('IMAP: verifying destination folder '.$folder.'.');
         $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($folder)));
+        // COPYUID gives an unambiguous destination identity for this exact UID.
+        // Only accept a single-message mapping and confirm its mailbox/existence.
+        if(!$gmail && preg_match('/\[COPYUID ([1-9][0-9]*) '.preg_quote($id,'/').' ([1-9][0-9]*)\]/i',implode('',$moved['lines']),$mapping) && $mapping[1]===$validity){
+            $uid=$mapping[2];$confirmed=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS)');
+            if(imap_response_has_uid($confirmed,$uid))return ['serverFolder'=>$folder,'uidValidity'=>$validity,'providerId'=>$uid,'source'=>mail_source($folder,$validity,$uid),'read'=>imap_fetch_flags($confirmed,$uid)];
+            fail('The mapped message is missing from the destination folder.');
+        }
         $candidates=$gmail?imap_search_ids($s,'X-GM-MSGID '.$gmailId):array_values(array_filter(imap_search_ids($s,'UID '.$next.':*'),static fn($uid)=>(int)$uid>=(int)$next));
         if (count($candidates)>10) fail('Too many new destination messages to verify this move.');
         foreach ($candidates as $uid) {
@@ -318,7 +325,7 @@ function imap_move_verified(mixed $s,string $id,string $folder,string $operation
         fail($operation.' could not be confirmed. '.$error->getMessage().' Check the server source and destination folders, then use Sync now before retrying.');
     }
 }
-/** Serialize provider reads and writes so a stale in-flight sync cannot undo an archive in the cache. */
+/** Serialize provider mutations and the brief cache-publication phase. */
 function with_account_mail_lock(string $accountId,callable $operation): mixed {
     $lock=fopen(data_dir().'/mail-'.hash('sha256',$accountId).'.lock','c');
     if ($lock===false) fail('Cannot lock this account for synchronization.',503);
@@ -327,6 +334,42 @@ function with_account_mail_lock(string $accountId,callable $operation): mixed {
         try { return $operation(); }
         finally { flock($lock,LOCK_UN); }
     } finally { fclose($lock); }
+}
+class MailSyncSuperseded extends RuntimeException {}
+function mail_generation(string $accountId): int {return (int)setting('mail-generation:'.$accountId,0);}
+/** Provider writes remain serialized. Invalidate scans on both sides of network
+ * work, including failures where a provider may have completed the operation. */
+function with_account_mail_mutation(string $accountId,callable $operation): mixed {
+    return with_account_mail_lock($accountId,function()use($accountId,$operation){
+        set_setting('mail-generation:'.$accountId,mail_generation($accountId)+1);
+        try{return $operation();}
+        finally{set_setting('mail-generation:'.$accountId,mail_generation($accountId)+1);}
+    });
+}
+/** Sync owns a separate scan lock. Interactive writes never wait for its network
+ * reads; publication briefly takes the write lock and checks the generation. */
+function with_account_mail_sync(string $accountId,callable $operation): int {
+    return with_account_mail_lock('sync:'.$accountId,function()use($accountId,$operation){
+        $previous=$GLOBALS['office_mail_sync_context']??null;
+        $GLOBALS['office_mail_sync_context']=['account'=>$accountId,'generation'=>mail_generation($accountId)];
+        try{return $operation();}
+        catch(MailSyncSuperseded){activity_step('Mail changed during synchronization; discarded the older scan. The next check will refresh it.');return 0;}
+        finally{if($previous===null)unset($GLOBALS['office_mail_sync_context']);else $GLOBALS['office_mail_sync_context']=$previous;}
+    });
+}
+function mail_sync_publish_guard(string $accountId,callable $publish): mixed {
+    $context=$GLOBALS['office_mail_sync_context']??null;
+    if($context===null)return $publish();
+    if($context['account']!==$accountId)throw new LogicException('Mail scan account mismatch.');
+    $entered=false;
+    try{return with_account_mail_lock($accountId,function()use($accountId,$context,$publish,&$entered){
+        $entered=true;
+        if(mail_generation($accountId)!==$context['generation'])throw new MailSyncSuperseded();
+        return $publish();
+    });}catch(HttpError $error){
+        if(!$entered && $error->getCode()===409)throw new MailSyncSuperseded();
+        throw $error;
+    }
 }
 function sync_imap(array $a,bool $repair=false): int {
     return imap_with_connection($a,fn($s)=>imap_sync_stream($a,$s,$repair));
@@ -370,7 +413,8 @@ function remote_mail_action(array $r,string $action): array {
                 $gmail=imap_is_gmail($a);
                 $gmailId=null;if ($gmail) $relatedIds=imap_gmail_move_copies($a,$s,$r,$path,$id,$gmailId);
                 // The archive preflight checks MOVE and never creates or expunges folders.
-                if ($destination==='Archive') $location=imap_archive($s,$id,$a['config']['archiveFolder']??'Archive',$path,$gmail,$a,$gmailId);
+                $cachedRaw=isset($r['meta']['rawBase64'])?base64_decode($r['meta']['rawBase64'],true):false;
+                if ($destination==='Archive') $location=imap_archive($s,$id,$a['config']['archiveFolder']??'Archive',$path,$gmail,$a,$gmailId,$cachedRaw===false?null:$cachedRaw);
                 else {
                     $cap=imap_command($s,'CAPABILITY');
                     if (!preg_match('/\b(?:MOVE|IMAP4REV2)\b/i',implode('',$cap['lines']))) fail('This IMAP server does not support MOVE.');
@@ -382,7 +426,7 @@ function remote_mail_action(array $r,string $action): array {
                     }
                     if ($target===$path) fail('Source and destination folders must be different.');
                     imap_command($s,'STATUS '.imap_quote($target).' (MESSAGES)');
-                    $location=imap_move_verified($s,$id,$target,'Move',$path,$gmail,$a,$gmailId);
+                    $location=imap_move_verified($s,$id,$target,'Move',$path,$gmail,$a,$gmailId,$cachedRaw===false?null:$cachedRaw);
                 }
                 $r['meta']=array_merge($r['meta'],$location,['folder'=>$destination]);
             } else {

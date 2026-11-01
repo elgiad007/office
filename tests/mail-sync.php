@@ -54,10 +54,23 @@ try {
     $cachedIds=array_map(fn($r)=>$r['meta']['providerId'],mail_cache_rows($a['id']));
     $flags=''; foreach ($cachedIds as $index=>$uid) $flags.='* '.($index+1).' FETCH (UID '.$uid.' FLAGS ())'."\r\n";
     $normal=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),['UID FETCH '.implode(',',$cachedIds).' (UID FLAGS)',$flags."{tag} OK done\r\n"]];
-    foreach (range(2,11) as $uid) $normal[]=download_step((string)$uid,"Subject: Other $uid\r\n\r\nRefreshed $uid");
     $normal[]=examine_step('Deleted');
     fixture($normal,function($s) use($a) { imap_sync_stream($a,$s); });
+    check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK')),'warm sync downloads no cached message bodies');
     check(get_record($old)['meta']['read']===false,'batched flags refresh older cached messages outside the download window');
+    // CONDSTORE checkpoints must preserve unchanged flags and advance only after
+    // a complete publish, without assuming all servers support the extension.
+    $deltaPreflight=sync_preflight();$deltaPreflight[0][1]=str_replace('MOVE SPECIAL-USE','MOVE SPECIAL-USE CONDSTORE',$deltaPreflight[0][1]);
+    $deltaSelect=static fn($path,$seq)=>['EXAMINE '.imap_quote($path).' (CONDSTORE)',"* OK [UIDVALIDITY 100] valid\r\n* OK [HIGHESTMODSEQ $seq] state\r\n{tag} OK done\r\n"];
+    set_setting('imap-checkpoints:'.$a['id'],['Saved'=>['validity'=>'100','modseq'=>'8']]);
+    $delta=[...$deltaPreflight,$deltaSelect('INBOX','10'),search_step('ALL',[]),$deltaSelect('Saved','10'),search_step('ALL',$archiveIds),$deltaSelect('Deleted','10'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),
+        ['UID FETCH '.implode(',',$cachedIds).' (UID FLAGS) (CHANGEDSINCE 8)',"* 1 FETCH (UID 1 FLAGS (\\Seen) MODSEQ (9))\r\n{tag} OK done\r\n"],examine_step('Deleted')];
+    fixture($delta,function($s)use($a){check(imap_sync_stream($a,$s)===0,'incremental flags do not download cached bodies');});
+    check(get_record($old)['meta']['read']===true,'changed flag applied from CONDSTORE response');
+    check(setting('imap-checkpoints:'.$a['id'])['Saved']['modseq']==='10','successful scan advances its initial watermark');
+    $checkpoint=setting('imap-checkpoints:'.$a['id']);
+    fixture([...$deltaPreflight,$deltaSelect('INBOX','11'),search_step('ALL',[]),['EXAMINE "Saved" (CONDSTORE)',"{tag} NO denied\r\n"]],function($s)use($a){refused(fn()=>imap_sync_stream($a,$s),'EXAMINE refused');});
+    check(setting('imap-checkpoints:'.$a['id'])===$checkpoint,'failed scan cannot advance incremental checkpoints');
     $before=mail_cache_rows($a['id']);
     fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX','101')],function($s) use($a) { refused(fn()=>imap_sync_stream($a,$s),'Mailbox identifiers changed'); });
     check(mail_cache_rows($a['id'])===$before,'UIDVALIDITY changing during a scan leaves the previous view intact');
@@ -111,6 +124,8 @@ try {
     sync_google_mail($g,$transport);
     check(get_record(remote_id($g['id'],'gmail:moved'))['meta']['folder']==='Trash','Gmail move reconciles stable message into Trash');
     check(count(mail_cache_rows($g['id']))===3 && count(array_filter($pages,fn($p)=>str_contains($p,'pageToken=page-two')))===1,'Gmail pagination includes later Inbox pages');
+    $pages=[];sync_google_mail($g,$transport);
+    check(!array_filter($pages,fn($p)=>str_contains($p,'format=raw')),'warm Gmail sync reuses cached bodies while refreshing labels');
     $before=mail_cache_rows($g['id']);
     refused(fn()=>sync_google_mail($g,function($path) { if (str_contains($path,'pageToken')) fail('fixture page failed'); return ['messages'=>[],'nextPageToken'=>'next']; }),'fixture page failed');
     check(mail_cache_rows($g['id'])===$before,'failed Gmail page does not remove cached messages');
@@ -135,8 +150,8 @@ try {
     $customRow=save_record(mail_download($custom,mail_source('Travel/Orders','100','1'),$raw,$customMeta),true);
     $listing=sync_preflight();
     $listing[1][1]=str_replace('{tag}',"* LIST () \"/\" \"Travel/Orders\"\r\n{tag}",$listing[1][1]);
-    fixture([...$listing,examine_step('Travel/Orders'),search_step('ALL',['1']),examine_step('Travel/Orders'),['UID FETCH 1 (UID FLAGS)',"* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n{tag} OK done\r\n"],download_step('1',$raw)],function($s) use($custom) {
-        check(imap_sync_stream($custom,$s,false,'Travel/Orders',20)===1,'custom folder scans independently');
+    fixture([...$listing,examine_step('Travel/Orders'),search_step('ALL',['1']),examine_step('Travel/Orders'),['UID FETCH 1 (UID FLAGS)',"* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n{tag} OK done\r\n"]],function($s) use($custom) {
+        check(imap_sync_stream($custom,$s,false,'Travel/Orders',20)===0,'custom folder refresh reuses cached content');
     });
     check(get_record($inbox['id'])===$inbox,'custom scan does not reconcile unrelated Inbox');
     check(get_record($customRow['id'])['meta']['read']===true,'custom scan refreshes flags and keeps identity');
@@ -175,6 +190,7 @@ try {
     check(count(mail_cache_rows($g2['id']))===2 && count(array_filter($paths,fn($p)=>str_contains($p,'pageToken')))===1,'Gmail custom label scan follows all pages');
     check(mail_cache_rows($g2['id'])[0]['meta']['labelIds']===['INBOX','Label_travel','Label_orders'],'multiple labels retained on one cached message');
     sync_gmail_folder($g2,'Label_orders',10,$labelTransport);
+    check(count(array_filter($paths,fn($p)=>str_contains($p,'format=raw')))===2,'opening another label does not redownload the same originals');
     check(count(mail_cache_rows($g2['id']))===2,'opening a second label does not duplicate Gmail messages');
     sync_gmail_folder($g2,'Label_travel',10,fn($p)=>str_starts_with($p,'?')?[]:['labelIds'=>['INBOX','Label_orders']]);
     check(count(mail_cache_rows($g2['id']))===2 && !in_array('Label_travel',mail_cache_rows($g2['id'])[0]['meta']['labelIds'],true),'removing label elsewhere preserves mail and other labels');

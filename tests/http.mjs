@@ -81,6 +81,11 @@ try{
  execFileSync(php,[...(extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite','-d','extension=openssl','-d','extension=curl']:[]),'-r',seed,'--',account.id],{env:{...process.env,OFFICE_DATA_DIR:a.dir},windowsHide:true});
  const recoveries=(await a.call('records&kind=mail')).records.filter(r=>r.meta.remote);
  const recovery=recoveries[0],other=recoveries[1];
+ const summaries=(await a.call('records&kind=mail&summaries=1')).records;
+ const summary=summaries.find(r=>r.id===recovery.id);
+ assert.equal(summary.hasOriginal,true);assert.equal(summary.summary,true);assert.equal(summary.body,'Cached body');
+ assert.ok(!('rawBase64' in summary.meta));assert.equal(summary.contentHash,recovery.contentHash);
+ assert.equal((await a.call('record&id='+recovery.id)).record.meta.rawBase64,recovery.meta.rawBase64);
  await a.call('mail-action',{id:recovery.id,revision:recovery.revision,action:'discard'},403,'bad-token');
  const revisionConflict=await a.call('mail-action',{id:recovery.id,revision:0,action:'discard'},409);
  assert.equal(revisionConflict.code,'mail_revision_conflict');assert.equal(revisionConflict.record.id,recovery.id);assert.equal(revisionConflict.record.revision,recovery.revision);
@@ -98,6 +103,6 @@ try{
  const b=await start();await setup(b);await b.call('restore',{backup:{...backup,records:[...backup.records,{kind:'bad',id:'bad',title:'bad',body:'',meta:{}}]}},400);assert.equal((await b.call('records&kind=wiki')).records.length,0);
  const restored=await b.call('restore',{backup});assert.equal(restored.count,4);assert.equal((await b.call('history&id='+record.id)).revisions.length,2);assert.equal((await b.call('status')).preferences.theme,'dark');assert.equal((await b.call('accounts')).accounts.length,0);assert.equal((await b.call('records&kind=sheets')).records[0].meta.workbook.sheets[0].cells.A1,'=2+3');
  await a.call('account-delete',{id:account.id});assert.equal((await a.call('accounts')).accounts.length,0);
- await a.call('logout',{});await a.call('records&kind=tasks',undefined,401);
+ await a.call('logout',{});await a.call('records&kind=tasks',undefined,401);await a.call('record&id='+mail.id,undefined,401);
  console.log('PASS HTTP integration: owner setup/session rotation, authentication, CSRF, stale edits, unique wiki names, atomic imports, binary EML preservation, ICS source, sheet persistence, encrypted accounts, backup/restore/history/preferences and logout.');
 }finally{for(const server of servers){if(server.exitCode===null){server.kill();await once(server,'exit');}}}

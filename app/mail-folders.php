@@ -153,7 +153,7 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
     $recent=array_slice(array_values(array_unique($ids)),0,$limit); $updates=[];
     $cached=[]; foreach (mail_cache_rows($a['id']) as $r) $cached[$r['meta']['providerId']]=$r;
     foreach (array_unique(array_merge($recent,array_keys(array_filter($cached,fn($r)=>in_array($label,$r['meta']['labelIds']??[],true) || in_array($r['meta']['providerId'],$ids,true))))) as $id) {
-        mail_deadline($deadline); $full=in_array($id,$recent,true);
+        mail_deadline($deadline); $full=in_array($id,$recent,true) && !isset($cached[$id]);
         $msg=$request('/'.rawurlencode((string)$id).'?format='.($full?'raw':'minimal'));
         if (!is_array($msg['labelIds']??null)) fail('Invalid Gmail message labels.');
         $meta=['providerId'=>(string)$id,'folder'=>gmail_folder($msg['labelIds'])??'Custom folder','labelIds'=>$msg['labelIds'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
@@ -167,10 +167,13 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
         else continue;
         $updates[]=$r;
     }
-    mail_deadline($deadline); $db=db(); $db->beginTransaction();
-    try { foreach ($updates as $r) save_record($r,true); $db->commit(); }
-    catch (Throwable $e) { $db->rollBack(); throw $e; }
-    return count($recent);
+    mail_deadline($deadline);
+    return mail_sync_publish_guard($a['id'],function()use($updates,$recent){
+        $db=db();$db->beginTransaction();
+        try { foreach ($updates as $r) save_record($r,true); $db->commit(); }
+        catch (Throwable $e) { $db->rollBack(); throw $e; }
+        return count($recent);
+    });
 }
 function sync_mail_folder(array $a,string $id,int $limit): int {
     if ($limit<10 || $limit>500 || $limit%10!==0) fail('Load between 10 and 500 messages in steps of 10.');
@@ -208,7 +211,8 @@ function file_remote_mail(array $r,string $action,string $folder): array {
             $gmail=imap_is_gmail($a);
             $gmailId=null;$relatedIds=$gmail?imap_gmail_move_copies($a,$s,$r,$path,$uid,$gmailId):[];
             imap_command($s,'STATUS '.imap_quote($folder).' (MESSAGES)');
-            $location=imap_move_verified($s,$uid,$folder,'Move',$path,$gmail,$a,$gmailId);
+            $cachedRaw=isset($r['meta']['rawBase64'])?base64_decode($r['meta']['rawBase64'],true):false;
+            $location=imap_move_verified($s,$uid,$folder,'Move',$path,$gmail,$a,$gmailId,$cachedRaw===false?null:$cachedRaw);
             $r['meta']=array_merge($r['meta'],$location,['folder'=>$destination['role']]);
             return $gmail?save_imap_gmail_move($r,$relatedIds):$r;
         });

@@ -64,8 +64,12 @@ try {
     if ($route==='logout' && $method==='POST') { $_SESSION=[]; session_destroy(); json_response(['ok'=>true]); }
     if ($route==='records' && $method==='GET') {
         $kind=$_GET['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
-        $q=db()->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC'); $q->execute([$kind]); json_response(['records'=>array_map('record_row',$q->fetchAll())]);
+        $q=db()->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC'); $q->execute([$kind]);
+        $records=array_map('record_row',$q->fetchAll());
+        if($kind==='mail' && ($_GET['summaries']??'')==='1') $records=array_map('mail_list_record',$records);
+        session_write_close();json_response(['records'=>$records]);
     }
+    if ($route==='record' && $method==='GET') {session_write_close();json_response(['record'=>get_record((string)($_GET['id']??''))]);}
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.
         if (!empty($input['meta']['remote'])) fail('Provider records cannot be edited locally.');
@@ -145,11 +149,13 @@ try {
     }
     if (in_array($route,['mail-folders','mail-folder-manage','mail-folder-sync'],true) && $method==='POST') {
         $a=account((string)($input['account']??'')); session_write_close();
-        $result=with_account_mail_lock($a['id'],function() use($route,$a,$input) {
+        $operation=function() use($route,$a,$input) {
             if ($route==='mail-folders') return ['folders'=>discover_mail_folders($a)];
             if ($route==='mail-folder-manage') return ['folders'=>manage_mail_folder($a,(string)($input['action']??''),(string)($input['folder']??''),(string)($input['name']??''))];
             return ['count'=>sync_mail_folder($a,(string)($input['folder']??''),(int)($input['limit']??10))];
-        });
+        };
+        $result=$route==='mail-folder-sync'?['count'=>with_account_mail_sync($a['id'],fn()=>$operation()['count'])]
+            :($route==='mail-folder-manage'?with_account_mail_mutation($a['id'],$operation):with_account_mail_lock($a['id'],$operation));
         json_response($result);
     }
     if ($route==='account-save' && $method==='POST') {
@@ -173,7 +179,8 @@ try {
         $repair=$input['repair']??false; if (!is_bool($repair)) fail('Invalid repair option.');
         $a=account((string)($input['id']??'')); session_write_close();
         try {
-            $count=with_account_mail_lock($a['id'],function() use (&$a,$repair) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair),'caldav'=>sync_caldav($a) }; });
+            $operation=function() use (&$a,$repair) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair),'caldav'=>sync_caldav($a) }; };
+            $count=$a['type']==='caldav'?with_account_mail_lock($a['id'],$operation):with_account_mail_sync($a['id'],$operation);
             db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]); json_response(['count'=>$count]);
         } catch(Throwable $e) { db()->prepare('UPDATE accounts SET error=? WHERE id=?')->execute(['Sync failed. Open Sync now to retry and see details.',$a['id']]); throw $e; }
     }
@@ -191,15 +198,18 @@ try {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$r],409);
         $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard','move','label','unlabel'],true))fail('Unknown mail action.');
         session_write_close();
-        $result=with_account_mail_lock((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
+        $result=with_account_mail_mutation((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
             $current=get_record($r['id']);
             if ((int)($input['revision']??0)!==$current['revision']) json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$current],409);
             $accountId=(string)($current['meta']['account']??'');
-            $before=array_column(mail_cache_rows($accountId),'id');
+            $ids=db()->prepare("SELECT id FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
+            $ids->execute([$accountId]);$before=$ids->fetchAll(PDO::FETCH_COLUMN);
             $record=in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''))
                 :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action));
-            return ['record'=>$record,'removedIds'=>array_values(array_diff($before,array_column(mail_cache_rows($accountId),'id')))];
+            $ids->execute([$accountId]);
+            return ['record'=>$record,'removedIds'=>array_values(array_diff($before,$ids->fetchAll(PDO::FETCH_COLUMN)))];
         });
+        if(($input['summary']??false)===true && $result['record']!==null)$result['record']=mail_list_record($result['record']);
         json_response($result);
     }
     fail('Route not found.',404);

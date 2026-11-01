@@ -71,6 +71,17 @@ function archive_finish(string $folder='Archive'):array {
     ];
 }
 fixture([...archive_start(),['UID MOVE 42 "Archive"',"{tag} OK moved\r\n"],...archive_finish()],function($s) { imap_archive($s,'42','Archive'); check(count(array_filter(ArchiveFixture::$commands,fn($cmd)=>str_starts_with($cmd,'UID MOVE ')))===1,'one UID MOVE with verified source and destination'); });
+fixture([
+    ['STATUS "Archive" (UIDNEXT)',"* STATUS Archive (UIDNEXT 100)\r\n{tag} OK done\r\n"],
+    ['UID MOVE 42 "Archive"',"{tag} OK [COPYUID 200 42 100] moved\r\n"],
+    ['UID SEARCH UID 42',"* SEARCH\r\n{tag} OK done\r\n"],
+    ['EXAMINE "Archive"',"* OK [UIDVALIDITY 200] valid\r\n{tag} OK done\r\n"],
+    ['UID FETCH 100 (UID FLAGS)',"* 1 FETCH (UID 100 FLAGS (\\Seen))\r\n{tag} OK done\r\n"],
+],function($s){
+    $location=imap_move_verified($s,'42','Archive',cachedRaw:'Cached original');
+    check($location['providerId']==='100' && $location['read']===true,'COPYUID confirms exact destination identity and read flag');
+    check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK')),'cached move with COPYUID downloads no message bodies');
+});
 fixture([...archive_start('INBOX.Archive'),['UID MOVE 42 "INBOX.Archive"',"{tag} OK moved\r\n"],...archive_finish('INBOX.Archive')],function($s) { imap_archive($s,'42','Archive'); check(true,'default resolves namespaced Archive'); });
 fixture(preflight("* LIST (\\Archive) \"/\" \"Saved mail\"\r\n",'IMAP4rev1 MOVE SPECIAL-USE','Saved mail'),function($s) { check(imap_archive_folder($s,'Archive')==='Saved mail','special-use archive discovery'); });
 fixture(preflight("* LIST (\\All) \"/\" \"[Gmail]/Tous les messages\"\r\n",'IMAP4rev1 MOVE SPECIAL-USE','[Gmail]/Tous les messages'),function($s) { check(imap_archive_folder($s,'Archive')==='[Gmail]/Tous les messages','Gmail localized All Mail archive discovery'); });

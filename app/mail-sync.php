@@ -46,6 +46,9 @@ function mail_download(array $a,string $source,string $raw,array $meta): array {
 /** Publish one complete account scan atomically. Downloads may be a recent window,
  * but membership is always based on complete folder identifier lists. */
 function publish_mail_snapshot(array $a,array $membership,array $downloads,?callable $scope=null): int {
+    return mail_sync_publish_guard($a['id'],fn()=>publish_mail_snapshot_unlocked($a,$membership,$downloads,$scope));
+}
+function publish_mail_snapshot_unlocked(array $a,array $membership,array $downloads,?callable $scope=null): int {
     $db=db(); $db->beginTransaction();
     try {
         $q=$db->prepare('SELECT id FROM accounts WHERE id=?'); $q->execute([$a['id']]);
@@ -158,11 +161,20 @@ function imap_validity(array $response): string {
     foreach ($response['lines'] as $line) if (preg_match('/\[UIDVALIDITY (\d+)\]/i',$line,$m) && (int)$m[1]>0) return $m[1];
     fail('IMAP server did not provide UIDVALIDITY.');
 }
+function imap_modseq(array $response): ?string {
+    foreach($response['lines'] as $line)if(preg_match('/\[HIGHESTMODSEQ ([1-9][0-9]*)\]/i',$line,$m))return $m[1];
+    return null;
+}
+function imap_response_has_uid(array $response,string $uid): bool {
+    return (bool)preg_match('/\bUID\s+'.preg_quote($uid,'/').'(?=\s|\))/i',implode('',$response['lines']));
+}
 function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath=null,int $limit=10): int {
     $deadline=microtime(true)+45;
     $cap=imap_command($s,'CAPABILITY');
     $gmail=(bool)preg_match('/\bX-GM-EXT-1\b/i',implode('',$cap['lines']));
     $special=(bool)preg_match('/\bSPECIAL-USE\b/i',implode('',$cap['lines']));
+    $condstore=(bool)preg_match('/\bCONDSTORE\b/i',implode('',$cap['lines']));
+    $checkpoints=setting('imap-checkpoints:'.$a['id'],[]);
     $folders=imap_list_folders(imap_command($s,'LIST "" "*"'.($special?' RETURN (SPECIAL-USE)':'')));
     if (!$folders) fail('The IMAP server did not return selectable folders. The previous mail view was kept.');
     $paths=['Inbox'=>'INBOX'];
@@ -180,32 +192,46 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         ? static fn($r)=>($r['meta']['serverFolder']??null)===$onlyPath
         : static fn($r)=>in_array($r['meta']['folder']??'',MAIL_FOLDERS,true) || (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true) && in_array($r['meta']['recoveryFrom']??'Inbox',MAIL_FOLDERS,true));
     $membership=[]; $scans=[]; $downloads=[]; $cached=array_values(array_filter(mail_cache_rows($a['id']),$scope));
+    $cachedSources=[];
+    foreach ($cached as $row) $cachedSources[mail_row_source($row)]=true;
     foreach ($paths as $label=>$path) {
         if(function_exists('activity_step'))activity_step('IMAP: refreshing folder '.$path.'.');
         mail_deadline($deadline);
-        $validity=imap_validity(imap_command($s,'EXAMINE '.imap_quote($path)));
+        $selected=imap_command($s,'EXAMINE '.imap_quote($path).($condstore?' (CONDSTORE)':''));
+        $validity=imap_validity($selected);
         $ids=imap_search_ids($s,'ALL');
-        $scans[$label]=['path'=>$path,'validity'=>$validity,'ids'=>$ids];
+        $scans[$label]=['path'=>$path,'validity'=>$validity,'ids'=>$ids,'modseq'=>imap_modseq($selected)];
         foreach ($ids as $uid) $membership[mail_source($path,$validity,$uid)]=['folder'=>$label,'serverFolder'=>$path,'uidValidity'=>$validity,'providerId'=>$uid];
     }
     foreach ($scans as $label=>$scan) {
         mail_deadline($deadline);
         if (imap_validity(imap_command($s,'EXAMINE '.imap_quote($scan['path'])))!==$scan['validity']) fail('Mailbox identifiers changed during synchronization. Retry Repair / resync.');
-        $ids=array_slice($scan['ids'],-$limit);
+        $ids=array_values(array_filter(array_slice($scan['ids'],-$limit),
+            static fn($uid)=>$repair || !isset($cachedSources[mail_source($scan['path'],$scan['validity'],$uid)])));
         // Refresh cached flags in bounded batches; repair also reloads bodies.
         $flagIds=[];
+        $checkpoint=$checkpoints[$scan['path']]??null;
+        $changedSince=!$repair && $scan['modseq']!==null && ($checkpoint['validity']??null)===$scan['validity'] && preg_match('/^[1-9][0-9]*$/D',(string)($checkpoint['modseq']??''))
+            && (strlen($checkpoint['modseq'])<strlen($scan['modseq']) || (strlen($checkpoint['modseq'])===strlen($scan['modseq']) && strcmp($checkpoint['modseq'],$scan['modseq'])<=0)) ? $checkpoint['modseq']:null;
         foreach ($cached as $r) {
             $source=mail_row_source($r);
             if (isset($membership[$source]) && $membership[$source]['folder']===$label) {
                 $uid=$membership[$source]['providerId'];
                 if ($repair) $ids[]=$uid;
-                else $flagIds[]=$uid;
+                else {
+                    $flagIds[]=$uid;
+                    if($changedSince!==null){
+                        $membership[$source]['read']=$r['meta']['read']??false;
+                        if(isset($r['meta']['gmailMessageId']))$membership[$source]['gmailMessageId']=$r['meta']['gmailMessageId'];
+                    }
+                }
             }
         }
         foreach (array_chunk($flagIds,100) as $chunk) {
             mail_deadline($deadline);
-            $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS'.($gmail?' X-GM-MSGID':'').')');
+            $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS'.($gmail?' X-GM-MSGID':'').')'.($changedSince!==null?' (CHANGEDSINCE '.$changedSince.')':''));
             foreach ($chunk as $uid) {
+                if($changedSince!==null && !imap_response_has_uid($response,$uid))continue;
                 $source=mail_source($scan['path'],$scan['validity'],$uid);
                 $membership[$source]['read']=imap_fetch_flags($response,$uid);
                 if ($gmail) $membership[$source]['gmailMessageId']=imap_gmail_message_id($response,$uid);
@@ -245,7 +271,15 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         }
     }
     mail_deadline($deadline);
-    return publish_mail_snapshot($a,$membership,$downloads,$scope);
+    $count=publish_mail_snapshot($a,$membership,$downloads,$scope);
+    // Advance only after publishing a complete scan. Use the first SELECT's
+    // watermark so changes arriving during the scan are fetched next time.
+    foreach($scans as $scan){
+        if($scan['modseq']!==null)$checkpoints[$scan['path']]=['validity'=>$scan['validity'],'modseq'=>$scan['modseq']];
+        else unset($checkpoints[$scan['path']]);
+    }
+    set_setting('imap-checkpoints:'.$a['id'],$checkpoints);
+    return $count;
 }
 function imap_fetch_flags(array $response,string $uid): bool {
     // FLAGS and UID belong to the same FETCH tuple, including UID-after-body.
@@ -281,8 +315,10 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
         $recent=array_merge($recent,array_slice($ids,0,10));
     }
     $downloads=[];
+    $cachedSources=[];
     foreach (mail_cache_rows($a['id']) as $r) {
         $source=$r['meta']['source']??'';
+        $cachedSources[$source]=true;
         if (!isset($membership[$source])) continue;
         mail_deadline($deadline);
         if ($repair) $recent[]=$membership[$source]['providerId'];
@@ -295,6 +331,7 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
         }
     }
     foreach (array_unique($recent) as $id) {
+        if (!$repair && isset($cachedSources['gmail:'.$id])) continue;
         mail_deadline($deadline); $msg=$request('/'.rawurlencode($id).'?format=raw');
         if (!is_string($msg['raw']??null) || !is_array($msg['labelIds']??null)) fail('Invalid Gmail message content. The previous mail view was kept.');
         $raw=base64_decode(strtr($msg['raw'],'-_','+/'),true);

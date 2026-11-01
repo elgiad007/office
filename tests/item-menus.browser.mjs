@@ -26,6 +26,9 @@ export async function testItemMenus(page,url) {
   }
   await importItems([1,2,3].map(n=>({kind:'tasks',title:'Menu task '+n,body:'',meta:{}})));
   await page.getByRole('button',{name:'Tasks',exact:true}).click();
+  // App navigation fetches records asynchronously; wait for its new workspace
+  // before filling the search input left by the previous application.
+  await item('Menu task 1').waitFor();
   await page.locator('#search').fill('Menu task ');
   const ordered=await page.locator('#items .item strong').allTextContents();
   await item(ordered[0]).click();await item(ordered[1]).click({modifiers:['Control']});

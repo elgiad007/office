@@ -39,8 +39,8 @@ function rememberMail(record) {
   if(record?.kind!=='mail')return;
   let revisions=mailSnapshots.get(record.id);
   if(!revisions){revisions=new Map();mailSnapshots.set(record.id,revisions);}
-  const fields=['remote','account','source','serverFolder','uidValidity','providerId','folder','rawBase64'];
-  revisions.set(record.revision,{id:record.id,kind:record.kind,meta:Object.fromEntries(fields.map(key=>[key,record.meta[key]]))});
+  const fields=['remote','account','source','serverFolder','uidValidity','providerId','folder'];
+  revisions.set(record.revision,{id:record.id,kind:record.kind,contentHash:record.contentHash??record.meta.rawBase64,meta:Object.fromEntries(fields.map(key=>[key,record.meta[key]]))});
   if(!mailLatest.has(record.id)||mailLatest.get(record.id).revision<=record.revision)mailLatest.set(record.id,structuredClone(record));
   if(revisions.size>16)revisions.delete(revisions.keys().next().value);
 }
@@ -52,7 +52,7 @@ function sameMailTarget(a,b) {
   const x=a.meta,y=b.meta;
   return !!x.remote && !!y.remote && x.account===y.account && !!x.source && x.source===y.source
     && x.serverFolder===y.serverFolder && x.uidValidity===y.uidValidity && x.providerId===y.providerId
-    && x.folder===y.folder && x.rawBase64===y.rawBase64;
+    && x.folder===y.folder && (a.contentHash??x.rawBase64)===(b.contentHash??y.rawBase64);
 }
 function refreshMailRecord(record) {
   rememberMail(record);
@@ -61,6 +61,7 @@ function refreshMailRecord(record) {
   if(state.current?.id===record.id)state.current=state.rows.find(row=>row.id===record.id)||null;
 }
 async function requestApi(route,data) {
+  if(route==='mail-action')data={...data,summary:true};
   const response=await fetch('api.php?r='+route,{method:data===undefined?'GET':'POST',headers:data===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':state.csrf,'X-Office-Progress':'1'},body:data===undefined?undefined:JSON.stringify(data),cache:'no-store'});
   let result,status=response.status;
   if(response.headers.get('Content-Type')?.includes('application/x-ndjson')){
@@ -108,11 +109,12 @@ async function api(route,data) {
   };
   const trackedRun=async()=>{activity.running(tracking);try{return await run();}finally{activity.done(tracking);}};
   if(!account)return trackedRun();
-  const previous=mailAccountQueue.get(account)||Promise.resolve();
+  const queueAccount=['sync','mail-folder-sync'].includes(route)?'sync:'+account:account;
+  const previous=mailAccountQueue.get(queueAccount)||Promise.resolve();
   const pending=previous.catch(()=>{}).then(trackedRun);
-  mailAccountQueue.set(account,pending);
+  mailAccountQueue.set(queueAccount,pending);
   try{return await pending;}
-  finally{if(mailAccountQueue.get(account)===pending)mailAccountQueue.delete(account);}
+  finally{if(mailAccountQueue.get(queueAccount)===pending)mailAccountQueue.delete(queueAccount);}
 }
 function applyTheme() {
   let theme=state.prefs.theme||'system'; if (theme==='system') theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
@@ -153,7 +155,11 @@ function mailLocation(record) {
   if(account?.type==='google')return [m.folder,...(account.folders||[]).filter(f=>!f.protected&&(m.labelIds||[]).includes(f.id)).map(f=>f.name)].filter(Boolean).join(' · ');
   return m.folder==='Custom folder'?(account?.folders?.find(f=>f.id===m.serverFolder)?.name||m.serverFolder||m.folder):m.folder;
 }
-function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(r.title+' '+r.body+' '+JSON.stringify(r.meta)).toLocaleLowerCase().includes(q)); }
+function searchableText(record) {
+  const {rawBase64,raw,headersBase64,...meta}=record.meta;
+  return (record.title+' '+record.body+' '+JSON.stringify(meta)).toLocaleLowerCase();
+}
+function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder):(r.meta.folder||'Archive')===state.mailFolder))&&(!q||searchableText(r).includes(q))); }
 async function deleteMailImmediately(rows,operation) {
   const ids=new Set(rows.map(r=>r.id)),visible=filteredRows().map(r=>r.id),currentId=state.current?.id;
   const context=JSON.stringify([state.mailFolder,state.mailScope,state.search]);
@@ -191,8 +197,8 @@ async function deleteMailImmediately(rows,operation) {
           (document.querySelector('#selected-item')||document.querySelector('#main'))?.focus({preventScroll:true});
         }
       }
-      // Keep the provider's returned Trash copy available when switching folders.
-      if(state.app==='mail'&&row.meta.remote&&result?.record?.meta?.folder==='Trash'){state.rows=state.rows.filter(r=>r.id!==row.id&&r.id!==result.record.id);state.rows.push(result.record);state.rows.sort(compareMail);}
+      // Keep confirmed moves available when switching folders.
+      if(state.app==='mail'&&row.meta.remote&&result?.record){state.rows=state.rows.filter(r=>r.id!==row.id&&r.id!==result.record.id);state.rows.push(result.record);state.rows.sort(compareMail);}
     }
   }catch(error){
     const remaining=rows.slice(count);
@@ -237,7 +243,7 @@ async function load(preferId,{selectFirst=true}={}) {
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
-  do{version=mailDeleteVersion+mailReadVersion;records=(await api('records&kind='+app)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
+  do{version=mailDeleteVersion+mailReadVersion;records=(await api('records&kind='+app+(app==='mail'?'&summaries=1':''))).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   state.rows=records.filter(r=>!pendingMailDeletes.has(r.id));
   if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
@@ -315,7 +321,7 @@ function detailContent(r) {
   if (state.app==='mail' && m.folder!=='Drafts') {
     const recovery=!!m.remote && ['Recovery copies','Not in Inbox'].includes(m.folder);
     const actions=recovery?'<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>':`${m.remote?'<button data-action="file-mail">Move / Labels</button>':''}${m.folder!=='Archive'?`<button data-action="archive">${m.remote?'Archive':'Archive locally'}</button>`:''}${m.remote?m.folder==='Trash'?'<button data-action="restore-mail">Restore to Inbox</button>':'<button data-action="trash-mail">Move to Trash</button>':''}<button data-action="read">Mark ${m.read?'unread':'read'}</button>`;
-    return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from||'Unknown')}</span><span>To: ${e(m.to||'')}</span><span>${e(m.date||'')}</span></div>${m.remote?`<p class="recurrence-note">${recovery?'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.':'Downloaded copy from '+e(mailLocation(r))+'. Mail actions update the provider; Sync now refreshes its location.'}</p>`:''}<div class="head-actions">${m.from?'<button data-action="reply">Reply</button>':''}${(m.rawBase64||m.raw)?'<button data-action="eml">Download original EML</button>':''}${actions}</div><hr>${mailBody(r,state.prefs)}`;
+    return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from||'Unknown')}</span><span>To: ${e(m.to||'')}</span><span>${e(m.date||'')}</span></div>${m.remote?`<p class="recurrence-note">${recovery?'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.':'Downloaded copy from '+e(mailLocation(r))+'. Mail actions update the provider; Sync now refreshes its location.'}</p>`:''}<div class="head-actions">${m.from?'<button data-action="reply">Reply</button>':''}${(m.rawBase64||m.raw||r.hasOriginal)?'<button data-action="eml">Download original EML</button>':''}${actions}</div><hr>${mailBody(r,state.prefs)}`;
   }
   if (state.app==='wiki' && state.wikiPreview) return `<span class="eyebrow">${e(r.title.split(':').slice(0,-1).join(' / ')||'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x=>x.id!==r.id && x.body.includes('[['+r.title+']]')).map(x=>`<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('')||'<p class="muted">No pages link here yet.</p>'}</div>`;
   let content=`<form id="record-form" class="detail-form"><label><span class="file-input">${state.app==='wiki'?'Page ID (namespace:page)':'Title'}</span><input class="title-input" name="title" value="${e(r.title)}" required ${disabled} aria-label="Title"></label>`;
@@ -364,7 +370,16 @@ async function commit() {
   await state.savePromise; if(state.dirty) await commit();
 }
 async function changeApp(name) { await commit(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
-async function selectRecord(id,focus=false) { await commit(); state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; renderList(); renderDetail(); if(focus)document.querySelector('#selected-item')?.focus({preventScroll:true}); }
+function updateMailListItem(id) {
+  const row=state.rows.find(r=>r.id===id),button=document.querySelector(`#items [data-id="${CSS.escape(id)}"]`);
+  if(!row||!button)return;
+  const selected=state.current?.id===id;
+  button.classList.toggle('selected',selected);button.classList.toggle('mail-read',!!row.meta.read);button.classList.toggle('mail-unread',!row.meta.read);
+  button.setAttribute('aria-pressed',String(selected||state.selected.has(id)));
+  if(selected)button.id='selected-item';else button.removeAttribute('id');
+  const label=button.querySelector('.mail-read-status .file-input');if(label)label.textContent=row.meta.read?'Read':'Unread';
+}
+async function selectRecord(id,focus=false) { await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current.id);}else renderList(); renderDetail(); if(focus)document.querySelector('#selected-item')?.focus({preventScroll:true}); }
 async function clickRecord(id,event) {
   await commit();
   if(event.shiftKey){
@@ -422,8 +437,15 @@ function modal(title,body) { dialog.innerHTML=`<div class="dialog-head"><h2 id="
 function confirmation(title,message,action) { modal(title,`<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`); dialog.querySelector('#cancel').onclick=()=>dialog.close();dialog.querySelector('#cancel').focus();dialog.querySelector('#confirm').onclick=async()=>{dialog.close();await attempt(action);}; }
 function download(name,text,type='text/plain') { const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'_');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
 function originalMail(record) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64),c=>c.charCodeAt(0)) : record.meta.raw || ''; }
+async function fullMailRecord(record) {
+  if(!record.summary)return record;
+  const cached=latestMail(record.id);
+  if(cached && !cached.summary && cached.revision===record.revision && sameMailTarget(record,cached))return cached;
+  return (await api('record&id='+encodeURIComponent(record.id))).record;
+}
 async function exportRecords(all=false,selectedRecords=null) {
-  await commit(); const records=selectedRecords|| (all?state.rows:[state.current].filter(Boolean)); if(!records.length){notice('There is nothing to export yet.');return;}
+  await commit(); let records=selectedRecords|| (all?state.rows:[state.current].filter(Boolean)); if(!records.length){notice('There is nothing to export yet.');return;}
+  if(state.app==='mail')records=await Promise.all(records.map(fullMailRecord));
   all=all||records.length>1;
   const name=all?state.app:records[0].title;
   if(state.app==='calendar')download(name+'.ics',icsExport(records),'text/calendar');
@@ -452,10 +474,25 @@ async function syncAccounts(manual=true) {
   if(!state.accounts.length){if(manual){notice('Add an account in Settings to start syncing.');await changeApp('settings');}return;}
   if(state.dirty){if(manual)await commit();else return;}
   state.syncing=true;busyButton(document.querySelector('#sync-button'),true);let errors=0;
-  for(const a of state.accounts){if(document.hidden || (!manual && Date.now()-state.lastActivity>120000))break;const s=document.querySelector('#sync-status');if(s)s.textContent='Syncing '+a.label+'…';try{await api('sync',{id:a.id});}catch(error){errors++;if(manual)notice(a.label+': '+error.message,true);}}
+  const accounts=[...state.accounts];let next=0;
+  const active=new Set();
+  const worker=async()=>{
+    while(next<accounts.length){
+      if(document.hidden || (!manual && Date.now()-state.lastActivity>120000))return;
+      const a=accounts[next++];active.add(a.label);
+      const status=document.querySelector('#sync-status');if(status)status.textContent='Syncing '+[...active].join(', ')+'…';
+      try{await api('sync',{id:a.id});}catch(error){errors++;if(manual)notice(a.label+': '+error.message,true);}finally{active.delete(a.label);}
+    }
+  };
+  // Two accounts at a time leave PHP workers available for local browsing and
+  // interactive requests. The per-account operation queue still serializes writes.
+  await Promise.all([worker(),worker()]);
   state.syncing=false;busyButton(document.querySelector('#sync-button'),false);const s=document.querySelector('#sync-status');if(s)s.textContent=errors?'Sync needs attention':'Checked '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   state.accounts=(await api('accounts')).accounts;
-  if(state.app==='mail'&&state.mailScope&&!state.dirty){try{await syncOpenFolder(mailFolderEnv());}catch(error){if(manual)notice(error.message,true);}}
+  // The standard scan already refreshed Inbox/Archive/Trash. Only custom scopes
+  // need another scan (or a larger requested download window).
+  const scope=state.mailScope,scopeAccount=state.accounts.find(a=>a.id===scope?.account),scopeFolder=scopeAccount?.folders?.find(f=>f.id===scope?.folder);
+  if(state.app==='mail'&&scope&&!state.dirty&&(scope.limit>10||!['Inbox','Archive','Trash'].includes(scopeFolder?.role))){try{await syncOpenFolder(mailFolderEnv());}catch(error){if(manual)notice(error.message,true);}}
   // Never replace an active editor with network data.
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable(document.activeElement))await load();
 }
@@ -493,7 +530,7 @@ async function handleClick(event) {
     if(action==='history')await history();
     if(action==='delete')confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current;if(state.app==='mail')await deleteMailImmediately([record],r=>api('delete',{id:r.id,revision:r.revision}));else{await api('delete',{id:record.id,revision:record.revision});await load();}notice('Item deleted.');});
     if(action==='logout'){await commit();await api('logout',{});await boot();}
-    if(action==='eml')download(state.current.title+'.eml',originalMail(state.current),'message/rfc822');
+    if(action==='eml'){const record=await fullMailRecord(state.current);download(record.title+'.eml',originalMail(record),'message/rfc822');}
     if(action==='original-ics')download(state.current.title+'.ics',state.current.meta.rawIcs||state.current.meta.raw,'text/calendar');
     if(action==='read')await readMail();
     if(action==='archive')await archiveLocal();
@@ -532,6 +569,11 @@ async function sendMail() {
 }
 async function archiveLocal() {
   if(state.app!=='mail')return;await commit();const ids=state.selected.size?[...state.selected]:[state.current?.id].filter(Boolean);let count=0;
+  const rows=ids.map(id=>state.rows.find(r=>r.id===id)).filter(Boolean);
+  if(rows.length && rows.every(r=>r.meta.remote && r.meta.folder!=='Archive')){
+    await deleteMailImmediately(rows,r=>api('mail-action',{id:r.id,revision:r.revision,action:'archive'}));
+    notice(`Archived ${rows.length} messages.`);return;
+  }
   const reconciled=new Set();
   try {
     for(const id of ids){if(reconciled.has(id)){count++;continue;}const r=state.rows.find(r=>r.id===id);await pendingMailReads.get(id);if(r.meta.remote){const result=await api('mail-action',{id:r.id,revision:r.revision,action:'archive'});for(const related of result.removedIds||[])reconciled.add(related);}else{r.meta.folder='Archive';await api('save',r);}count++;}
@@ -572,9 +614,7 @@ function markOpenedMailRead(record) {
       update(record);
       if(state.app==='mail'){
         state.rows.forEach(update);update(state.current);
-        const focused=document.activeElement?.closest('#items [data-id]')?.dataset.id;
-        renderList();
-        if(focused)document.querySelector(`#items [data-id="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
+        updateMailListItem(record.id);
         if(state.current?.id===record.id){const button=document.querySelector('#detail [data-action="read"]');if(button)button.textContent=`Mark ${state.current.meta.read?'unread':'read'}`;}
       }
       return {...result,previousRevision};

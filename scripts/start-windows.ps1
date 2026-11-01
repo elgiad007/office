@@ -1,7 +1,11 @@
-param([ValidateRange(1024,65535)][int]$Port = 8765, [switch]$NoBrowser)
+param([ValidateRange(1024,65535)][int]$Port = 8765, [switch]$NoBrowser, [switch]$DevelopmentServer)
 $ErrorActionPreference = 'Stop'
 try {
     $officeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    if (!$DevelopmentServer -and (Test-Path -LiteralPath (Join-Path $officeRoot 'runtime\apache\Apache24\bin\httpd.exe'))) {
+        & (Join-Path $PSScriptRoot 'start-apache.ps1') -Port $Port -NoBrowser:$NoBrowser
+        exit
+    }
     $officePhp = Join-Path $officeRoot 'runtime\windows\php.exe'
     $officeData = Join-Path $officeRoot 'data'
     $officeState = Join-Path $officeData 'local-server.json'
