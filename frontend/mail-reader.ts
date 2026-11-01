@@ -4,6 +4,7 @@ import {escapeHtml as e} from './formats.js';
 const modes=new Map<string, string>(), imageConsent=new Set<string>(), originalColors=new Set<string>();
 export function mailBody(record: OfficeRecord,prefs: Preferences) {
   if(record.meta.headerOnly===true){
+    if(Number(record.meta.messageSize||0)<=1400000)return '<div class="mail-body"><p class="recurrence-note">Message headers are available offline. The message body downloads when opened while connected.</p><button data-download-body>Download message body</button><span data-body-status role="status"></span></div>';
     const size=Number(record.meta.messageSize),label=Number.isFinite(size)?(size/1000000).toFixed(1)+' MB':'larger than the download limit';
     return `<div class="mail-body"><p class="recurrence-note">This message is ${e(label)}. Office downloaded its headers; the body and attachments exceed the 1.4 MB download limit. Open the message in your email provider to read the full content.${record.meta.remote&&record.meta.gmailMessageId?' You can still mark it read, move it, or move it to Trash in Office.':''}</p></div>`;
   }

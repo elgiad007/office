@@ -150,29 +150,40 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
         if ($token!=='' && (isset($seen[$token]) || count($seen)>=100)) fail('Gmail folder pagination did not complete.');
         $seen[$token]=true;
     } while ($token!=='');
-    $recent=array_slice(array_values(array_unique($ids)),0,$limit); $updates=[];
     $cached=[]; foreach (mail_cache_rows($a['id']) as $r) $cached[$r['meta']['providerId']]=$r;
-    foreach (array_unique(array_merge($recent,array_keys(array_filter($cached,fn($r)=>in_array($label,$r['meta']['labelIds']??[],true) || in_array($r['meta']['providerId'],$ids,true))))) as $id) {
-        mail_deadline($deadline); $full=in_array($id,$recent,true) && !isset($cached[$id]);
-        $msg=$request('/'.rawurlencode((string)$id).'?format='.($full?'raw':'minimal'));
+    $unknown=array_values(array_filter(array_unique($ids),fn($id)=>!isset($cached[$id])));
+    $recent=array_slice($unknown,0,$limit); $updates=[];$pending=count($unknown)>$limit;
+    $relevant=array_keys(array_filter($cached,fn($r)=>in_array($label,$r['meta']['labelIds']??[],true) || in_array($r['meta']['providerId'],$ids,true)));
+    $bodyIds=mail_offline_download()?array_keys(array_filter($cached,fn($r)=>in_array($r['meta']['providerId'],$ids,true) && !empty($r['meta']['headerOnly']) && ($r['meta']['messageSize']??0)<=IMAP_BODY_LIMIT)):[];
+    if(count($bodyIds)>$limit)$pending=true;
+    $cursor=(int)setting('gmail-label-cursor:'.$a['id'].':'.$label,0);
+    if($relevant){$cursor%=count($relevant);$relevant=array_merge(array_slice($relevant,$cursor),array_slice($relevant,0,$cursor));}
+    $refresh=array_slice($relevant,0,$limit);
+    foreach (array_unique(array_merge($recent,array_slice($bodyIds,0,$limit),$refresh)) as $id) {
+        if(microtime(true)>$deadline-10){$pending=true;break;}
+        $new=in_array($id,$recent,true) && !isset($cached[$id]);
+        $full=mail_offline_download() && ($new || (!empty($cached[$id]['meta']['headerOnly']) && ($cached[$id]['meta']['messageSize']??0)<=IMAP_BODY_LIMIT));
+        $msg=$request('/'.rawurlencode((string)$id).'?format='.($full?'raw':($new?'metadata':'minimal')));
         if (!is_array($msg['labelIds']??null)) fail('Invalid Gmail message labels.');
         $meta=['providerId'=>(string)$id,'folder'=>gmail_folder($msg['labelIds'])??'Custom folder','labelIds'=>$msg['labelIds'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
         if ($full) {
             if (!is_string($msg['raw']??null)) fail('Invalid Gmail content.');
             $raw=base64_decode(strtr($msg['raw'],'-_','+/'),true); if ($raw===false) fail('Invalid Gmail encoding.');
-            if (strlen($raw)>1400000) continue;
-            $r=mail_download($a,'gmail:'.$id,$raw,$meta);
+            if (strlen($raw)>IMAP_BODY_LIMIT) $r=gmail_header_download($a,(string)$id,$request('/'.rawurlencode((string)$id).'?format=metadata'),$meta);
+            else $r=mail_download($a,'gmail:'.$id,$raw,$meta);
             $r['id']=$cached[$id]['id']??remote_id($a['id'],'gmail:'.$id);
-        } elseif (isset($cached[$id])) { $r=$cached[$id]; $r['meta']=array_merge($r['meta'],$meta); unset($r['meta']['recoveryFrom']); }
+        } elseif ($new) { $r=gmail_header_download($a,(string)$id,$msg,$meta);$r['id']=remote_id($a['id'],'gmail:'.$id); }
+        elseif (isset($cached[$id])) { $r=$cached[$id]; $r['meta']=array_merge($r['meta'],$meta); unset($r['meta']['recoveryFrom']); }
         else continue;
         $updates[]=$r;
     }
     mail_deadline($deadline);
-    return mail_sync_publish_guard($a['id'],function()use($updates,$recent){
+    return mail_sync_publish_guard($a['id'],function()use($updates,$recent,$a,$label,$pending,$cursor,$refresh){
         $db=db();$db->beginTransaction();
         try { foreach ($updates as $r) save_record($r,true); $db->commit(); }
         catch (Throwable $e) { $db->rollBack(); throw $e; }
-        return count($recent);
+        set_setting('gmail-label-cursor:'.$a['id'].':'.$label,$cursor+count($refresh));
+        mail_pending($a,'label:'.$label,$pending);return count($recent);
     });
 }
 function sync_mail_folder(array $a,string $id,int $limit): int {

@@ -30,8 +30,13 @@ export async function syncOpenFolder(env, more = false) {
     const scope = env.state.mailScope;
     if (!scope)
         return;
-    const limit = more ? Math.min(500, scope.limit + 10) : scope.limit;
-    await busy(env, () => env.api('mail-folder-sync', { account: scope.account, folder: scope.folder, limit }));
+    const limit = 100;
+    await busy(env, async () => { for (let batch = 0; batch < (more ? 1 : 5); batch++) {
+        const result = await env.api('mail-folder-sync', { account: scope.account, folder: scope.folder, limit });
+        await reloadMail(env);
+        if (!result.more || document.hidden)
+            break;
+    } });
     scope.limit = limit;
     await reloadMail(env);
 }
@@ -63,7 +68,7 @@ export function renderMailFolders(env) {
     const { state, e } = env, navigation = document.querySelector('#mail-folder-navigation'), controls = document.querySelector('.search-wrap'), host = document.querySelector('.shell');
     const scope = state.mailScope, account = state.accounts.find(a => a.id === scope?.account), folder = account?.folders?.find(f => f.id === scope.folder);
     navigation.insertAdjacentHTML('beforeend', `<div class="account-folders" aria-label="Account folders">${state.accounts.filter(a => ['imap', 'google'].includes(a.type)).map(a => `<details class="folder-account" ${state.folderOpen.has(a.id) ? 'open' : ''} data-account-tree="${e(a.id)}"><summary>${e(a.label)}${a.type === 'google' ? ' · Labels' : ''}</summary><div class="folder-tools"><button data-refresh-folders="${e(a.id)}">Refresh folders</button><button data-manage-folder="create" data-folder-account="${e(a.id)}">New ${a.type === 'google' ? 'label' : 'folder'}</button></div>${tree(a.folders || [], e, a.id) || '<p class="muted">Refresh folders to discover this account’s folders.</p>'}</details>`).join('')}</div>`);
-    controls.insertAdjacentHTML('beforeend', scope ? `<div class="folder-current"><strong>${e(account?.label || 'Account')} / ${e(folder?.name || scope.folder)}</strong><div class="folder-tools"><button id="folder-refresh">Refresh mail</button><button id="folder-more" ${scope.limit >= 500 ? 'disabled' : ''}>Load more</button>${folder && !folder.protected ? `<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>` : ''}</div><small>Downloaded copies · up to ${scope.limit} recent messages, plus previously cached mail.</small></div>` : '');
+    controls.insertAdjacentHTML('beforeend', scope ? `<div class="folder-current"><strong>${e(account?.label || 'Account')} / ${e(folder?.name || scope.folder)}</strong><div class="folder-tools"><button id="folder-refresh">Refresh mail</button><button id="folder-more" ${''}>Load next batch</button>${folder && !folder.protected ? `<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>` : ''}</div><small>Headers sync in batches of 100. Open a message to download its contents.</small></div>` : '');
     host.querySelectorAll('[data-account-tree]').forEach(d => d.ontoggle = () => { if (d.open)
         state.folderOpen.add(d.dataset.accountTree);
     else
@@ -82,7 +87,7 @@ export function renderMailFolders(env) {
     }));
     host.querySelectorAll('[data-open-folder]').forEach(b => b.onclick = () => env.attempt(async () => {
         await env.commit();
-        state.mailScope = { account: b.dataset.folderAccount, folder: b.dataset.openFolder, limit: 10 };
+        state.mailScope = { account: b.dataset.folderAccount, folder: b.dataset.openFolder, limit: 100 };
         state.current = null;
         state.selected.clear();
         if (matchMedia('(max-width: 800px)').matches)

@@ -70,6 +70,12 @@ try {
         session_write_close();json_response(['records'=>$records]);
     }
     if ($route==='record' && $method==='GET') {session_write_close();json_response(['record'=>get_record((string)($_GET['id']??''))]);}
+    if ($route==='mail-content' && $method==='POST') {
+        $r=get_record((string)($input['id']??''));
+        if($r['kind']!=='mail' || empty($r['meta']['remote']))fail('Choose synchronized mail.');
+        session_write_close();
+        json_response(['record'=>with_account_mail_mutation($r['meta']['account'],fn()=>download_mail_content($r))]);
+    }
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.
         if (!empty($input['meta']['remote'])) fail('Provider records cannot be edited locally.');
@@ -152,10 +158,12 @@ try {
         $operation=function() use($route,$a,$input) {
             if ($route==='mail-folders') return ['folders'=>discover_mail_folders($a)];
             if ($route==='mail-folder-manage') return ['folders'=>manage_mail_folder($a,(string)($input['action']??''),(string)($input['folder']??''),(string)($input['name']??''))];
-            return ['count'=>sync_mail_folder($a,(string)($input['folder']??''),(int)($input['limit']??10))];
+            return ['count'=>sync_mail_folder($a,(string)($input['folder']??''),(int)($input['limit']??MAIL_SYNC_BATCH))];
         };
         $result=$route==='mail-folder-sync'?['count'=>with_account_mail_sync($a['id'],fn()=>$operation()['count'])]
             :($route==='mail-folder-manage'?with_account_mail_mutation($a['id'],$operation):with_account_mail_lock($a['id'],$operation));
+        $key=$a['type']==='google'?'label:'.($input['folder']??''):($input['folder']??'');
+        if($route==='mail-folder-sync')$result['more']=(bool)(setting('mail-pending:'.$a['id'],[])[$key]??false);
         json_response($result);
     }
     if ($route==='account-save' && $method==='POST') {
@@ -181,7 +189,10 @@ try {
         try {
             $operation=function() use (&$a,$repair) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair),'caldav'=>sync_caldav($a) }; };
             $count=$a['type']==='caldav'?with_account_mail_lock($a['id'],$operation):with_account_mail_sync($a['id'],$operation);
-            db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]); json_response(['count'=>$count]);
+            db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]);
+            $pending=setting('mail-pending:'.$a['id'],[]);
+            $more=$pending['standard']??false;
+            json_response(['count'=>$count,'more'=>$more]);
         } catch(Throwable $e) { db()->prepare('UPDATE accounts SET error=? WHERE id=?')->execute(['Sync failed. Open Sync now to retry and see details.',$a['id']]); throw $e; }
     }
     if ($route==='send' && $method==='POST') {

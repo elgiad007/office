@@ -19,7 +19,9 @@ function sync_preflight(): array {
 function download_step(string $uid,string $raw): array {
     return ['UID FETCH '.$uid.' (UID FLAGS BODY.PEEK[])','* 1 FETCH (FLAGS (\Seen) BODY[] {'.strlen($raw)."}\r\n".$raw.' UID '.$uid.")\r\n{tag} OK done\r\n"];
 }
+function legacy_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath=null,int $limit=10): int {return imap_sync_stream($a,$s,$repair,$onlyPath,$repair?100:$limit);}
 try {
+    set_setting('preferences',['mailOffline'=>true]);
     $a=make_account('sync-fixture');
     $raw="Message-ID: <move@example.com>\r\nSubject: Moved mail\r\n\r\nPreserve exact original";
     cache_remote($a,'imap:100:42','mail','Before move','Old body',['providerId'=>'42','folder'=>'Inbox','rawBase64'=>base64_encode($raw)]);
@@ -31,7 +33,7 @@ try {
     foreach (range(2,11) as $uid) $steps[]=download_step((string)$uid,"Subject: Other $uid\r\n\r\nOther content $uid");
     $steps[]=download_step('1',$raw);
     $steps[]=examine_step('Deleted'); $steps[]=search_step('HEADER Message-ID "<move@example.com>"',[]);
-    fixture($steps,function($s) use($a) { check(imap_sync_stream($a,$s)===11,'sync downloads recent Archive and older moved message'); });
+    fixture($steps,function($s) use($a) { check(legacy_sync_stream($a,$s)===11,'sync downloads recent Archive and older moved message'); });
     $moved=get_record($old);
     check($moved['meta']['folder']==='Archive' && $moved['meta']['serverFolder']==='Saved' && $moved['meta']['providerId']==='1','external move retains identity with destination folder and UID');
     check($moved['meta']['source']===mail_source('Saved','100','1') && $moved['meta']['read']===true && $moved['body']==='Preserve exact original','UID-after-body and flags decoded into synchronized destination');
@@ -44,18 +46,18 @@ try {
     publish_mail_snapshot($a,[$unchanged['meta']['source']=>$same['meta']],[$unchanged['meta']['source']=>$same],fn($r)=>$r['id']===$old);
     check(get_record($old)['revision']===$unchanged['revision']+1,'changed provider read flag still increments the revision');
     $before=mail_cache_rows($a['id']);
-    fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),['EXAMINE "Saved"',"{tag} NO [NOPERM] denied\r\n"]],function($s) use($a) { refused(fn()=>imap_sync_stream($a,$s),'EXAMINE refused'); });
+    fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),['EXAMINE "Saved"',"{tag} NO [NOPERM] denied\r\n"]],function($s) use($a) { refused(fn()=>legacy_sync_stream($a,$s),'EXAMINE refused'); });
     check(mail_cache_rows($a['id'])===$before,'failed folder scan does not publish partial deletions or membership');
     $repair=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved')];
-    foreach (array_merge(range(2,11),[1]) as $uid) $repair[]=download_step((string)$uid,$uid===1?$raw:"Subject: Other $uid\r\n\r\nRefreshed $uid");
+    foreach (array_map(fn($r)=>(int)$r['meta']['providerId'],mail_cache_rows($a['id'])) as $uid) $repair[]=download_step((string)$uid,$uid===1?$raw:"Subject: Other $uid\r\n\r\nRefreshed $uid");
     $repair[]=examine_step('Deleted');
-    fixture($repair,function($s) use($a) { check(imap_sync_stream($a,$s,true)===11,'repair fetches every cached member including older messages'); });
+    fixture($repair,function($s) use($a) { check(legacy_sync_stream($a,$s,true)===11,'repair fetches every cached member including older messages'); });
     check(get_record($old)['id']===$old,'repair retains stable record identity');
     $cachedIds=array_map(fn($r)=>$r['meta']['providerId'],mail_cache_rows($a['id']));
     $flags=''; foreach ($cachedIds as $index=>$uid) $flags.='* '.($index+1).' FETCH (UID '.$uid.' FLAGS ())'."\r\n";
     $normal=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),['UID FETCH '.implode(',',$cachedIds).' (UID FLAGS)',$flags."{tag} OK done\r\n"]];
     $normal[]=examine_step('Deleted');
-    fixture($normal,function($s) use($a) { imap_sync_stream($a,$s); });
+    fixture($normal,function($s) use($a) { legacy_sync_stream($a,$s); });
     check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK')),'warm sync downloads no cached message bodies');
     check(get_record($old)['meta']['read']===false,'batched flags refresh older cached messages outside the download window');
     // CONDSTORE checkpoints must preserve unchanged flags and advance only after
@@ -65,14 +67,14 @@ try {
     set_setting('imap-checkpoints:'.$a['id'],['Saved'=>['validity'=>'100','modseq'=>'8']]);
     $delta=[...$deltaPreflight,$deltaSelect('INBOX','10'),search_step('ALL',[]),$deltaSelect('Saved','10'),search_step('ALL',$archiveIds),$deltaSelect('Deleted','10'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),
         ['UID FETCH '.implode(',',$cachedIds).' (UID FLAGS) (CHANGEDSINCE 8)',"* 1 FETCH (UID 1 FLAGS (\\Seen) MODSEQ (9))\r\n{tag} OK done\r\n"],examine_step('Deleted')];
-    fixture($delta,function($s)use($a){check(imap_sync_stream($a,$s)===0,'incremental flags do not download cached bodies');});
+    fixture($delta,function($s)use($a){check(legacy_sync_stream($a,$s)===0,'incremental flags do not download cached bodies');});
     check(get_record($old)['meta']['read']===true,'changed flag applied from CONDSTORE response');
     check(setting('imap-checkpoints:'.$a['id'])['Saved']['modseq']==='10','successful scan advances its initial watermark');
     $checkpoint=setting('imap-checkpoints:'.$a['id']);
-    fixture([...$deltaPreflight,$deltaSelect('INBOX','11'),search_step('ALL',[]),['EXAMINE "Saved" (CONDSTORE)',"{tag} NO denied\r\n"]],function($s)use($a){refused(fn()=>imap_sync_stream($a,$s),'EXAMINE refused');});
+    fixture([...$deltaPreflight,$deltaSelect('INBOX','11'),search_step('ALL',[]),['EXAMINE "Saved" (CONDSTORE)',"{tag} NO denied\r\n"]],function($s)use($a){refused(fn()=>legacy_sync_stream($a,$s),'EXAMINE refused');});
     check(setting('imap-checkpoints:'.$a['id'])===$checkpoint,'failed scan cannot advance incremental checkpoints');
     $before=mail_cache_rows($a['id']);
-    fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX','101')],function($s) use($a) { refused(fn()=>imap_sync_stream($a,$s),'Mailbox identifiers changed'); });
+    fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX','101')],function($s) use($a) { refused(fn()=>legacy_sync_stream($a,$s),'Mailbox identifiers changed'); });
     check(mail_cache_rows($a['id'])===$before,'UIDVALIDITY changing during a scan leaves the previous view intact');
     $local=save_record(['kind'=>'mail','title'=>'Independent local mail','body'=>'Keep local','meta'=>['folder'=>'Local mail']]);
     publish_mail_snapshot($a,[],[]);
@@ -93,7 +95,7 @@ try {
     publish_mail_snapshot($a,[$source=>$returned],[$source=>mail_download($a,$source,$raw,$returned)]);
     check(get_record($saved['id'])['meta']['folder']==='Local mail' && count(mail_cache_rows($a['id']))===1,'returning provider message cannot overwrite a saved independent local copy');
     publish_mail_snapshot($a,[],[]);
-    set_setting('preferences',[]);
+    set_setting('preferences',['mailOffline'=>true]);
     // Mailbox identity includes the folder as well as UIDVALIDITY and UID.
     $membership=[mail_source('INBOX','9','1')=>['folder'=>'Inbox','serverFolder'=>'INBOX','uidValidity'=>'9','providerId'=>'1'],mail_source('Saved','9','1')=>['folder'=>'Archive','serverFolder'=>'Saved','uidValidity'=>'9','providerId'=>'1']];
     $downloads=[]; foreach ($membership as $source=>$meta) $downloads[$source]=mail_download($a,$source,"Subject: Same UID\r\n\r\n".$meta['folder'],$meta+['read'=>false]);
@@ -151,15 +153,15 @@ try {
     $listing=sync_preflight();
     $listing[1][1]=str_replace('{tag}',"* LIST () \"/\" \"Travel/Orders\"\r\n{tag}",$listing[1][1]);
     fixture([...$listing,examine_step('Travel/Orders'),search_step('ALL',['1']),examine_step('Travel/Orders'),['UID FETCH 1 (UID FLAGS)',"* 1 FETCH (UID 1 FLAGS (\\Seen))\r\n{tag} OK done\r\n"]],function($s) use($custom) {
-        check(imap_sync_stream($custom,$s,false,'Travel/Orders',20)===0,'custom folder refresh reuses cached content');
+        check(legacy_sync_stream($custom,$s,false,'Travel/Orders',20)===0,'custom folder refresh reuses cached content');
     });
     check(get_record($inbox['id'])===$inbox,'custom scan does not reconcile unrelated Inbox');
     check(get_record($customRow['id'])['meta']['read']===true,'custom scan refreshes flags and keeps identity');
     $default=[...$listing,examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',[]),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),examine_step('Deleted')];
-    fixture($default,function($s) use($custom) { imap_sync_stream($custom,$s); });
+    fixture($default,function($s) use($custom) { legacy_sync_stream($custom,$s); });
     check(get_record($customRow['id'])['meta']['folder']==='Custom folder','standard sync preserves unscanned custom folders');
     $before=mail_cache_rows($custom['id']);
-    fixture([...$listing,examine_step('Travel/Orders'),search_step('ALL',['1']),examine_step('Travel/Orders','101')],function($s) use($custom) { refused(fn()=>imap_sync_stream($custom,$s,false,'Travel/Orders'),'Mailbox identifiers changed'); });
+    fixture([...$listing,examine_step('Travel/Orders'),search_step('ALL',['1']),examine_step('Travel/Orders','101')],function($s) use($custom) { refused(fn()=>legacy_sync_stream($custom,$s,false,'Travel/Orders'),'Mailbox identifiers changed'); });
     check(mail_cache_rows($custom['id'])===$before,'failed custom scan publishes nothing');
     fixture($listing,function($s) use($custom) {
         $catalog=imap_folder_catalog($custom,$s);
@@ -197,7 +199,53 @@ try {
     $before=mail_cache_rows($g2['id']);
     refused(fn()=>sync_gmail_folder($g2,'Label_orders',10,function($p){if(str_starts_with($p,'?'))return ['messages'=>[['id'=>'one']]];fail('label scan failed');}),'label scan failed');
     check(mail_cache_rows($g2['id'])===$before,'Gmail label scan failure keeps previous snapshot');
-    echo "PASS mail synchronization, custom folders, repair and recovery fixtures (no live provider calls).\n";
+    // Default headers-first sync must catch a burst larger than its batch and
+    // resume older history even when more arrivals appear between passes.
+    set_setting('preferences',[]);$busy=make_account('busy-headers');
+    $runHeaders=function(array $all,array $fresh,array $existing)use($busy){
+        $steps=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',$all),examine_step('Saved'),search_step('ALL',[]),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX')];
+        foreach(array_chunk($existing,100) as $chunk){$flags='';foreach($chunk as $uid)$flags.='* 1 FETCH (UID '.$uid.' FLAGS ())'."\r\n";$steps[]=['UID FETCH '.implode(',',$chunk).' (UID FLAGS)',$flags."{tag} OK done\r\n"];}
+        if($fresh){$sizes='';foreach($fresh as $uid)$sizes.='* 1 FETCH (UID '.$uid.' RFC822.SIZE 200)'."\r\n";$steps[]=['UID FETCH '.implode(',',$fresh).' (UID RFC822.SIZE)',$sizes."{tag} OK done\r\n"];}
+        foreach($fresh as $uid){$headers="Subject: Busy $uid\r\nFrom: sender@example.com\r\nMessage-ID: <busy-$uid@example.com>\r\n\r\n";$steps[]=['UID FETCH '.$uid.' (UID FLAGS BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)','* 1 FETCH (UID '.$uid.' FLAGS () BODY['.IMAP_HEADER_SECTION.'] {'.strlen($headers)."}\r\n".$headers.")\r\n{tag} OK done\r\n"];}
+        $steps[]=examine_step('Saved');$steps[]=examine_step('Deleted');
+        fixture($steps,fn($s)=>imap_sync_stream($busy,$s));
+        check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK[]')),'header batch never downloads full bodies');
+    };
+    $uids=fn($from,$to)=>array_map('strval',range($from,$to));
+    $runHeaders($uids(1,250),$uids(151,250),[]);
+    check(count(mail_cache_rows($busy['id']))===100 && setting('mail-pending:'.$busy['id'])['standard'],'first batch retains 100 newest headers and signals continuation');
+    $cachedUids=fn()=>array_map(fn($r)=>$r['meta']['providerId'],mail_cache_rows($busy['id']));
+    $runHeaders($uids(1,270),array_merge($uids(71,150),$uids(251,270)),$cachedUids());
+    $runHeaders($uids(1,270),$uids(1,70),$cachedUids());
+    check(count(mail_cache_rows($busy['id']))===270 && !setting('mail-pending:'.$busy['id'])['standard'],'resumed batches include every message and arrivals between passes');
+    $header=get_record(remote_id($busy['id'],mail_source('INBOX','100','1')));
+    check($header['meta']['headerOnly'] && $header['body']==='' && !isset($header['meta']['rawBase64']),'normal-sized mail starts as headers only');
+    $raw="Subject: Busy 1\r\n\r\nBody downloaded on demand";
+    fixture([examine_step('INBOX'),['UID FETCH 1 (UID BODY.PEEK[])',message_response('1',$raw)]],function($s)use($header,$raw){check(imap_mail_content($header,$s)===$raw,'on-demand download verifies mailbox and preserves raw content');});
+    fixture([examine_step('INBOX','101')],function($s)use($header){refused(fn()=>imap_mail_content($header,$s),'Mailbox identifiers changed');});
+    $g3=make_account('gmail-headers','google');$calls=[];
+    $gmailHeaders=function($path)use(&$calls){$calls[]=$path;if(str_starts_with($path,'?')){parse_str(substr($path,1),$q);return ['messages'=>$q['q']==='in:inbox'?array_map(fn($n)=>['id'=>'h'.$n],range(1,125)):[]];}return ['labelIds'=>['INBOX'],'sizeEstimate'=>200,'payload'=>['headers'=>[['name'=>'Subject','value'=>'Gmail header'],['name'=>'From','value'=>'sender@example.com']]]];};
+    sync_google_mail($g3,$gmailHeaders);check(count(mail_cache_rows($g3['id']))===100 && setting('mail-pending:'.$g3['id'])['standard'],'Gmail default indexes 100 headers and retains continuation');
+    sync_google_mail($g3,$gmailHeaders);check(count(mail_cache_rows($g3['id']))===125 && !setting('mail-pending:'.$g3['id'])['standard'],'Gmail header sync resumes remaining identifiers');
+    check(!array_filter($calls,fn($path)=>str_contains($path,'format=raw')),'Gmail headers do not download raw messages');
+    set_setting('preferences',['mailOffline'=>true]);$bodyReads=0;
+    sync_google_mail($g3,function($path)use($gmailHeaders,&$bodyReads){$msg=$gmailHeaders($path);if(str_contains($path,'format=raw')){$bodyReads++;$msg['raw']=base64_encode("Subject: Gmail header\r\n\r\nOffline body");}return $msg;});
+    check($bodyReads===125 && !array_filter(mail_cache_rows($g3['id']),fn($r)=>!empty($r['meta']['headerOnly'])),'enabling offline downloads fills bodies for previously indexed Gmail headers');
+    set_setting('preferences',[]);
+    $repairBatch=function(bool $repair)use($busy,$uids){
+        $rows=mail_cache_rows($busy['id']);
+        $queued=$repair?array_map(fn($r)=>$r['meta']['providerId'],$rows):(setting('imap-repair:'.$busy['id'])['INBOX']['ids']??[]);
+        $fetch=array_slice($queued,0,100);
+        $steps=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',$uids(1,270)),examine_step('INBOX')];
+        if(!$repair)foreach(array_chunk($rows,100) as $chunk){$flags='';$ids=[];foreach($chunk as $r){$uid=$r['meta']['providerId'];$ids[]=$uid;$flags.='* 1 FETCH (UID '.$uid.' FLAGS ())'."\r\n";}$steps[]=['UID FETCH '.implode(',',$ids).' (UID FLAGS)',$flags."{tag} OK done\r\n"];}
+        foreach($fetch as $uid)$steps[]=download_step($uid,"Subject: Busy $uid\r\n\r\nRepaired body $uid");
+        fixture($steps,fn($s)=>imap_sync_stream($busy,$s,$repair,'INBOX'));
+    };
+    $repairBatch(true);
+    check(count(setting('imap-repair:'.$busy['id'])['INBOX']['ids'])===170,'large repair saves its remaining body identifiers');
+    $repairBatch(false);$repairBatch(false);
+    check(setting('imap-repair:'.$busy['id'])['INBOX']['ids']===[] && !array_filter(mail_cache_rows($busy['id']),fn($r)=>!empty($r['meta']['headerOnly'])),'later normal syncs complete all 270 repair bodies without restarting');
+    echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
     foreach (glob($testDir.'/*')?:[] as $file) @unlink($file); @rmdir($testDir);
 }

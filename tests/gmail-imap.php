@@ -71,6 +71,7 @@ try {
         check(count($cached)===2 && get_record($rows['source']['id'])['meta']['folder']==='Trash' && get_record($rows['source']['id'])['meta']['gmailMessageId']==='9001','sync preserves verified Trash identity without resurrecting Inbox or All Mail copies');
     });
     db()->prepare('INSERT INTO accounts (id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute(['large-fixture','Large fixture','imap','{}','']);
+    set_setting('preferences',['mailOffline'=>true]);
     $largeAccount=['id'=>'large-fixture','label'=>'Large fixture','config'=>['host'=>'imap.gmail.com']];
     $headers="Subject: Large message\r\nFrom: sender@example.com\r\nTo: receiver@example.com\r\nMessage-ID: <large@example.com>\r\n\r\n";
     $small="Subject: Normal message after large one\r\n\r\nDownloaded body";

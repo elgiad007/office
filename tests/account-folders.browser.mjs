@@ -57,9 +57,9 @@ export async function testAccountFolders(page,url) {
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'Personal booking','Opening an account folder selects its first message');
     await page.locator('.item').filter({hasText:'Personal trip'}).click();
     await page.locator('#folder-more').click();
-    await page.waitForFunction(()=>document.querySelector('.folder-current small').textContent.includes('20 recent'));
+    await page.waitForFunction(()=>document.querySelector('.folder-current small').textContent.includes('batches of 100'));
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'Personal trip','Folder refresh preserves the selected message');
-    assert.ok(requests.some(r=>r.action==='mail-folder-sync'&&r.input.limit===20));
+    assert.ok(requests.some(r=>r.action==='mail-folder-sync'&&r.input.limit===100));
     await page.locator('.item').filter({hasText:'Personal trip'}).click();await page.locator('#main').focus();await page.keyboard.press('v');
     await page.locator('.item').filter({hasText:'Personal booking'}).click();await page.locator('#main').focus();await page.keyboard.press('v');
     await page.getByRole('button',{name:'Move / Labels',exact:true}).click();

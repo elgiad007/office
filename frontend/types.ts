@@ -62,6 +62,7 @@ export interface Preferences {
   keys?: Record<string, string>;
   mailDisplay?: string; defaultMailAccount?: string;
   keepRecoveryCopies?: boolean; confirmBeforeSend?: boolean;
+  mailOffline?: boolean;
 }
 export interface MailScope { account: string; folder: string; limit: number }
 export interface AppState {
@@ -97,8 +98,9 @@ export interface ApiResponses {
   send: { ok: boolean };
   'mail-folders': { folders: MailFolder[] };
   'mail-folder-manage': { folders: MailFolder[] };
-  'mail-folder-sync': { count: number };
-  sync: { count: number };
+  'mail-folder-sync': { count: number; more?: boolean };
+  'mail-content': { record: OfficeRecord };
+  sync: { count: number; more?: boolean };
   'account-test': CheckResult; 'account-save': { id: string };
   'account-delete': { ok: boolean };
   'google-connect': { url: string }; 'google-settings': GoogleSettings;
