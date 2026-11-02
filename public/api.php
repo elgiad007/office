@@ -6,6 +6,7 @@ require dirname(__DIR__).'/app/connectors.php';
 require dirname(__DIR__).'/app/account-setup.php';
 require dirname(__DIR__).'/app/google.php';
 require dirname(__DIR__).'/app/mail-folders.php';
+require dirname(__DIR__).'/app/mail-transfer.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -215,8 +216,11 @@ try {
             $accountId=(string)($current['meta']['account']??'');
             $ids=db()->prepare("SELECT id FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
             $ids->execute([$accountId]);$before=$ids->fetchAll(PDO::FETCH_COLUMN);
-            $record=in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''))
-                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action));
+            $destination=(string)($input['destinationAccount']??'');
+            $record=$action==='move' && $destination!=='' && $destination!==$accountId
+                ?with_account_mail_mutation($destination,fn()=>transfer_remote_mail($current,account($destination),(string)($input['folder']??'')))
+                :(in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''),$destination!=='')
+                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action)));
             $ids->execute([$accountId]);
             return ['record'=>$record,'removedIds'=>array_values(array_diff($before,$ids->fetchAll(PDO::FETCH_COLUMN)))];
         });

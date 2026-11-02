@@ -129,6 +129,7 @@ export interface FolderEnvironment {
   dialog: HTMLDialogElement; e: (value: unknown) => string;
   field: (label: string, name: string, value?: string, type?: string, extra?: string) => string;
   confirmation: Confirmation; attempt: Attempt; closeFolderPanel?: () => void;
+  mailDeletionReload?: () => (removedIds: string[]) => Promise<void>;
 }
 export interface MenuEnvironment {
   state: AppState; e: (value: unknown) => string; commit: () => Promise<void>;

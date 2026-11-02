@@ -4,7 +4,7 @@ import { isPresent } from './utils.js';
 import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
 import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
-import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail } from './mail-folders.js';
+import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail } from './mail-folders.js';
 import { mailBody, bindMailReader } from './mail-reader.js';
 import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
@@ -18,7 +18,7 @@ const apps = {
     wiki: { name: 'Wiki', singular: 'page', empty: 'No pages yet.', hint: 'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].', icon: 'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3' },
     sheets: { name: 'Sheets', singular: 'workbook', empty: 'No workbooks yet.', hint: 'Create a workbook or import a CSV file.', icon: 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18' },
 };
-const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', read: 'm', delete: 'd' };
+const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
@@ -31,7 +31,7 @@ const pendingMailReads = new Map();
 const mailAccountQueue = new Map(), mailSnapshots = new Map(), mailLatest = new Map(), trashedMailCopies = new Map();
 let mailReadVersion = 0, displayedMailId = null;
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
-const keys = () => ({ ...defaultKeys, ...state.prefs.keys });
+const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => [action, state.prefs.keys?.[action] || defaultKeys[action]]));
 const editable = (node) => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName);
 const dateLabel = (value) => { const date = new Date(value); return Number.isNaN(+date) ? value : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
 const field = (label, name, value = '', type = 'text', extra = '') => `<label>${e(label)}<input type="${type}" name="${name}" value="${e(value)}" ${extra}></label>`;
@@ -251,7 +251,7 @@ function setMailFolderPanel(open) {
     document.querySelector('.shell')?.classList.toggle('folders-open', open);
     document.querySelector('#mail-folders-toggle')?.setAttribute('aria-expanded', String(open));
 }
-function mailFolderEnv() { return { state, api, commit, load, notice, modal, dialog, e, field, confirmation, attempt, closeFolderPanel: () => setMailFolderPanel(false) }; }
+function mailFolderEnv() { return { state, api, commit, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, closeFolderPanel: () => setMailFolderPanel(false) }; }
 function mailLocation(record) {
     const m = record.meta, account = state.accounts.find(a => a.id === m.account);
     if (!m.remote || ['Recovery copies', 'Not in Inbox'].includes(m.folder || ''))
@@ -1013,7 +1013,7 @@ async function syncAccounts(manual = true) {
 }
 function help() {
     const k = keys();
-    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete current item / move connected mail to Trash'], [k.archive, 'Archive selected messages'], [k.read, 'Toggle read / unread'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
+    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete current item / move connected mail to Trash'], [k.archive, 'Archive selected messages'], [k.move, 'Quick Move to folder'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
 }
 async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
@@ -1509,9 +1509,10 @@ document.addEventListener('keydown', event => {
         void attempt(archiveLocal);
         return;
     }
-    if (action === 'read') {
+    if (action === 'move' && state.app === 'mail') {
         event.preventDefault();
-        void attempt(readMail);
+        if (!event.repeat)
+            void attempt(() => quickMoveMail(mailFolderEnv()));
         return;
     }
     if (action === 'reply' && state.app === 'mail') {

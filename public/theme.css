@@ -184,3 +184,9 @@
   .detail-form { display: block; }
   .document-content, .document-content .rich-editor { display: block !important; }
 }
+
+.quick-move-results { max-height: min(45vh, 360px); overflow: auto; display: grid; gap: 4px; }
+.quick-move-results [role="option"] { display: grid; justify-content: stretch; text-align: left; gap: 4px; overflow-wrap: anywhere; }
+.quick-move-results [aria-selected="true"] { background: var(--wash); border-color: var(--accent); }
+.quick-move-results small { color: var(--muted); }
+#quick-move-search { width: 100%; }

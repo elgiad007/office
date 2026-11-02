@@ -96,3 +96,76 @@ export async function fileMail(env: FolderEnvironment) {
     finally{button.disabled=false;await reloadMail(env);}
   });};
 }
+
+/** Quick Move keeps typing focus in the search box, including while navigating matches. */
+export async function quickMoveMail(env: FolderEnvironment) {
+  await env.commit();
+  const {state,e}=env;
+  if(state.app!=='mail')return;
+  const rows=state.selected.size?state.rows.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
+  if(!rows.length||rows.some(r=>!r.meta.remote||['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(r.meta.folder||'')))throw Error('Select synchronized messages to move.');
+  const accounts=state.accounts.filter(a=>['imap','google'].includes(a.type));
+  env.modal('Move to folder',`<form id="quick-move-form"><label>Folder name<input id="quick-move-search" type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="quick-move-results" placeholder="Type a folder name…"></label><div id="quick-move-results" class="quick-move-results" role="listbox" aria-label="Matching folders"></div><p id="quick-move-status" class="muted" role="status"></p><p class="muted">↑ ↓ to choose · Enter to move · Esc to cancel</p></form>`);
+  const form=env.dialog.querySelector<HTMLFormElement>('#quick-move-form')!,input=form.querySelector<HTMLInputElement>('input')!,list=form.querySelector<HTMLElement>('[role="listbox"]')!,status=form.querySelector<HTMLElement>('[role="status"]')!;
+  let matches: {account: Account;folder: MailFolder}[]=[],index=0,moving=false;
+  const completed=new Set<string>(),closeButton=env.dialog.querySelector<HTMLButtonElement>('[data-close]')!;
+  form.insertAdjacentHTML('beforeend','<button type="submit" class="primary">Move</button>');
+  const submit=form.querySelector<HTMLButtonElement>('[type="submit"]')!;
+  const missing=accounts.filter(a=>!a.folders?.length);
+  let discovering=missing.length>0,discoveryFailed=false;
+  const render=()=>{
+    const query=input.value.trim().toLocaleLowerCase();
+    matches=accounts.flatMap(account=>(account.folders||[]).filter(folder=>
+      (account.type!=='google'||!folder.protected||['INBOX','TRASH','SPAM'].includes(folder.id))&&folder.name.toLocaleLowerCase().includes(query)
+    ).map(folder=>({account,folder})));
+    matches.sort((a,b)=>Number(!a.folder.name.toLocaleLowerCase().startsWith(query))-Number(!b.folder.name.toLocaleLowerCase().startsWith(query))||a.folder.name.localeCompare(b.folder.name)||a.account.label.localeCompare(b.account.label));
+    index=Math.max(0,Math.min(index,matches.length-1));
+    list.innerHTML=matches.map(({account,folder},i)=>`<button type="button" role="option" tabindex="-1" id="quick-folder-${i}" data-match="${i}" aria-selected="${i===index}" ${moving?'disabled':''}><strong>${e(folder.name)}</strong><small>${e(account.label)}</small></button>`).join('');
+    if(matches.length)input.setAttribute('aria-activedescendant',`quick-folder-${index}`);else input.removeAttribute('aria-activedescendant');
+    status.textContent=moving?'Moving messages…':`${matches.length?matches.length+' matching folder(s).':'No matching folders.'}${discovering?' Discovering folders…':''}${discoveryFailed?' Some accounts could not be refreshed. Cached folders are shown.':''}`;
+    submit.disabled=moving||discovering||!matches.length;
+    list.querySelector('[aria-selected="true"]')?.scrollIntoView({block:'nearest'});
+  };
+  const move=async()=>{
+    const target=matches[index];if(moving||discovering||!target)return;
+    moving=true;input.disabled=true;closeButton.disabled=true;render();
+    const reload=env.mailDeletionReload?.();
+    let count=completed.size;
+    try{
+      await busy(env,async()=>{
+        const removed=new Set<string>();
+        for(const row of rows){
+          if(completed.has(row.id))continue;
+          if(!removed.has(row.id)){
+            const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:'move',folder:target.folder.id,destinationAccount:target.account.id});
+            for(const id of result.removedIds||[])removed.add(id);
+          }
+          count++;
+          completed.add(row.id);
+        }
+      });
+      env.dialog.close();env.notice(`Moved ${count} message(s) to ${target.account.label} / ${target.folder.name}.`);
+    }catch(cause){throw Error(`${count} of ${rows.length} messages moved. ${asError(cause).message}`);}
+    finally{
+      moving=false;input.disabled=false;closeButton.disabled=false;
+      if(state.app==='mail'&&!state.dirty&&!state.savePromise){if(reload)await reload([...completed]);else await reloadMail(env);}
+      if(env.dialog.open&&form.isConnected){render();input.focus();}
+    }
+  };
+  input.oninput=()=>{index=0;render();};
+  input.onkeydown=event=>{
+    if(event.isComposing)return;
+    if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();index=Math.max(0,Math.min(matches.length-1,index+(event.key==='ArrowDown'?1:-1)));render();}
+  };
+  list.onclick=event=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-match]');if(button){index=Number(button.dataset.match);void env.attempt(move);}};
+  form.onsubmit=event=>{event.preventDefault();void env.attempt(move);};
+  // Do not let a provider mutation outlive a dismissed dialog unnoticed.
+  const cancel=(event: Event)=>{if(moving)event.preventDefault();};
+  env.dialog.addEventListener('cancel',cancel);
+  env.dialog.addEventListener('close',()=>env.dialog.removeEventListener('cancel',cancel),{once:true});
+  render();input.focus();
+  if(missing.length){
+    const results=await Promise.allSettled(missing.map(async account=>{account.folders=(await env.api('mail-folders',{account:account.id})).folders;}));discoveryFailed=results.some(r=>r.status==='rejected');
+    discovering=false;if(form.isConnected&&env.dialog.open)render();
+  }
+}

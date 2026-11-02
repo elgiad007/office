@@ -20,6 +20,7 @@ import {testActivity} from './activity.browser.mjs';
 import {testLargeMail} from './large-mail.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
+import {testQuickMove} from './quick-move.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES || new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
@@ -91,6 +92,7 @@ try{
  await testActivity(page,url);
  await testLargeMail(page,url);
  await testAccountFolders(page,url);
+ await testQuickMove(page,url);
  await testMailHtml(page,url);
  await testItemMenus(page,url);
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.screenshot({path:'test-results/mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));

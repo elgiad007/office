@@ -97,7 +97,9 @@ Right-click an item in any application's list to open its action menu. Ctrl/Cmd-
 
 With an item focused, Shift+F10 or the Menu key opens the same menu. Use arrows, Home/End and Enter to choose an action, or Escape to close it. Text fields and editors retain their normal browser context menus.
 
-Press `?` for context help. Normal mode: `j/k` next/previous, `h/l` focus list/detail, `gg/G` first/last, `/` search, `n/N` move through results, `g 1`–`g 7` change apps, `c` create, `i` edit, `v` select, `s` save, `d` delete the current item (with confirmation) or move connected mail to Trash. Mail: `a` archive selected messages, `m` toggle read/unread, `r` reply. `Escape` leaves an editor and saves; Ctrl/Cmd+S saves. Single-character bindings can be remapped in Settings. The delete shortcut leaves synced read-only items and connected mail already in Trash unchanged. No send key is enabled.
+Press `?` for context help. Normal mode: `j/k` next/previous, `h/l` focus list/detail, `gg/G` first/last, `/` search, `n/N` move through results, `g 1`–`g 7` change apps, `c` create, `i` edit, `v` select, `s` save, `d` delete the current item (with confirmation) or move connected mail to Trash. Mail: `a` archive selected messages, `m` Quick Move to a folder, `r` reply. `Escape` leaves an editor and saves; Ctrl/Cmd+S saves. Single-character bindings can be remapped in Settings. The delete shortcut leaves synced read-only items and connected mail already in Trash unchanged. Ctrl+Enter sends the current draft, with confirmation enabled by default.
+
+Quick Move works like eM Client: press `m`, type a folder name, use ↑/↓ to choose a match, then Enter to move or Escape to cancel. Matches include folders from all connected mail accounts, with account names to distinguish duplicates. It moves selected messages, or the current message when none are selected. Read/unread remains available through buttons and menus. Cross-account moves copy the full original, verify the destination contents, then move the source to its account's Trash. Transfers use the existing 1.4 MB original-message limit and require UIDPLUS on IMAP destinations. Failed verification keeps the source; uncertain copies cannot be retried automatically, preventing duplicates. Check the destination manually if that occurs. Live cross-account provider acceptance remains unverified.
 
 In spreadsheets, focus a cell, use h/j/k/l or arrows to move, i/Enter to edit its formula, Escape to return, Tab/Shift+Tab to move cells. Typing fields keep their normal text input and browser editing behavior. **Full Vim motions/operators in text editors are not implemented yet.** The current mode distinction supplies home-row application navigation, not a full Vim emulator.
 
@@ -130,6 +132,7 @@ Additional checks:
 php tests/backend.php
 php tests/mail-sync.php
 php tests/gmail-imap.php
+php tests/mail-transfer.php
 php tests/activity.php
 php tests/google.php
 node tests/http.mjs

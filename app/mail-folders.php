@@ -195,16 +195,16 @@ function sync_mail_folder(array $a,string $id,int $limit): int {
     }
     fail('Choose a mail account.');
 }
-function file_remote_mail(array $r,string $action,string $folder): array {
+function file_remote_mail(array $r,string $action,string $folder,bool $quickMove=false): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote']) || in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('Choose a synchronized message.');
     $a=account($r['meta']['account']);
     mail_folder_find(setting('mail-folders:'.$a['id'],[]),$folder);
     if ($a['type']==='google') {
         $token=google_token($a);
         $labels=gmail_folder_catalog(google_json('https://gmail.googleapis.com/gmail/v1/users/me/labels',$token));
-        if (mail_folder_find($labels,$folder)['protected']) fail('Choose a custom label. Use the standard mail actions for Inbox and Trash.');
+        if (mail_folder_find($labels,$folder)['protected'] && (!$quickMove || !in_array($folder,['INBOX','TRASH','SPAM'],true))) fail('Choose a custom label. Use the standard mail actions for Inbox and Trash.');
         $body=$action==='unlabel'?['removeLabelIds'=>[$folder]]:['addLabelIds'=>[$folder]];
-        if ($action==='move') $body['removeLabelIds']=['INBOX','TRASH'];
+        if ($action==='move') $body['removeLabelIds']=array_values(array_diff($quickMove?['INBOX','TRASH','SPAM']:['INBOX','TRASH'],[$folder]));
         $msg=google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($r['meta']['providerId']).'/modify',$token,'POST',$body);
         if (!is_array($msg['labelIds']??null) || (in_array($folder,$msg['labelIds'],true)===($action==='unlabel'))) fail('Label action could not be confirmed. Sync before retrying.');
         $r['meta']['labelIds']=$msg['labelIds']; $r['meta']['folder']=gmail_folder($msg['labelIds'])??'Custom folder'; $r['meta']['read']=!in_array('UNREAD',$msg['labelIds'],true);
