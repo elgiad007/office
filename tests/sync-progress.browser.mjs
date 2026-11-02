@@ -18,12 +18,19 @@ export async function testSyncProgress(page,url){
   try{
     await page.goto(url+'?sync-progress#mail');
     await page.locator('#sync-status').filter({hasText:'batch 1'}).waitFor();
+    const bounds=()=>page.evaluate(()=>['.topbar','#main','.view-head','.work-grid','#items','#detail'].map(selector=>{
+      const node=document.querySelector(selector),rect=node.getBoundingClientRect();
+      return {selector,top:rect.top,height:rect.height};
+    }));
+    const initialBounds=await bounds();
     assert.equal(await page.locator('#list-count').textContent(),'0 cached messages');
     assert.match(await page.locator('#list-count').getAttribute('title'),/older mail/);
     releaseFirst();await page.locator('#sync-status').filter({hasText:'batch 2 · downloading older mail'}).waitFor();
+    assert.deepEqual(await bounds(),initialBounds,'Refreshing Mail and changing sync progress must keep pane positions steady');
     assert.equal(await page.locator('#sync-button').isDisabled(),true);
     releaseSecond();await page.locator('#sync-status').filter({hasText:'Older mail remains · continues on next check'}).waitFor();
     assert.equal(calls,5,'one check retains the five-batch limit');assert.equal(await page.locator('#sync-button').isEnabled(),true);
+    assert.deepEqual(await bounds(),initialBounds,'Completing sync must keep pane positions steady');
     // Isolate the activity controller from the app to test streamed progress ownership.
     await page.route(url+'progress-fixture',route=>route.fulfill({contentType:'text/html',body:'<footer id="activity-status"><div id="notice"></div><button id="view-activity"></button></footer><dialog id="activity-dialog"></dialog>'}));
     await page.goto(url+'progress-fixture');

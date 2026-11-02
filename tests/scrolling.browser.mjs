@@ -10,7 +10,7 @@ export async function testScrolling(page, url) {
     assert.ok(action in responses, `Unexpected scrolling fixture API: ${action}`);
     await route.fulfill({json:responses[action]});
   });
-  const positions = () => page.evaluate(() => ({list:document.querySelector('#items').scrollTop, detail:document.querySelector('#detail').scrollTop, main:document.querySelector('#main').scrollTop, page:window.scrollY}));
+  const positions = () => page.evaluate(() => ({list:document.querySelector('#items').scrollTop, detail:document.querySelector('#detail').scrollTop, main:document.querySelector('#main').scrollTop, shell:document.querySelector('.shell').scrollTop, page:window.scrollY}));
   const wheel = async (selector, delta) => {
     const box = await page.locator(selector).boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -26,6 +26,16 @@ export async function testScrolling(page, url) {
         await page.locator('.mail-body').waitFor();
         const dimensions=await page.evaluate(()=>({height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth,viewportHeight:innerHeight,viewportWidth:innerWidth,elements:['.shell','.workspace','#main','.work-grid','.detail'].map(selector=>{const node=document.querySelector(selector),style=getComputedStyle(node);return {selector,height:node.getBoundingClientRect().height,overflow:style.overflow,minHeight:style.minHeight,display:style.display};})}));
         assert.ok(dimensions.height<=dimensions.viewportHeight+1 && dimensions.width<=dimensions.viewportWidth+1, 'Workspace must fit the viewport: '+JSON.stringify(dimensions));
+        const frame = await page.evaluate(() => {
+          const shell=document.querySelector('.shell'), main=document.querySelector('#main');
+          const overflow=shell.scrollHeight-shell.clientHeight;
+          // Focus and browser scroll anchoring can request tiny outer scrolls.
+          shell.scrollTop=1;main.scrollTop=1;
+          return {overflow,shell:shell.scrollTop,main:main.scrollTop};
+        });
+        assert.ok(frame.overflow<=1, 'Hidden labels must not expand the outer Mail frame: '+JSON.stringify(frame));
+        assert.equal(frame.shell,0,'The outer frame must reject one-pixel scrolls');
+        assert.equal(frame.main,0,'Mail panes must scroll independently of the main frame');
         await wheel('#detail', 400);
         await page.waitForFunction(() => document.querySelector('#detail').scrollTop > 0);
         const detailScrolled = await positions();
@@ -56,6 +66,7 @@ export async function testScrolling(page, url) {
             return row.top>=pane.top-1 && row.bottom<=pane.bottom+1;
           }, index);
           assert.equal((await positions()).main, 0);
+          assert.equal((await positions()).shell, 0);
           assert.equal((await positions()).page, 0);
         };
         await navigate('g', 0);
