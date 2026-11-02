@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 const KINDS = ['tasks', 'contacts', 'calendar', 'documents', 'wiki', 'sheets', 'mail'];
+require_once __DIR__.'/attachments.php';
 
 function data_dir(): string {
     $dir = getenv('OFFICE_DATA_DIR') ?: dirname(__DIR__) . '/data';
@@ -19,7 +20,8 @@ function db(): PDO {
         CREATE UNIQUE INDEX IF NOT EXISTS wiki_page_names ON records(title) WHERE kind=\'wiki\';
         CREATE TABLE IF NOT EXISTS revisions (record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, revision INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY(record_id,revision));
         CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, label TEXT NOT NULL, type TEXT NOT NULL, config TEXT NOT NULL, secret TEXT NOT NULL, last_sync TEXT, error TEXT);
-        CREATE TABLE IF NOT EXISTS attempts (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, started INTEGER NOT NULL);');
+        CREATE TABLE IF NOT EXISTS attempts (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, started INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS mail_files (record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, part TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(record_id,part));');
     @chmod(data_dir() . '/office.sqlite', 0600);
     return $db;
 }
@@ -39,9 +41,10 @@ function json_response(mixed $value, int $code = 200): never {
     echo json_encode($value, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE); exit;
 }
 function request_json(): array {
-    if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 12 * 1024 * 1024) fail('Request too large.', 413);
-    $raw = file_get_contents('php://input', false, null, 0, 12 * 1024 * 1024 + 1);
-    if (strlen($raw) > 12 * 1024 * 1024) fail('Request too large.', 413);
+    $limit=($_GET['r']??'')==='restore'?128*1024*1024:16*1024*1024;
+    if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > $limit) fail('Request too large.', 413);
+    $raw = file_get_contents('php://input', false, null, 0, $limit + 1);
+    if (strlen($raw) > $limit) fail('Request too large.', 413);
     try { $value = json_decode($raw ?: '{}', true, 64, JSON_THROW_ON_ERROR); } catch (JsonException) { fail('Invalid JSON.'); }
     if (!is_array($value)) fail('Expected a JSON object.'); return $value;
 }
@@ -115,16 +118,20 @@ function record_row(array $row): array {
     // Empty PHP maps otherwise serialize as [], which loses named cell edits in JavaScript.
     if ($row['kind']==='sheets') foreach ($row['meta']['workbook']['sheets'] as &$sheet) $sheet['cells']=(object)$sheet['cells'];
     if($row['kind']==='mail' && !empty($row['meta']['remote']))$row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
+    if($row['kind']==='mail'){
+        unset($row['meta']['attachments']);
+        try{$files=attachment_manifest($row);}catch(HttpError){$files=attachment_cached($row['id']);}
+        if($files){$row['meta']['attachments']=$files;$row['meta']['hasAttachments']=true;}
+    }
     $row['revision']=(int)$row['revision']; return $row;
 }
 /** Keep originals on the server during normal browsing. Bodies remain available
  * for instant text reading, replies and full-body search. */
 function mail_list_record(array $row): array {
-    if (empty($row['meta']['remote'])) return $row;
     $row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
     $row['hasOriginal']=isset($row['meta']['rawBase64']) || isset($row['meta']['raw']);
     $row['summary']=true;
-    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64']);
+    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts']);
     return $row;
 }
 function get_record(string $id): array {
@@ -135,7 +142,8 @@ function validate_record(array $input): array {
     $kind=$input['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
     $title=trim((string)($input['title']??'')); if (!$title || strlen($title)>500) fail('A title of up to 500 bytes is required.');
     $body=(string)($input['body']??''); if (strlen($body)>2*1024*1024) fail('Item exceeds 2 MB.');
-    $meta=$input['meta']??[]; if (!is_array($meta) || strlen(json_encode($meta))>2*1024*1024) fail('Invalid item metadata.');
+    $meta=$input['meta']??[]; if (!is_array($meta) || strlen(json_encode($meta))>($kind==='mail'?40:2)*1024*1024) fail('Invalid item metadata.');
+    unset($meta['attachments']); // Derived from the file table, never accepted from clients.
     if ($kind==='sheets') {
         $sheets=$meta['workbook']['sheets']??null;
         if (!is_array($sheets) || !array_is_list($sheets) || count($sheets)<1 || count($sheets)>10) fail('A workbook needs 1–10 sheets.');
@@ -153,6 +161,10 @@ function save_record(array $input, bool $internal = false): array {
     $db=db(); $outer=$db->inTransaction(); if (!$outer) $db->beginTransaction();
     try {
         $q=$db->prepare('SELECT * FROM records WHERE id=?'); $q->execute([$id]); $old=$q->fetch();
+        if($old && $r['kind']==='mail' && !empty($input['summary'])){
+            $oldMeta=json_decode($old['meta'],true,64,JSON_THROW_ON_ERROR);
+            foreach(['rawBase64','raw','headersBase64','bodyRawBase64','mimeParts'] as $key)if(!array_key_exists($key,$r['meta']) && isset($oldMeta[$key]))$r['meta'][$key]=$oldMeta[$key];
+        }
         if ($internal && !empty($r['meta']['remote'])) { $q=$db->prepare('SELECT id FROM accounts WHERE id=?'); $q->execute([$r['meta']['account']??'']); if (!$q->fetch()) fail('Account was removed during synchronization.',409); }
         if ($r['kind']==='wiki') { $duplicate=$db->prepare("SELECT id FROM records WHERE kind='wiki' AND title=? AND id<>?"); $duplicate->execute([$r['title'],$id]); if ($duplicate->fetch()) fail('A wiki page with that name already exists.',409); }
         if ($old && !$internal && (int)($input['revision']??0)!==(int)$old['revision']) fail('This item changed elsewhere. Reopen it before saving.',409);

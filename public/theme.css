@@ -27,6 +27,16 @@
 .mail-list-normal { font-size: 13px; }
 .mail-list-large { font-size: 15px; }
 .mail-field-preview, .mail-field-date, .mail-field-attachment { color: var(--muted); font-weight: 400; }
+.mail-attachments { margin: 1rem 0; padding: .8rem; border: 1px solid var(--line); border-radius: .6rem; }
+[data-save-files][hidden] { display: none; }
+.mail-attachment { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem 1rem; padding: .6rem 0; border-top: 1px solid var(--line); }
+.mail-attachment-name { overflow-wrap: anywhere; font-weight: 600; }
+.mail-attachment small { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+.mail-attachment > div { grid-column: 2; grid-row: 1 / 3; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.attachment-drop { outline: 2px dashed var(--accent); outline-offset: 4px; }
+#dialog:has(.attachment-preview) { width: min(1000px, 93vw); }
+.attachment-preview { display: block; width: 100%; height: 60vh; border: 0; background: white; }
+@media (max-width: 600px) { .mail-attachment { grid-template-columns: minmax(0, 1fr); } .mail-attachment > div { grid-column: 1; grid-row: auto; } }
 .mail-unread .mail-field-sender, .mail-unread .mail-field-subject { font-weight: 700; }
 .mail-read .mail-field-sender, .mail-read .mail-field-subject { font-weight: 400; }
 .mail-layout-controls { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }

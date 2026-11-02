@@ -14,8 +14,8 @@ try {
     $record=get_record((string)($_GET['id']??''));
     if ($record['kind']!=='mail' || ($record['meta']['folder']??'')==='Drafts') fail('Select a received email.',400);
     $meta=$record['meta'];
-    $raw=isset($meta['rawBase64']) ? base64_decode($meta['rawBase64'],true) : ($meta['raw']??'');
-    if (!is_string($raw) || strlen($raw)>1400000) fail('Original email is unavailable.',400);
+    $raw=isset($meta['bodyRawBase64'])?base64_decode($meta['bodyRawBase64'],true):(isset($meta['rawBase64']) ? base64_decode($meta['rawBase64'],true) : ($meta['raw']??''));
+    if (!is_string($raw) || strlen($raw)>32*1024*1024) fail('Original email is unavailable.',400);
     $content=eml_html($raw);
     $theme=($_GET['theme']??'')==='dark'?'dark':'light';
     if (($_GET['colors']??'')==='original') $theme='light';

@@ -11,6 +11,7 @@ import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
 import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail} from './mail-folders.js';
 import {mailBody, bindMailReader} from './mail-reader.js';
+import {attachmentSection, bindAttachments, waitForAttachments} from './mail-attachments.js';
 import {installItemMenus} from './item-menus.js';
 import {compareMail} from './mail-sort.js';
 import {renderMailListCopy, bindMailListSettings} from './mail-list.js';
@@ -98,11 +99,11 @@ async function api<R extends ApiRoute>(route: R, data?: ApiData): Promise<ApiRes
   let payload = data as RequestPayload | undefined;
   const expected=mailSnapshots.get(payload?.id!)?.get(payload?.revision!);
   // Let an in-flight read update finish before another mutation uses its revision.
-  if(payload?.id && ['save','delete','mail-action'].includes(route) && pendingMailReads.has(payload.id)) {
+  if(payload?.id && ['save','delete','mail-action','mail-files'].includes(route) && pendingMailReads.has(payload.id)) {
     const result=await pendingMailReads.get(payload.id);
     if(result && payload.revision===result.previousRevision)payload={...payload,revision:result.record.revision};
   }
-  const account=route==='mail-action'?expected?.meta.account||latestMail(payload?.id)?.meta.account
+  const account=['mail-action','mail-files'].includes(route)?expected?.meta.account||latestMail(payload?.id)?.meta.account
     :route==='sync'?payload?.id:['mail-content','mail-folder-sync','mail-folders','mail-folder-manage'].includes(route)?payload?.account:null;
   const names: Partial<Record<ApiRoute, string>>={'mail-action':({trash:'Moving mail to Trash',archive:'Archiving mail',restore:'Restoring mail to Inbox',read:'Marking mail read',unread:'Marking mail unread',move:'Moving mail',discard:'Discarding cached copy','keep-local':'Saving local copy'})[payload?.action||'']||'Updating mail',sync:'Synchronizing mail','mail-folders':'Discovering folders','mail-folder-sync':'Refreshing folder','mail-folder-manage':'Updating folders','account-test':'Testing connection',save:'Saving item',delete:'Deleting item',send:'Sending mail',backup:'Preparing backup',restore:'Restoring backup',import:'Importing items','import-items':'Importing items'};
   const label=state.accounts.find(row=>row.id===account)?.label;
@@ -245,6 +246,7 @@ function mailDeletionReload() {
   };
 }
 async function load(preferId?: string,{selectFirst=true}={}) {
+  await waitForAttachments();
   if(state.app!=='mail')displayedMailId=null;
   itemMenus.close();selectionAnchor=null;keyboardSelection=false;
   document.querySelectorAll<HTMLElement>('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
@@ -338,9 +340,13 @@ function renderDetail() {
   panel.innerHTML=`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':'Saved'}</span>${['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?'<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>':''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>${detailContent(r)}`;
   const form=panel.querySelector<HTMLFormElement>('#record-form')!;
   if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail);
+  if(state.app==='mail')bindAttachments(panel,r,{api,commit,notice,modal,update:record=>{
+    if(state.current?.id===record.id){state.current.revision=record.revision;state.current.meta.attachments=record.meta.attachments;state.current.meta.hasAttachments=record.meta.hasAttachments;}
+    const row=state.rows.find(row=>row.id===record.id);if(row){row.revision=record.revision;row.meta.attachments=record.meta.attachments;row.meta.hasAttachments=record.meta.hasAttachments;}
+  }});
   if(newlyOpened && openedMail)markOpenedMailRead(r);
   const bodyButton=panel.querySelector<HTMLButtonElement>('[data-download-body]');
-  if(bodyButton){bodyButton.onclick=()=>void hydrateMailBody(r,true);if(!['Recovery copies','Not in Inbox'].includes(r.meta.folder||''))void hydrateMailBody(r);}
+  if(bodyButton){bodyButton.onclick=()=>void hydrateMailBody(r,true);if(Number(r.meta.messageSize||0)<=1400000&&!['Recovery copies','Not in Inbox'].includes(r.meta.folder||''))void hydrateMailBody(r);}
   if (form) { form.oninput=()=>markDirty(); form.onsubmit=async ev=>{ev.preventDefault(); await attempt(()=>commit());}; }
   if (fillSender) markDirty();
   panel.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button=>{
@@ -356,7 +362,7 @@ function detailContent(r: OfficeRecord) {
   if (state.app==='mail' && m.folder!=='Drafts') {
     const recovery=!!m.remote && ['Recovery copies','Not in Inbox'].includes(m.folder||'');
     const actions=recovery?'<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>':`${m.remote?'<button data-action="file-mail">Move / Labels</button>':''}${m.folder!=='Archive'?`<button data-action="archive">${m.remote?'Archive':'Archive locally'}</button>`:''}${m.remote?m.folder==='Trash'?'<button data-action="restore-mail">Restore to Inbox</button>':'<button data-action="trash-mail">Move to Trash</button>':''}<button data-action="read">Mark ${m.read?'unread':'read'}</button>`;
-    return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from||'Unknown')}</span><span>To: ${e(m.to||'')}</span><span>${e(m.date||'')}</span></div>${m.remote?`<p class="recurrence-note">${recovery?'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.':'Downloaded copy from '+e(mailLocation(r))+'. Mail actions update the provider; Sync now refreshes its location.'}</p>`:''}<div class="head-actions">${m.from?'<button data-action="reply">Reply</button>':''}${(m.rawBase64||m.raw||r.hasOriginal)?'<button data-action="eml">Download original EML</button>':''}${actions}</div><hr>${mailBody(r,state.prefs)}`;
+    return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from||'Unknown')}</span><span>To: ${e(m.to||'')}</span><span>${e(m.date||'')}</span></div>${m.remote?`<p class="recurrence-note">${recovery?'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.':'Downloaded copy from '+e(mailLocation(r))+'. Mail actions update the provider; Sync now refreshes its location.'}</p>`:''}<div class="head-actions">${m.from?'<button data-action="reply">Reply</button>':''}<button data-action="forward">Forward</button>${(m.rawBase64||m.raw||r.hasOriginal)?'<button data-action="eml">Download original EML</button>':''}${actions}</div><hr>${attachmentSection(r)}${mailBody(r,state.prefs)}`;
   }
   if (state.app==='wiki' && state.wikiPreview) return `<span class="eyebrow">${e(r.title.split(':').slice(0,-1).join(' / ')||'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x=>x.id!==r.id && x.body.includes('[['+r.title+']]')).map(x=>`<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('')||'<p class="muted">No pages link here yet.</p>'}</div>`;
   let content=`<form id="record-form" class="detail-form"><label><span class="file-input">${state.app==='wiki'?'Page ID (namespace:page)':'Title'}</span><input class="title-input" name="title" value="${e(r.title)}" required ${disabled} aria-label="Title"></label>`;
@@ -367,7 +373,7 @@ function detailContent(r: OfficeRecord) {
   if (state.app==='documents') content+=`<div class="document-content"><div class="rich-toolbar" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
   else if (state.app==='sheets') content+=sheetContent(r);
   else content+=`<label>${state.app==='wiki'?'Markdown source':state.app==='mail'?'Message':'Notes'}<textarea class="body-editor" name="body" ${disabled}>${e(r.body)}</textarea></label>`;
-  if (state.app==='mail') content+=`<div class="head-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail?'disabled':''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
+  if (state.app==='mail') content+=attachmentSection(r)+`<div class="head-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail?'disabled':''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
   return content+'</form>';
 }
 function localInput(value?: string) { if (!value) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value+'T00:00'; if (!/[Zz]|[+-]\d\d:\d\d$/.test(value)) return value.slice(0,16); const d=new Date(value); return new Date(+d-d.getTimezoneOffset()*60000).toISOString().slice(0,16); }
@@ -404,7 +410,7 @@ async function commit(): Promise<void> {
   } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
   await state.savePromise; if(state.dirty) await commit();
 }
-async function changeApp(name: AppName) { await commit(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
+async function changeApp(name: AppName) { await waitForAttachments(); await commit(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
 function updateMailListItem(id: string) {
   const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
   if(!row||!button)return;
@@ -415,7 +421,7 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus=false) { await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); renderDetail(); if(focus){
+async function selectRecord(id: string,focus=false) { await waitForAttachments(); await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); renderDetail(); if(focus){
   const selected=document.querySelector<HTMLElement>('#selected-item');
   selected?.focus({preventScroll:true});
   selected?.scrollIntoView({block:'nearest',inline:'nearest'});
@@ -441,7 +447,7 @@ function draftAccount(context?: OfficeRecord | null) {
   return [context?.meta.sendAccount,context?.meta.account,state.prefs.defaultMailAccount,accounts.length===1?accounts[0].id:''].find(id=>accounts.some(a=>a.id===id)) || '';
 }
 async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,focusBody=false}={}) {
-  await commit(); const kind=state.app;
+  await waitForAttachments(); await commit(); const kind=state.app;
   if (!apps[kind]) return;
   // Remove the previous editor before the network round-trip, so fast typing cannot overwrite it.
   const previous=state.current;
@@ -478,7 +484,7 @@ function confirmation(title: string,message: string,action: () => unknown) { mod
 function download(name: string,text: BlobPart,type='text/plain') { const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'_');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
 function originalMail(record: OfficeRecord) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64),c=>c.charCodeAt(0)) : record.meta.raw || ''; }
 async function fullMailRecord(record: OfficeRecord) {
-  if(record.meta.headerOnly && Number(record.meta.messageSize||0)<=1400000){await pendingMailReads.get(record.id);return (await api('mail-content',{id:record.id,account:record.meta.account})).record;}
+  if(record.meta.headerOnly){await pendingMailReads.get(record.id);return (await api('mail-content',{id:record.id,account:record.meta.account})).record;}
   if(!record.summary)return record;
   const cached=latestMail(record.id);
   if(cached && !cached.summary && cached.revision===record.revision && sameMailTarget(record,cached))return cached;
@@ -585,6 +591,12 @@ async function handleClick(event: MouseEvent) {
     if(action==='read')await readMail();
     if(action==='archive')await archiveLocal();
     if(action==='reply'){const original=state.current!;const r=original.meta.headerOnly?await fullMailRecord(original):original;if(state.current?.id!==original.id)return;const match=(r.meta.from||'').match(/<([^>]+)>/);await createRecord({title:/^Re:/i.test(r.title)?r.title:'Re: '+r.title,body:'\n\nOn '+(r.meta.date||'')+', '+(r.meta.from||'')+' wrote:\n'+r.body.split('\n').map(l=>'> '+l).join('\n'),meta:{to:match?match[1]:r.meta.from}},{keepMailList:true,focusBody:true});}
+    if(action==='forward'){
+      const original=state.current!;await waitForAttachments();await commit();await pendingMailReads.get(original.id);
+      const source=original.meta.headerOnly?await fullMailRecord(original):original;
+      const response=await api('mail-files',{id:source.id,action:'forward'});
+      state.mailScope=null;state.mailFolder='Drafts';await load(response.record.id);enterEdit();
+    }
     if(action==='send')await sendMail();
     if(action==='add-sheet'){await commit();const w=workbook(state.current!);if(w.sheets.length>=10)throw Error('Up to 10 sheets per workbook.');w.sheets.push({name:'Sheet '+(w.sheets.length+1),cells:{}});state.sheet=w.sheets.length-1;state.cell='A1';renderDetail();markDirty();}
     if(action==='rename-sheet'){modal('Rename sheet',`<form id="rename-form">${field('Name','name',workbook(state.current!).sheets[state.sheet].name,'text','required maxlength="60"')}<button class="primary">Rename</button></form>`);dialog.querySelector<HTMLFormElement>('form')!.onsubmit=ev=>{ev.preventDefault();collect();workbook(state.current!).sheets[state.sheet].name=new FormData(ev.target as HTMLFormElement).get('name') as string;dialog.close();renderDetail();markDirty();};}
@@ -597,6 +609,7 @@ async function sendMail() {
   if(!form||!form.reportValidity())return;
   sendingMail=true;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,true);
   try{
+    await waitForAttachments();
     await commit();
     if(state.app!=='mail'||state.current?.id!==record.id)return;
     if(!mailAccounts().some(a=>a.id===record.meta.sendAccount))throw Error('Choose a sending account first.');

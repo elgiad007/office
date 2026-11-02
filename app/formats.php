@@ -20,7 +20,8 @@ function eml_text(array $headers,string $body,int $depth,int &$remaining,bool $h
         if ($bytes!==false && strlen($bytes)<=500000 && ($info=@getimagesizefromstring($bytes)) && ($info['mime']??'')===$media) $images[trim($headers['content-id'],' <>')]='data:'.$media.';base64,'.base64_encode($bytes);
         return null;
     }
-    if (strtolower(trim(explode(';',$disposition,2)[0]))==='attachment' || eml_parameter($disposition,'filename')!==null || eml_parameter($type,'name')!==null) return null;
+    $parameter=function_exists('attachment_parameter')?'attachment_parameter':'eml_parameter';
+    if (strtolower(trim(explode(';',$disposition,2)[0]))==='attachment' || $parameter($disposition,'filename')!==null || $parameter($type,'name')!==null) return null;
     if (str_starts_with($media,'multipart/')) {
         $boundary=eml_parameter($type,'boundary');
         if ($boundary===null || $boundary==='' || strlen($boundary)>200 || strpbrk($boundary,"\r\n")!==false) return null;
@@ -75,6 +76,7 @@ function eml_has_attachments(string $raw,int $depth=0,?int &$remaining=null): ?b
     [$headers,$body]=eml_entity($raw);
     $type=$headers['content-type']??'text/plain';
     $disposition=$headers['content-disposition']??'';
+    if(!str_starts_with(strtolower($type),'multipart/') && function_exists('attachment_part') && attachment_part($headers,'1',strlen($body))['attachment'])return true;
     $inline=str_starts_with(strtolower(trim(explode(';',$type,2)[0])),'image/') && (strtolower(trim(explode(';',$disposition,2)[0]))==='inline' || isset($headers['content-id']));
     if (strtolower(trim(explode(';',$disposition,2)[0]))==='attachment' || (!$inline && (eml_parameter($disposition,'filename')!==null || eml_parameter($type,'name')!==null))) return true;
     if (!str_starts_with(strtolower($type),'multipart/')) return false;

@@ -88,6 +88,15 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
             // ambiguous duplicates or copies still present in the source folder.
             if (!$old && $hash!==null && count($hashes[$hash]??[])===1 && count($incomingHashes[$hash]??[])===1) $old=$missing[$hashes[$hash][0]]??null;
             $r['id']=$old['id']??remote_id($a['id'],$source);
+            if($old){
+                unset($old['meta']['attachments']);
+                // An unchanged remote message retains discovered part metadata and cached text.
+                if(mail_row_source($old)===$source){
+                    if(isset($old['meta']['mimeParts']))$r['meta']['mimeParts']=$old['meta']['mimeParts'];
+                    if(isset($old['meta']['bodyRawBase64']) && !empty($r['meta']['headerOnly'])){$r['meta']['bodyRawBase64']=$old['meta']['bodyRawBase64'];$r['body']=$old['body'];$r['meta']['hasHtml']=$old['meta']['hasHtml'];unset($r['meta']['headerOnly']);}
+                    if(isset($old['meta']['mimeParts']))$r['meta']['hasAttachments']=$old['meta']['hasAttachments'];
+                }
+            }
             validate_record($r);
             // Re-downloading unchanged mail must not invalidate an open reader.
             if (!$old || $old['kind']!==$r['kind'] || $old['title']!==$r['title'] || $old['body']!==$r['body'] || $old['meta']!==$r['meta']) save_record($r,true);
@@ -123,8 +132,9 @@ function recovery_mail_action(array $r,string $action): ?array {
     $db=db(); $db->beginTransaction();
     try {
         $local=save_record($r,true);
+        attachment_copy($oldId,$local['id']);
         $db->prepare('DELETE FROM records WHERE id=?')->execute([$oldId]);
-        $db->commit(); return $local;
+        $db->commit(); return get_record($local['id']);
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
 }
 /** Decode LIST once for synchronization and MOVE preflight. */
@@ -440,7 +450,7 @@ function download_mail_content(array $r): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote'])) fail('Choose synchronized mail.');
     if (empty($r['meta']['headerOnly'])) return $r;
     if (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('This message is no longer in its synchronized folder.');
-    if (($r['meta']['messageSize']??0)>IMAP_BODY_LIMIT) fail('This message exceeds the 1.4 MB body download limit.');
+    if (($r['meta']['messageSize']??0)>IMAP_BODY_LIMIT) return attachment_large_body($r);
     $a=account($r['meta']['account']);$meta=$r['meta'];
     if($a['type']==='imap')$raw=imap_with_connection($a,fn($s)=>imap_mail_content($r,$s));
     elseif($a['type']==='google'){

@@ -3,6 +3,7 @@ export type ItemKind = 'mail' | 'calendar' | 'tasks' | 'contacts' | 'documents' 
 export type AppName = ItemKind | 'settings';
 export type Cells = Record<string, string>;
 export interface Workbook { sheets: {name: string; cells: Cells}[] }
+export interface Attachment {part: string; name: string; type: string; size: number; available: boolean; encodedSize?: boolean}
 export interface ItemMeta {
   remote?: boolean;
   account?: string;
@@ -26,6 +27,7 @@ export interface ItemMeta {
   hasHtml?: boolean;
   headerOnly?: boolean;
   hasAttachments?: boolean;
+  attachments?: Attachment[];
   messageSize?: number;
   due?: string;
   priority?: string;
@@ -105,6 +107,7 @@ export interface ApiResponses {
   'mail-folder-manage': { folders: MailFolder[] };
   'mail-folder-sync': { count: number; more?: boolean };
   'mail-content': { record: OfficeRecord };
+  'mail-files': {record: OfficeRecord; attachments: Attachment[]};
   sync: { count: number; more?: boolean };
   'account-test': CheckResult; 'account-save': { id: string };
   'account-delete': { ok: boolean };

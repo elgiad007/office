@@ -71,6 +71,12 @@ try {
         session_write_close();json_response(['records'=>$records]);
     }
     if ($route==='record' && $method==='GET') {session_write_close();json_response(['record'=>get_record((string)($_GET['id']??''))]);}
+    if($route==='mail-files' && $method==='POST'){
+        $r=get_record((string)($input['id']??''));session_write_close();
+        $operation=fn()=>attachment_request($input);
+        $result=!empty($r['meta']['remote'])?with_account_mail_mutation($r['meta']['account'],$operation):$operation();
+        $result['record']=mail_list_record($result['record']);json_response($result);
+    }
     if ($route==='mail-content' && $method==='POST') {
         $r=get_record((string)($input['id']??''));
         if($r['kind']!=='mail' || empty($r['meta']['remote']))fail('Choose synchronized mail.');
@@ -102,8 +108,8 @@ try {
     }
     if ($route==='backup' && $method==='GET') {
         $db=db(); $db->beginTransaction();
-        $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]); $db->commit();
-        json_response(['format'=>'portable-office','version'=>1,'created'=>gmdate('c'),'records'=>$records,'revisions'=>$revisions,'preferences'=>$prefs]);
+        $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]);$files=$db->query('SELECT * FROM mail_files')->fetchAll(); $db->commit();
+        json_response(['format'=>'portable-office','version'=>1,'created'=>gmdate('c'),'records'=>$records,'revisions'=>$revisions,'preferences'=>$prefs,'mailFiles'=>$files]);
     }
     if ($route==='restore' && $method==='POST') {
         $backup=$input['backup']??[];
@@ -120,6 +126,13 @@ try {
         $histories=$backup['revisions']??[]; if (!is_array($histories) || count($histories)>20000) fail('Invalid revision history.');
         foreach ($histories as $h) { if (!is_array($h) || !isset($seen[$h['record_id']??'']) || (int)($h['revision']??0)<1 || !is_array(json_decode($h['snapshot']??'',true))) fail('Invalid revision history.'); validate_record(json_decode($h['snapshot'],true)); }
         $prefs=$backup['preferences']??[]; if (!is_array($prefs) || strlen(json_encode($prefs))>10000) fail('Invalid preferences.');
+        $files=$backup['mailFiles']??[];if(!is_array($files)||count($files)>50000)fail('Invalid attachment backup.');
+        $fileKeys=[];
+        foreach($files as $file){
+            if(!is_array($file)||!isset($seen[$file['record_id']??''])||!is_string($file['part']??null)||!preg_match('/^[a-zA-Z0-9_.-]{1,100}$/D',$file['part'])||!is_string($file['name']??null)||!is_string($file['type']??null)||!is_string($file['data']??null))fail('Invalid attachment backup.');
+            $bytes=base64_decode($file['data'],true);if($bytes===false||strlen($bytes)>MAIL_FILE_LIMIT||strlen($bytes)!==($file['size']??null))fail('Invalid attachment backup data.');
+            $key=$file['record_id'].'/'.$file['part'];if(isset($fileKeys[$key]))fail('Duplicate attachment backup.');$fileKeys[$key]=true;
+        }
         $db=db(); $db->exec('BEGIN IMMEDIATE');
         try {
             // Merge only into an empty local workspace to avoid accidental overwrites.
@@ -127,6 +140,7 @@ try {
             $q=$db->prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?)');
             foreach ($validated as $v) $q->execute([$v['id'],$v['kind'],$v['title'],$v['body'],json_encode($v['meta'],JSON_THROW_ON_ERROR),$v['revision'],$v['updated']]);
             $q=$db->prepare('INSERT INTO revisions VALUES(?,?,?)'); foreach ($histories as $h) $q->execute([$h['record_id'],(int)$h['revision'],$h['snapshot']]);
+            foreach($files as $file)attachment_store($file['record_id'],$file,base64_decode($file['data'],true));
             set_setting('preferences',$prefs); $db->exec('COMMIT');
         } catch(Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
         json_response(['count'=>count($validated)]);
@@ -203,7 +217,7 @@ try {
         if (!filter_var($r['meta']['to']??'',FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/',$r['title']) || strlen($r['body'])>1000000) fail('Use one valid recipient, a one-line subject and a plain-text message up to 1 MB.');
         // Persist an uncertain state before networking; a dropped response must not trigger an automatic resend.
         $r['meta']['folder']='Sending'; $r=save_record($r);
-        try { $raw=send_mail($a,(string)($r['meta']['to']??''),$r['title'],$r['body']); $r['meta']['folder']='Sent'; $r['meta']['sentAt']=gmdate('c'); $r['meta']['from']=$a['config']['email']; $r['meta']['rawBase64']=base64_encode($raw); $r['meta']['read']=true; save_record($r); json_response(['ok'=>true]); }
+        try { $raw=send_mail($a,(string)($r['meta']['to']??''),$r['title'],$r['body'],attachment_draft_files($r)); $r['meta']['folder']='Sent'; $r['meta']['filePartsLocal']=true; $r['meta']['hasHtml']=false; $r['meta']['sentAt']=gmdate('c'); $r['meta']['from']=$a['config']['email']; $r['meta']['rawBase64']=base64_encode($raw); $r['meta']['read']=true; save_record($r); json_response(['ok'=>true]); }
         catch(Throwable $e) { $r['meta']['folder']='Delivery uncertain'; save_record($r); fail($e->getMessage().' Check the recipient/provider before creating another send attempt.'); }
     }
     if ($route==='mail-action' && $method==='POST') {

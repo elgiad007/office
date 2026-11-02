@@ -6,6 +6,7 @@ import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
 import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail } from './mail-folders.js';
 import { mailBody, bindMailReader } from './mail-reader.js';
+import { attachmentSection, bindAttachments, waitForAttachments } from './mail-attachments.js';
 import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
 import { renderMailListCopy, bindMailListSettings } from './mail-list.js';
@@ -135,12 +136,12 @@ async function api(route, data) {
     let payload = data;
     const expected = mailSnapshots.get(payload?.id)?.get(payload?.revision);
     // Let an in-flight read update finish before another mutation uses its revision.
-    if (payload?.id && ['save', 'delete', 'mail-action'].includes(route) && pendingMailReads.has(payload.id)) {
+    if (payload?.id && ['save', 'delete', 'mail-action', 'mail-files'].includes(route) && pendingMailReads.has(payload.id)) {
         const result = await pendingMailReads.get(payload.id);
         if (result && payload.revision === result.previousRevision)
             payload = { ...payload, revision: result.record.revision };
     }
-    const account = route === 'mail-action' ? expected?.meta.account || latestMail(payload?.id)?.meta.account
+    const account = ['mail-action', 'mail-files'].includes(route) ? expected?.meta.account || latestMail(payload?.id)?.meta.account
         : route === 'sync' ? payload?.id : ['mail-content', 'mail-folder-sync', 'mail-folders', 'mail-folder-manage'].includes(route) ? payload?.account : null;
     const names = { 'mail-action': ({ trash: 'Moving mail to Trash', archive: 'Archiving mail', restore: 'Restoring mail to Inbox', read: 'Marking mail read', unread: 'Marking mail unread', move: 'Moving mail', discard: 'Discarding cached copy', 'keep-local': 'Saving local copy' })[payload?.action || ''] || 'Updating mail', sync: 'Synchronizing mail', 'mail-folders': 'Discovering folders', 'mail-folder-sync': 'Refreshing folder', 'mail-folder-manage': 'Updating folders', 'account-test': 'Testing connection', save: 'Saving item', delete: 'Deleting item', send: 'Sending mail', backup: 'Preparing backup', restore: 'Restoring backup', import: 'Importing items', 'import-items': 'Importing items' };
     const label = state.accounts.find(row => row.id === account)?.label;
@@ -371,6 +372,7 @@ function mailDeletionReload() {
     };
 }
 async function load(preferId, { selectFirst = true } = {}) {
+    await waitForAttachments();
     if (state.app !== 'mail')
         displayedMailId = null;
     itemMenus.close();
@@ -531,12 +533,26 @@ function renderDetail() {
     const form = panel.querySelector('#record-form');
     if (state.app === 'mail' && r.meta.folder !== 'Drafts')
         bindMailReader(panel, r, renderDetail);
+    if (state.app === 'mail')
+        bindAttachments(panel, r, { api, commit, notice, modal, update: record => {
+                if (state.current?.id === record.id) {
+                    state.current.revision = record.revision;
+                    state.current.meta.attachments = record.meta.attachments;
+                    state.current.meta.hasAttachments = record.meta.hasAttachments;
+                }
+                const row = state.rows.find(row => row.id === record.id);
+                if (row) {
+                    row.revision = record.revision;
+                    row.meta.attachments = record.meta.attachments;
+                    row.meta.hasAttachments = record.meta.hasAttachments;
+                }
+            } });
     if (newlyOpened && openedMail)
         markOpenedMailRead(r);
     const bodyButton = panel.querySelector('[data-download-body]');
     if (bodyButton) {
         bodyButton.onclick = () => void hydrateMailBody(r, true);
-        if (!['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || ''))
+        if (Number(r.meta.messageSize || 0) <= 1400000 && !['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || ''))
             void hydrateMailBody(r);
     }
     if (form) {
@@ -569,7 +585,7 @@ function detailContent(r) {
     if (state.app === 'mail' && m.folder !== 'Drafts') {
         const recovery = !!m.remote && ['Recovery copies', 'Not in Inbox'].includes(m.folder || '');
         const actions = recovery ? '<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>' : `${m.remote ? '<button data-action="file-mail">Move / Labels</button>' : ''}${m.folder !== 'Archive' ? `<button data-action="archive">${m.remote ? 'Archive' : 'Archive locally'}</button>` : ''}${m.remote ? m.folder === 'Trash' ? '<button data-action="restore-mail">Restore to Inbox</button>' : '<button data-action="trash-mail">Move to Trash</button>' : ''}<button data-action="read">Mark ${m.read ? 'unread' : 'read'}</button>`;
-        return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from || 'Unknown')}</span><span>To: ${e(m.to || '')}</span><span>${e(m.date || '')}</span></div>${m.remote ? `<p class="recurrence-note">${recovery ? 'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.' : 'Downloaded copy from ' + e(mailLocation(r)) + '. Mail actions update the provider; Sync now refreshes its location.'}</p>` : ''}<div class="head-actions">${m.from ? '<button data-action="reply">Reply</button>' : ''}${(m.rawBase64 || m.raw || r.hasOriginal) ? '<button data-action="eml">Download original EML</button>' : ''}${actions}</div><hr>${mailBody(r, state.prefs)}`;
+        return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from || 'Unknown')}</span><span>To: ${e(m.to || '')}</span><span>${e(m.date || '')}</span></div>${m.remote ? `<p class="recurrence-note">${recovery ? 'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.' : 'Downloaded copy from ' + e(mailLocation(r)) + '. Mail actions update the provider; Sync now refreshes its location.'}</p>` : ''}<div class="head-actions">${m.from ? '<button data-action="reply">Reply</button>' : ''}<button data-action="forward">Forward</button>${(m.rawBase64 || m.raw || r.hasOriginal) ? '<button data-action="eml">Download original EML</button>' : ''}${actions}</div><hr>${attachmentSection(r)}${mailBody(r, state.prefs)}`;
     }
     if (state.app === 'wiki' && state.wikiPreview)
         return `<span class="eyebrow">${e(r.title.split(':').slice(0, -1).join(' / ') || 'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x => x.id !== r.id && x.body.includes('[[' + r.title + ']]')).map(x => `<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('') || '<p class="muted">No pages link here yet.</p>'}</div>`;
@@ -589,7 +605,7 @@ function detailContent(r) {
     else
         content += `<label>${state.app === 'wiki' ? 'Markdown source' : state.app === 'mail' ? 'Message' : 'Notes'}<textarea class="body-editor" name="body" ${disabled}>${e(r.body)}</textarea></label>`;
     if (state.app === 'mail')
-        content += `<div class="head-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail ? 'disabled' : ''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
+        content += attachmentSection(r) + `<div class="head-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail ? 'disabled' : ''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
     return content + '</form>';
 }
 function localInput(value) { if (!value)
@@ -683,7 +699,7 @@ async function commit() {
     if (state.dirty)
         await commit();
 }
-async function changeApp(name) { await commit(); if (name === 'mail' && state.app !== 'mail') {
+async function changeApp(name) { await waitForAttachments(); await commit(); if (name === 'mail' && state.app !== 'mail') {
     state.mailFolder = 'Inbox';
     state.mailScope = null;
 } state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(); }
@@ -708,6 +724,7 @@ function updateMailListItem(id) {
         label.textContent = row.meta.read ? 'Read' : 'Unread';
 }
 async function selectRecord(id, focus = false) {
+    await waitForAttachments();
     await commit();
     const previous = state.current?.id;
     state.current = state.rows.find(r => r.id === id) || null;
@@ -763,6 +780,7 @@ function draftAccount(context) {
     return [context?.meta.sendAccount, context?.meta.account, state.prefs.defaultMailAccount, accounts.length === 1 ? accounts[0].id : ''].find(id => accounts.some(a => a.id === id)) || '';
 }
 async function createRecord(initial = {}, { keepMailList = false, focusBody = false } = {}) {
+    await waitForAttachments();
     await commit();
     const kind = state.app;
     if (!apps[kind])
@@ -846,7 +864,7 @@ function confirmation(title, message, action) { modal(title, `<p>${e(message)}</
 function download(name, text, type = 'text/plain') { const url = URL.createObjectURL(new Blob([text], { type })); const a = document.createElement('a'); a.href = url; a.download = name.replace(/[\\/:*?"<>|]/g, '_'); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function originalMail(record) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64), c => c.charCodeAt(0)) : record.meta.raw || ''; }
 async function fullMailRecord(record) {
-    if (record.meta.headerOnly && Number(record.meta.messageSize || 0) <= 1400000) {
+    if (record.meta.headerOnly) {
         await pendingMailReads.get(record.id);
         return (await api('mail-content', { id: record.id, account: record.meta.account })).record;
     }
@@ -1167,6 +1185,18 @@ async function handleClick(event) {
             const match = (r.meta.from || '').match(/<([^>]+)>/);
             await createRecord({ title: /^Re:/i.test(r.title) ? r.title : 'Re: ' + r.title, body: '\n\nOn ' + (r.meta.date || '') + ', ' + (r.meta.from || '') + ' wrote:\n' + r.body.split('\n').map(l => '> ' + l).join('\n'), meta: { to: match ? match[1] : r.meta.from } }, { keepMailList: true, focusBody: true });
         }
+        if (action === 'forward') {
+            const original = state.current;
+            await waitForAttachments();
+            await commit();
+            await pendingMailReads.get(original.id);
+            const source = original.meta.headerOnly ? await fullMailRecord(original) : original;
+            const response = await api('mail-files', { id: source.id, action: 'forward' });
+            state.mailScope = null;
+            state.mailFolder = 'Drafts';
+            await load(response.record.id);
+            enterEdit();
+        }
         if (action === 'send')
             await sendMail();
         if (action === 'add-sheet') {
@@ -1196,6 +1226,7 @@ async function sendMail() {
     sendingMail = true;
     busyButton(document.querySelector('#detail [data-action="send"]'), true);
     try {
+        await waitForAttachments();
         await commit();
         if (state.app !== 'mail' || state.current?.id !== record.id)
             return;

@@ -10,13 +10,13 @@ function public_host(string $host): string {
     foreach ($ips as $ip) if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_NO_PRIV_RANGE|FILTER_FLAG_NO_RES_RANGE)) fail('Private/reserved servers are not supported.');
     return $ips[0];
 }
-function web_request(string $url, string $method='GET', array $headers=[], ?string $body=null): array {
+function web_request(string $url, string $method='GET', array $headers=[], ?string $body=null,int $limit=8388608): array {
     if (!extension_loaded('curl')) fail('The cURL extension is required for this connector.');
     $p=parse_url($url);
     if (!$p || ($p['scheme']??'')!=='https' || empty($p['host']) || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) fail('Use an HTTPS endpoint without embedded credentials.');
     $port=(int)($p['port']??443); if (!in_array($port,[443,8443],true)) fail('HTTPS ports 443 or 8443 are supported.');
     $ip=public_host($p['host']); $ch=curl_init($url); $response='';
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>18,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response) { if (strlen($response)+strlen($chunk)>8*1024*1024) return 0; $response.=$chunk; return strlen($chunk); }]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>30,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response,$limit) { if (strlen($response)+strlen($chunk)>$limit) return 0; $response.=$chunk; return strlen($chunk); }]);
     if ($body!==null) curl_setopt($ch,CURLOPT_POSTFIELDS,$body);
     $ok=curl_exec($ch); $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
     if ($ok===false) fail('Provider connection failed or exceeded its response limit.');
@@ -100,7 +100,7 @@ function write_all(mixed $s,string $data): void {
     while ($data!=='') { $n=fwrite($s,$data); if ($n===false || $n===0) fail('Provider connection interrupted.'); $data=substr($data,$n); }
 }
 function imap_quote(string $value): string { if (preg_match('/[\r\n\x00]/',$value)) fail('Invalid account credential.'); return '"'.addcslashes($value,'\\"').'"'; }
-function imap_command(mixed $s,string $command): array {
+function imap_command(mixed $s,string $command,int $literalLimit=1400000): array {
     static $sequence=0;$stage=imap_stage($command);$started=microtime(true);
     activity_step('IMAP: '.$stage.'.');
     if(preg_match('/^(?:UID\s+)?(?:MOVE|COPY|STORE|CREATE|DELETE|RENAME|EXPUNGE|APPEND)\b/i',$command))$GLOBALS['office_imap_mutated']=true;
@@ -111,10 +111,10 @@ function imap_command(mixed $s,string $command): array {
     if(str_contains(stream_get_meta_data($s)['stream_type']??'','tcp_socket'))stream_set_timeout($s,max(1,min(20,(int)$remaining)));
     $lines=[]; $literals=[]; $total=0;
     while (($line=fgets($s,65536))!==false) {
-        $total+=strlen($line); if ($total>3*1024*1024) fail('Email exceeds the initial download limit.');
+        $total+=strlen($line); if ($total>max(3*1024*1024,$literalLimit+1048576)) fail('Email exceeds the download limit.');
         $lines[]=$line;
         if (preg_match('/\{(\d+)\}\r\n$/',$line,$m)) {
-            $remaining=(int)$m[1]; if ($remaining>1400000) fail('Email exceeds the initial 1.4 MB download limit.'); $literal='';
+            $remaining=(int)$m[1]; if ($remaining>$literalLimit) fail('Email part exceeds the download limit.'); $literal='';
             while ($remaining>0) { $part=fread($s,min(65536,$remaining)); if ($part===false || $part==='') imap_transport_failure($s,$stage); $literal.=$part; $remaining-=strlen($part); }
             $literals[]=$literal; $total+=strlen($literal);
         }
@@ -199,7 +199,7 @@ function imap_fetch_content(array $response,string $id,string $section=''): ?str
         if (preg_match('/^\* \d+ FETCH\s*\(/i',$line) || preg_match('/^A\d+ /',$line)) {
             if ($matches($header)) {
                 $seen=true;
-                if ($body!==null && $body!=='') return $body;
+                if ($body!==null && ($body!=='' || $section!=='')) return $body;
             }
             $header=''; $body=null;
         }
@@ -439,11 +439,11 @@ function remote_mail_action(array $r,string $action): array {
     } else fail('This connector does not support email actions.');
     return $relatedIds?save_imap_gmail_move($r,$relatedIds):save_record($r,true);
 }
-function send_mail(array $a,string $to,string $subject,string $body): string {
+function send_mail(array $a,string $to,string $subject,string $body,array $files=[]): string {
     $from=$a['config']['email']??'';
     foreach ([$from,$to] as $address) if (!filter_var($address,FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/',$address)) fail('A valid sender and recipient email are required.');
     if (!$subject || preg_match('/[\r\n]/',$subject)) fail('Subject must be one line.');
-    $raw='From: '.$from."\r\nTo: ".$to."\r\nSubject: =?UTF-8?B?".base64_encode($subject)."?=\r\nDate: ".gmdate('D, d M Y H:i:s +0000')."\r\nMessage-ID: <".bin2hex(random_bytes(16))."@".substr(strrchr($from,'@'),1).">\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n".chunk_split(base64_encode($body),76,"\r\n");
+    $raw='From: '.$from."\r\nTo: ".$to."\r\nSubject: =?UTF-8?B?".base64_encode($subject)."?=\r\nDate: ".gmdate('D, d M Y H:i:s +0000')."\r\nMessage-ID: <".bin2hex(random_bytes(16))."@".substr(strrchr($from,'@'),1).">\r\nMIME-Version: 1.0\r\n".attachment_mime_body($body,$files);
     if ($a['type']==='google') { google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',google_token($a),'POST',['raw'=>rtrim(strtr(base64_encode($raw),'+/','-_'),'=')]); return $raw; }
     if ($a['type']!=='imap') fail('This account cannot send email.');
     $s=socket_connection($a['config']['smtp'],465);

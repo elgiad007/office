@@ -7,12 +7,14 @@
 - Functional local tasks, contacts, agenda, rich-text documents, Markdown wiki and multi-sheet workbooks.
 - Home-row application commands and remapping, standard keyboard focus, light/dark/system themes, three accent palettes and compact density.
 - JSON backup/restore and item import/export; CSV workbooks, basic vCards, ICS, EML, text, Markdown and safe HTML. Original binary mail source is stored as base64; original ICS sources can be downloaded. The README documents format and size limits.
-- Multipart mail reading extracts plain text or converts HTML to text, decodes transfer encodings/charsets and excludes attachments. Existing cached multipart notices are replaced on read using the retained original, without changing provider state or record revisions. Attachment viewing and complete MIME support remain deferred.
+- Multipart mail reading extracts plain text or converts HTML to text, decodes transfer encodings/charsets and excludes attachments. Existing cached multipart notices are replaced on read using the retained original, without changing provider state or record revisions. File attachments now have metadata lists, image/PDF previews, individual downloads, ZIP Save all, draft uploads/removal, forwarding and multipart sending. IMAP BODYSTRUCTURE and Gmail payload metadata allow on-demand part downloads; bytes are cached separately in SQLite and included in backup/restore. Complete MIME support remains deferred.
 - Active-use Gmail/Google Calendar, IMAP/SMTP and CalDAV connector code; read/archive mail actions; explicit sends with a persisted uncertain state on failure. No cron jobs, automatic sends or background workers.
 - Guided and manual account setup with shared validation, drafts preserved across paths/provider changes, masked review, connection checks that do not save or download, installation-level Google settings, copyable callback, and Google sign-in with optional Calendar before account creation. Gmail identity and requested permissions are verified before saving through OAuth. Gmail app-password setup supplies IMAP/SMTP settings without OAuth configuration, normalizes grouped passwords, and detects localized All Mail and Trash through server flags. Connection checks inspect Inbox, archive/MOVE support, Trash, and SMTP login without sending or moving mail. Live Gmail app-password and folder-action acceptance remains open.
 - Windows batch launch/stop scripts and a release bundle containing the official PHP executable/DLLs, configuration and a CA bundle. Linux shared-hosting ZIP contains the application but no Windows runtime binaries.
 
 ## Verified locally
+
+- Attachment fixtures cover MIME/Unicode filenames, exact binary bytes, ZIP duplicate names, optimistic draft upload/removal, forwarded files, recovery-copy preservation and IMAP metadata/part identity checks. The isolated attachment browser integration verifies a 2 MB upload, drag and drop, downloads, preview isolation, ZIP, forward/reply behavior and actual backup/restore. Live provider downloads and sending with attachments remain unverified.
 
 - PHP syntax checks for all backend entry points/modules.
 - Seven JavaScript tests for CSV/vCard/ICS round trips, Markdown safety and formula evaluation, including cycles, scripts and shared dependencies.
@@ -36,7 +38,7 @@
 
 ## Deliberate first-version limits
 
-No complete mailbox synchronization or deletion reconciliation, external calendar edits/invitations, CalDAV recurrence expansion, MIME attachment viewer, MBOX, full DokuWiki/CommonMark compatibility, offline editing, or DOCX/ODT/XLSX/ODS conversion. Sync is a bounded recent snapshot. Embedded raster document images are supported; external images are omitted. See README for exact behavior and next phases in implementation-plan.md.
+No complete mailbox synchronization or deletion reconciliation, external calendar edits/invitations, CalDAV recurrence expansion, complete MIME support, MBOX, full DokuWiki/CommonMark compatibility, offline editing, or DOCX/ODT/XLSX/ODS conversion. Sync is a bounded recent snapshot. Embedded raster document images are supported; external images are omitted. See README for exact behavior and next phases in implementation-plan.md.
 
 - Large-message IMAP sync checks sizes in batches, retains up to 32 KB of selected headers above 1.4 MB, and continues downloading normal mail. Header-only copies carry an explicit reader notice and no fabricated original EML. Gmail moves and interrupted-move recovery verify its unique message ID without body downloads; generic IMAP retains byte-content move verification. Stopped activity entries include the safe API failure reason. Fixtures cover an 8.1 MB message followed by normal mail, body-free Gmail Trash, and streamed failure reasons. A read-only live Gmail sync refreshed 30 messages in 27.3 seconds and retained the 8.1 MB message as headers only; no live move was performed.
 
