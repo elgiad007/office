@@ -291,7 +291,9 @@ function renderWorkspace() {
 }
 let mailListLimit=100;
 function renderList() {
-  const rows=filteredRows(); document.querySelector<HTMLElement>('#list-count')!.textContent=`${rows.length} ${rows.length===1?apps[state.app].singular:'items'}`;
+  const rows=filteredRows(),count=document.querySelector<HTMLElement>('#list-count')!;
+  count.textContent=state.app==='mail'?`${rows.length} cached ${rows.length===1?'message':'messages'}`:`${rows.length} ${rows.length===1?apps[state.app].singular:'items'}`;
+  count.title=state.app==='mail'?'Messages stored in Office for this view. This count can grow as older mail downloads.':'';
   document.querySelector<HTMLElement>('#selection-count')!.textContent=state.selected.size?`${state.selected.size} selected`:'';
   if(state.app==='mail')mailListLimit=Math.max(mailListLimit,rows.findIndex(r=>r.id===state.current?.id)+1);
   const visible=state.app==='mail'?rows.slice(0,mailListLimit):rows;
@@ -508,19 +510,28 @@ async function syncAccounts(manual=true) {
   if(state.dirty){if(manual)await commit();else return;}
   state.syncing=true;busyButton(document.querySelector<HTMLButtonElement>('#sync-button')!,true);let errors=0;
   const accounts=[...state.accounts];let next=0;
-  const active=new Set<string>();
+  const active=new Map<string,string>(),pendingHistory=new Set<string>();
+  const showActive=()=>{const status=document.querySelector<HTMLElement>('#sync-status');if(status)status.textContent='Syncing '+[...active.values()].join('; ')+'…';};
   const worker=async()=>{
     while(next<accounts.length){
       if(document.hidden || (!manual && Date.now()-state.lastActivity>120000))return;
-      const a=accounts[next++];active.add(a.label);
-      const status=document.querySelector<HTMLElement>('#sync-status')!;if(status)status.textContent='Syncing '+[...active].join(', ')+'…';
-      try{for(let batch=0;batch<5;batch++){const result=await api('sync',{id:a.id});if(state.app==='mail'&&!state.dirty)await load();if(!result.more||document.hidden)break;}}catch(cause) { const error=asError(cause);errors++;if(manual)notice(a.label+': '+error.message,true);}finally{active.delete(a.label);}
+      const a=accounts[next++];
+      try{for(let batch=0;batch<5;batch++){
+        active.set(a.id,`${a.label} · batch ${batch+1}${pendingHistory.has(a.id)?' · downloading older mail':''}`);showActive();
+        const result=await api('sync',{id:a.id});
+        if(result.more)pendingHistory.add(a.id);else pendingHistory.delete(a.id);
+        if(state.app==='mail'&&!state.dirty)await load();if(!result.more||document.hidden)break;
+      }}catch(cause) { const error=asError(cause);errors++;if(manual)notice(a.label+': '+error.message,true);}finally{active.delete(a.id);if(active.size)showActive();}
     }
   };
   // Two accounts at a time leave PHP workers available for local browsing and
   // interactive requests. The per-account operation queue still serializes writes.
-  await Promise.all([worker(),worker()]);
-  state.syncing=false;busyButton(document.querySelector<HTMLButtonElement>('#sync-button')!,false);const s=document.querySelector<HTMLElement>('#sync-status')!;if(s)s.textContent=errors?'Sync needs attention':'Checked '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  try{await Promise.all([worker(),worker()]);}
+  finally{state.syncing=false;busyButton(document.querySelector<HTMLButtonElement>('#sync-button'),false);}
+  const s=document.querySelector<HTMLElement>('#sync-status');if(s){
+    s.textContent=errors?'Sync needs attention':pendingHistory.size?'Older mail remains · continues on next check':'Checked '+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    s.title=pendingHistory.size?'Older messages are still being downloaded for '+accounts.filter(a=>pendingHistory.has(a.id)).map(a=>a.label).join(', ')+'. Each check processes up to five batches.':'';
+  }
   state.accounts=(await api('accounts')).accounts;
   // The standard scan already refreshed Inbox/Archive/Trash. Only custom scopes
   // need another scan (or a larger requested download window).

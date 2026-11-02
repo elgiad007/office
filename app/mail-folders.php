@@ -152,6 +152,9 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
     } while ($token!=='');
     $cached=[]; foreach (mail_cache_rows($a['id']) as $r) $cached[$r['meta']['providerId']]=$r;
     $unknown=array_values(array_filter(array_unique($ids),fn($id)=>!isset($cached[$id])));
+    $catalog=setting('mail-folders:'.$a['id'],[]);$folderName=$label;
+    foreach($catalog as $f)if($f['id']===$label){$folderName=$f['name'];break;}
+    activity_sync_progress('Checking mail · '.$folderName.' · '.(count(array_unique($ids))-count($unknown)).' of '.count(array_unique($ids)).' messages cached.');
     $recent=array_slice($unknown,0,$limit); $updates=[];$pending=count($unknown)>$limit;
     $relevant=array_keys(array_filter($cached,fn($r)=>in_array($label,$r['meta']['labelIds']??[],true) || in_array($r['meta']['providerId'],$ids,true)));
     $bodyIds=mail_offline_download()?array_keys(array_filter($cached,fn($r)=>in_array($r['meta']['providerId'],$ids,true) && !empty($r['meta']['headerOnly']) && ($r['meta']['messageSize']??0)<=IMAP_BODY_LIMIT)):[];
@@ -159,8 +162,12 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
     $cursor=(int)setting('gmail-label-cursor:'.$a['id'].':'.$label,0);
     if($relevant){$cursor%=count($relevant);$relevant=array_merge(array_slice($relevant,$cursor),array_slice($relevant,0,$cursor));}
     $refresh=array_slice($relevant,0,$limit);
-    foreach (array_unique(array_merge($recent,array_slice($bodyIds,0,$limit),$refresh)) as $id) {
+    $batchIds=array_unique(array_merge($recent,array_slice($bodyIds,0,$limit),$refresh));$batchPosition=0;$remaining=count($unknown);
+    foreach ($batchIds as $id) {
         if(microtime(true)>$deadline-10){$pending=true;break;}
+        $batchPosition++;
+        activity_sync_progress((count($unknown)>$limit?'Downloading older mail':'Checking mail').' · '.$folderName.' · batch message '.$batchPosition.' of '.count($batchIds).' · '.$remaining.' messages still to cache.');
+        if(in_array($id,$unknown,true))$remaining--;
         $new=in_array($id,$recent,true) && !isset($cached[$id]);
         $full=mail_offline_download() && ($new || (!empty($cached[$id]['meta']['headerOnly']) && ($cached[$id]['meta']['messageSize']??0)<=IMAP_BODY_LIMIT));
         $msg=$request('/'.rawurlencode((string)$id).'?format='.($full?'raw':($new?'metadata':'minimal')));

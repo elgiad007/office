@@ -227,6 +227,8 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         // then older history on subsequent passes. No arrival window can skip mail.
         $unknown=array_values(array_filter(array_reverse($scan['ids']),
             static fn($uid)=>!isset($cachedSources[mail_source($scan['path'],$scan['validity'],$uid)])));
+        $folderName=function_exists('imap_folder_decode')?imap_folder_decode($scan['path']):$scan['path'];
+        activity_sync_progress('Checking mail · '.$folderName.' · '.(count($scan['ids'])-count($unknown)).' of '.count($scan['ids']).' messages cached.');
         $ids=array_reverse(array_slice($unknown,0,$limit));$reconcileIds=[];
         // Refresh cached flags in bounded batches; repair also reloads bodies.
         $flagIds=[];
@@ -275,8 +277,13 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         $ids=array_values(array_unique($ids));
         $pending=count($ids)>$limit || count($unknown)>$limit;
         $ids=array_map('strval',array_values(array_unique(array_merge(array_slice($ids,0,$limit),array_keys($reconcileIds)))));$sizes=imap_download_sizes($s,$ids);
+        $batchPosition=0;$remaining=count($unknown);$older=count($unknown)>$limit;$oldestUnknown=$unknown?(int)min($unknown):0;
+        if(!$older && $unknown){foreach($cached as $row)if(($row['meta']['serverFolder']??null)===$scan['path'] && (int)($row['meta']['providerId']??0)>$oldestUnknown){$older=true;break;}}
         foreach ($ids as $uid) {
             if (microtime(true)>$deadline-10) { $pending=true; break; }
+            $batchPosition++;
+            activity_sync_progress(($older?'Downloading older mail':'Downloading mail').' · '.$folderName.' · batch message '.$batchPosition.' of '.count($ids).' · '.$remaining.' messages still to cache.');
+            if(in_array($uid,$unknown,true))$remaining--;
             $source=mail_source($scan['path'],$scan['validity'],$uid);
             // Preserve full-content reconciliation for known moved messages.
             $reconcile=isset($reconcileIds[$uid]);
@@ -333,7 +340,7 @@ function gmail_folder(array $labels): ?string {
 }
 /** Callable transport makes pagination and failure behavior testable without accounts. */
 function sync_google_mail(array $a,callable $request,bool $repair=false): int {
-    $deadline=microtime(true)+45; $membership=[]; $recent=[]; $pending=false;
+    $deadline=microtime(true)+45; $membership=[]; $recent=[]; $pending=false;$unknownCounts=[];$olderFolders=[];
     $known=[]; foreach(mail_cache_rows($a['id']) as $row)$known[mail_row_source($row)]=$row;
     $repairIds=$repair?array_map(fn($r)=>(string)$r['meta']['providerId'],array_values($known)):setting('gmail-repair:'.$a['id'],[]);
     foreach (['Inbox'=>'in:inbox','Archive'=>'-in:inbox -in:trash -in:spam -in:drafts','Trash'=>'in:trash'] as $folder=>$query) {
@@ -353,6 +360,9 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
             $seen[$pageToken]=true;
         } while ($pageToken!=='');
         $unknown=array_values(array_filter($ids,fn($id)=>!isset($known['gmail:'.$id])));
+        $unknownCounts[$folder]=count($unknown);$olderFolders[$folder]=count($unknown)>MAIL_SYNC_BATCH;
+        $seenCached=false;foreach($ids as $id){if(isset($known['gmail:'.$id]))$seenCached=true;elseif($seenCached)$olderFolders[$folder]=true;}
+        activity_sync_progress('Checking mail · '.$folder.' · '.(count($ids)-count($unknown)).' of '.count($ids).' messages cached.');
         $pending=$pending || count($unknown)>MAIL_SYNC_BATCH;
         $recent=array_merge($recent,array_slice($unknown,0,MAIL_SYNC_BATCH));
     }
@@ -378,8 +388,12 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
     $recent=array_merge($recent,$repairIds);
     $recent=array_values(array_unique($recent));
     if(count($recent)>MAIL_SYNC_BATCH*3){$pending=true;$recent=array_slice($recent,0,MAIL_SYNC_BATCH*3);}
+    $batchPosition=0;
     foreach ($recent as $id) {
         if (microtime(true)>$deadline-10) { $pending=true; break; }
+        $folder=$membership['gmail:'.$id]['folder'];$batchPosition++;
+        activity_sync_progress((($olderFolders[$folder]??false)?'Downloading older mail':'Downloading mail').' · '.$folder.' · batch message '.$batchPosition.' of '.count($recent).' · '.($unknownCounts[$folder]??0).' messages still to cache.');
+        if(!isset($known['gmail:'.$id]))$unknownCounts[$folder]--;
         $full=mail_offline_download() || $repair || in_array($id,$repairIds,true);
         mail_deadline($deadline); $msg=$request('/'.rawurlencode($id).'?format='.($full?'raw':'metadata'));
         if (!$full) {

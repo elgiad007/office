@@ -21,6 +21,7 @@ import {testLargeMail} from './large-mail.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 import {testQuickMove} from './quick-move.browser.mjs';
+import {testSyncProgress} from './sync-progress.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES || new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
@@ -90,6 +91,7 @@ try{
  await testMailHeaders(page,url);
  await testMailOperationQueue(page,url);
  await testActivity(page,url);
+ await testSyncProgress(page,url);
  await testLargeMail(page,url);
  await testAccountFolders(page,url);
  await testQuickMove(page,url);

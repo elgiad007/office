@@ -212,7 +212,11 @@ try {
         check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK[]')),'header batch never downloads full bodies');
     };
     $uids=fn($from,$to)=>array_map('strval',range($from,$to));
+    activity_begin('Synchronize account','Fixture');
     $runHeaders($uids(1,250),$uids(151,250),[]);
+    activity_finish(true);
+    $progress=array_values(array_filter(activity_rows(),fn($entry)=>$entry['phase']==='sync-progress'));
+    check((bool)array_filter($progress,fn($entry)=>str_contains($entry['message'],'Downloading older mail · INBOX · batch message 1 of 100 · 250 messages still to cache.')),'real IMAP batches publish folder, batch position and remaining history');
     check(count(mail_cache_rows($busy['id']))===100 && setting('mail-pending:'.$busy['id'])['standard'],'first batch retains 100 newest headers and signals continuation');
     $cachedUids=fn()=>array_map(fn($r)=>$r['meta']['providerId'],mail_cache_rows($busy['id']));
     $runHeaders($uids(1,270),array_merge($uids(71,150),$uids(251,270)),$cachedUids());

@@ -103,6 +103,8 @@ Quick Move works like eM Client: press `m`, type a folder name, use ↑/↓ to c
 
 In spreadsheets, focus a cell, use h/j/k/l or arrows to move, i/Enter to edit its formula, Escape to return, Tab/Shift+Tab to move cells. Typing fields keep their normal text input and browser editing behavior. **Full Vim motions/operators in text editors are not implemented yet.** The current mode distinction supplies home-row application navigation, not a full Vim emulator.
 
+The Mail list count is labelled **cached messages**: it counts messages stored in Office for the current folder or search. It can grow as older messages download, without indicating new arrivals. During sync, the top status shows each active account and batch number. The bottom bar shows the current folder, message progress within the batch, and messages still to cache. Low-level connection details remain in View activity. When a check reaches its batch limit, **Older mail remains · continues on next check** explains that more history is pending.
+
 ## Moving and backing up
 
 Use Settings → Download full backup for a consistent snapshot. Backups include message/document contents and are sensitive; store them privately. Restore into a fresh empty installation so existing records cannot be overwritten accidentally. Browser file imports, including JSON backup restore, are initially limited to 8 MB; for larger workspaces, stop access and copy the complete folder. Chunked/streaming large-backup restore is future work. Reconnect provider accounts after restoring.

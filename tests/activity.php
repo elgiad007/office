@@ -8,6 +8,10 @@ try {
     activity_finish(true);$entries=activity_rows();$json=json_encode($entries);
     check(!str_contains($json,'secret-password')&&!str_contains($json,'private-user')&&!str_contains($json,'private-server-text'),'activity excludes credentials, raw commands and server text');
     check(count($entries)===4 && $entries[0]['phase']==='start' && $entries[3]['phase']==='complete' && $entries[3]['duration_ms']!==null,'activity records stages and completion duration');
+    activity_begin('Synchronize account','Fixture account');
+    activity_sync_progress('Downloading older mail · Archive · batch message 4 of 100 · 296 messages still to cache.');
+    activity_finish(true);$progress=array_values(array_filter(activity_rows(),fn($entry)=>$entry['phase']==='sync-progress'));
+    check(count($progress)===1 && str_contains($progress[0]['message'],'Archive · batch message 4 of 100'),'folder and batch progress has its own activity phase');
     $attempts=0;
     $connect=function() use(&$attempts){$attempts++;ArchiveFixture::$script=[['CAPABILITY',$attempts===1?'':"* CAPABILITY IMAP4rev1\r\n{tag} OK done\r\n"]];return fopen('archivefixture://retry','r+');};
     activity_begin('Recover connection','Fixture account');

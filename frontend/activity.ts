@@ -5,7 +5,7 @@ import {escapeHtml as e} from './formats.js';
 export function createActivity({csrf}: {csrf: () => string}) {
   const bar=document.querySelector<HTMLElement>('#activity-status')!,status=document.querySelector<HTMLElement>('#notice')!,button=document.querySelector<HTMLButtonElement>('#view-activity')!,dialog=document.querySelector<HTMLDialogElement>('#activity-dialog')!;
   let enabled=false,entries: ActivityEntry[]=[],cursor=0,polling=false,generation=0,lastMessage='Ready.',lastError=false,sequence=0;
-  const tasks=new Map<number, {message: string; active: boolean}>();
+  const tasks=new Map<number, {message: string; active: boolean; syncProgress?: boolean}>();
   let idle=true,idleTimer: ReturnType<typeof setTimeout>;
   const markBusy=()=>{clearTimeout(idleTimer);idle=false;};
   const settle=()=>{
@@ -42,7 +42,12 @@ export function createActivity({csrf}: {csrf: () => string}) {
     entries=[...byId.values()].sort((a,b)=>a.id-b.id).slice(-500);cursor=entries.at(-1)?.id||cursor;
     const latest=entries.at(-1);if(!latest)return;
     lastMessage=(latest.account?latest.account+': ':'')+latest.message;lastError=latest.level==='error';
-    if(latest.phase==='progress'&&tasks.size){const active=[...tasks.values()].filter(task=>task.active),task=active.find(task=>latest.account&&task.message.startsWith(latest.account+': '))||active.at(-1);if(task)task.message=lastMessage;}
+    if(['progress','sync-progress'].includes(latest.phase)&&tasks.size){
+      const active=[...tasks.values()].filter(task=>task.active),task=active.find(task=>latest.account&&task.message.startsWith(latest.account+': '))||(!latest.account?active.at(-1):undefined);
+      if(task&&(latest.phase==='sync-progress'||!task.syncProgress)){
+        task.message=lastMessage;task.syncProgress=latest.phase==='sync-progress';
+      }
+    }
     renderStatus();renderEntries();
   }
   async function poll() {

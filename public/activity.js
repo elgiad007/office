@@ -53,10 +53,12 @@ export function createActivity({ csrf }) {
             return;
         lastMessage = (latest.account ? latest.account + ': ' : '') + latest.message;
         lastError = latest.level === 'error';
-        if (latest.phase === 'progress' && tasks.size) {
-            const active = [...tasks.values()].filter(task => task.active), task = active.find(task => latest.account && task.message.startsWith(latest.account + ': ')) || active.at(-1);
-            if (task)
+        if (['progress', 'sync-progress'].includes(latest.phase) && tasks.size) {
+            const active = [...tasks.values()].filter(task => task.active), task = active.find(task => latest.account && task.message.startsWith(latest.account + ': ')) || (!latest.account ? active.at(-1) : undefined);
+            if (task && (latest.phase === 'sync-progress' || !task.syncProgress)) {
                 task.message = lastMessage;
+                task.syncProgress = latest.phase === 'sync-progress';
+            }
         }
         renderStatus();
         renderEntries();

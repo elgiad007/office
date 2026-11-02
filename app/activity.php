@@ -37,6 +37,10 @@ function activity_begin(string $operation,string $account=''): void {
 function activity_step(string $message,string $level='info',?int $duration=null): void {
     if(isset($GLOBALS['office_activity']))activity_event($message,$level,'progress',$duration);
 }
+/** Keep useful folder/batch progress visible while transport details fill the log. */
+function activity_sync_progress(string $message): void {
+    if(isset($GLOBALS['office_activity']))activity_event($message,'info','sync-progress');
+}
 function activity_finish(bool $ok,?string $reason=null): void {
     $context=$GLOBALS['office_activity']??null;if(!$context)return;
     activity_event(($ok?'Completed: ':'Stopped: ').$context['operation'].(!$ok&&$reason!==null?' — '.$reason:''),$ok?'success':'error',$ok?'complete':'error',(int)round((microtime(true)-$context['started'])*1000));
