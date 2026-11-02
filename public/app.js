@@ -707,17 +707,29 @@ function updateMailListItem(id) {
     if (label)
         label.textContent = row.meta.read ? 'Read' : 'Unread';
 }
-async function selectRecord(id, focus = false) { await commit(); const previous = state.current?.id; state.current = state.rows.find(r => r.id === id) || null; state.sheet = 0; state.cell = 'A1'; if (state.app === 'mail') {
-    if (!document.querySelector('#items [data-id="' + CSS.escape(id) + '"]'))
+async function selectRecord(id, focus = false) {
+    await commit();
+    const previous = state.current?.id;
+    state.current = state.rows.find(r => r.id === id) || null;
+    state.sheet = 0;
+    state.cell = 'A1';
+    if (state.app === 'mail') {
+        if (!document.querySelector('#items [data-id="' + CSS.escape(id) + '"]'))
+            renderList();
+        if (previous)
+            updateMailListItem(previous);
+        if (state.current)
+            updateMailListItem(state.current.id);
+    }
+    else
         renderList();
-    if (previous)
-        updateMailListItem(previous);
-    if (state.current)
-        updateMailListItem(state.current.id);
+    renderDetail();
+    if (focus) {
+        const selected = document.querySelector('#selected-item');
+        selected?.focus({ preventScroll: true });
+        selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
 }
-else
-    renderList(); renderDetail(); if (focus)
-    document.querySelector('#selected-item')?.focus({ preventScroll: true }); }
 async function clickRecord(id, event) {
     await commit();
     if (event.shiftKey) {

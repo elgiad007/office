@@ -415,7 +415,11 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus=false) { await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); renderDetail(); if(focus)document.querySelector<HTMLElement>('#selected-item')!?.focus({preventScroll:true}); }
+async function selectRecord(id: string,focus=false) { await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); renderDetail(); if(focus){
+  const selected=document.querySelector<HTMLElement>('#selected-item');
+  selected?.focus({preventScroll:true});
+  selected?.scrollIntoView({block:'nearest',inline:'nearest'});
+} }
 async function clickRecord(id: string,event: MouseEvent) {
   await commit();
   if(event.shiftKey){

@@ -47,6 +47,24 @@ export async function testScrolling(page, url) {
         await page.locator('#main').focus();
         await page.keyboard.press('h');
         assert.equal(await page.locator('#selected-item').evaluate(node => node === document.activeElement), true);
+        const navigate = async (key, index) => {
+          await page.keyboard.press(key);
+          await page.waitForFunction(index => {
+            const selected=document.querySelector('#selected-item'), list=document.querySelector('#items');
+            if(!selected || list.querySelectorAll('.item')[index]!==selected || document.activeElement!==selected)return false;
+            const row=selected.getBoundingClientRect(), pane=list.getBoundingClientRect();
+            return row.top>=pane.top-1 && row.bottom<=pane.bottom+1;
+          }, index);
+          assert.equal((await positions()).main, 0);
+          assert.equal((await positions()).page, 0);
+        };
+        await navigate('g', 0);
+        await navigate('g', 0);
+        for(let i=1;i<=15;i++)await navigate(i%2?'j':'n', i);
+        await navigate('G', 79);
+        for(let i=78;i>=64;i--)await navigate(i%2?'k':'N', i);
+        await page.keyboard.press('g');
+        await navigate('g', 0);
         await page.keyboard.press('l');
         assert.equal(await page.locator('#detail').evaluate(node => node === document.activeElement), true);
         await page.emulateMedia({media:'print'});
