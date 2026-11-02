@@ -10,6 +10,10 @@
 @keyframes office-activity-sweep{from{transform:translateX(-100%)}to{transform:translateX(225%)}}
 @media(prefers-reduced-motion:reduce){#activity-status[data-busy=true]::before{animation:none;transform:none;width:100%}}
 #view-activity{flex:none;padding:5px 10px;font-size:12px}
+#view-activity .activity-attention-icon{width:17px;height:17px;stroke-width:2}
+#view-activity[data-attention=error] .activity-attention-icon{color:var(--danger)}
+#view-activity[data-attention=warning] .activity-attention-icon{color:#946200}
+:root[data-theme=dark] #view-activity[data-attention=warning] .activity-attention-icon{color:#f2c15c}
 #activity-dialog{width:min(900px,95vw);max-height:85dvh}
 .activity-tools{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.activity-tools label{min-width:130px;flex:1}
 #activity-entries{list-style:none;margin:0;padding:0;overflow:auto;max-height:48dvh;border-top:1px solid var(--line)}

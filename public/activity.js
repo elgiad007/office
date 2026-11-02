@@ -26,8 +26,12 @@ export function createActivity({ csrf }) {
         bar.dataset.level = lastError && !idle ? 'error' : tasks.size ? 'busy' : 'info';
         bar.dataset.busy = String(tasks.size > 0);
         bar.setAttribute('aria-busy', String(tasks.size > 0));
-        const errors = entries.filter(entry => entry.level === 'error').length;
-        button.textContent = 'View activity' + (errors ? ` (${errors} ${errors === 1 ? 'error' : 'errors'})` : '');
+        const errors = entries.filter(entry => entry.level === 'error').length, warnings = entries.filter(entry => entry.level === 'warning').length;
+        const attention = errors ? 'error' : warnings ? 'warning' : '';
+        const counts = [errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : '', warnings ? `${warnings} ${warnings === 1 ? 'warning' : 'warnings'}` : ''].filter(Boolean);
+        const icon = attention ? `<svg class="activity-attention-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${errors ? '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/>' : '<path d="M12 3 2 21h20L12 3Zm0 6v5m0 3v.01"/>'}</svg>` : '';
+        button.dataset.attention = attention;
+        button.innerHTML = icon + `<span>View activity${counts.length ? ' (' + counts.join(', ') + ')' : ''}</span>`;
     }
     function filtered() {
         const level = dialog.querySelector('#activity-level')?.value || '', account = dialog.querySelector('#activity-account')?.value || '';
