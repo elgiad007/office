@@ -51,8 +51,9 @@ try {
     if($route==='activity' && $method==='GET') { session_write_close();json_response(['entries'=>activity_rows((int)($_GET['after']??0))]); }
     if($route==='activity' && $method==='POST') {
         if(($input['action']??'')==='clear'){activity_db()->exec('DELETE FROM activity');json_response(['ok'=>true]);}
-        if(($input['action']??'')!=='notice'||!is_string($input['message']??null)||strlen($input['message'])>1000)fail('Invalid activity message.');
-        activity_event($input['message'],!empty($input['error'])?'error':'info','notice');json_response(['ok'=>true]);
+        if(!in_array($input['action']??'',['notice','diagnostic'],true)||!is_string($input['message']??null)||strlen($input['message'])>1000)fail('Invalid activity message.');
+        $diagnostic=$input['action']==='diagnostic';
+        activity_event($input['message'],!$diagnostic&&!empty($input['error'])?'error':'info',$diagnostic?'diagnostic':'notice');json_response(['ok'=>true]);
     }
     $activityNames=['save'=>'Save item','delete'=>'Delete item','preferences'=>'Save preferences','account-save'=>'Save account','account-delete'=>'Remove account','account-test'=>'Test connection','google-settings'=>'Save Google integration','google-connect'=>'Connect Google account','sync'=>'Synchronize account','send'=>'Send mail','mail-folders'=>'Discover folders','mail-folder-sync'=>'Refresh folder','mail-folder-manage'=>'Manage folder','mail-action'=>'Update mail','backup'=>'Download backup','restore'=>'Restore backup','import'=>'Import items','import-items'=>'Import items'];
     if(isset($activityNames[$route]) && ($method==='POST'||$route==='backup')) {

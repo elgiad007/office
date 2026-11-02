@@ -27,6 +27,9 @@ try{
  await a.call('activity',{action:'clear'},403,'bad-token');
  await a.call('activity',{action:'notice',message:'Activity visibility fixture',error:true});
  assert.ok((await a.call('activity')).entries.some(entry=>entry.message==='Activity visibility fixture'&&entry.level==='error'));
+ await a.call('activity',{action:'diagnostic',message:'Mail conflict diagnostic fixture'});
+ assert.ok((await a.call('activity')).entries.some(entry=>entry.message==='Mail conflict diagnostic fixture'&&entry.phase==='diagnostic'&&entry.level==='info'));
+ await a.call('activity',{action:'diagnostic',message:'No CSRF'},403,'bad-token');
  const stream=await fetch(a.url+'preferences',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf,'Content-Type':'application/json','X-Office-Progress':'1'},body:JSON.stringify({preferences:{}})});
  assert.ok(stream.headers.get('content-type').includes('application/x-ndjson'));
  const events=(await stream.text()).trim().split('\n').map(line=>JSON.parse(line));

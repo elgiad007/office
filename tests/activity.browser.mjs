@@ -7,6 +7,7 @@ export async function testActivity(page,url) {
     {id:1,time:new Date().toISOString(),level:'info',account:'Gmail fixture',operation:'Move to Trash',message:'IMAP: signing in.',duration_ms:10,phase:'progress'},
     {id:2,time:new Date().toISOString(),level:'error',account:'Gmail fixture',operation:'Move to Trash',message:'IMAP timed out while moving message.',duration_ms:20000,phase:'error'},
     {id:3,time:new Date().toISOString(),level:'success',account:'Other account',operation:'Synchronize account',message:'Completed: Synchronize account',duration_ms:50,phase:'complete'},
+    {id:4,time:new Date().toISOString(),level:'info',account:'',operation:'Office',message:'Mail conflict diagnostic fixture',duration_ms:null,phase:'diagnostic'},
   ];
   const routes=target=>target.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
@@ -15,8 +16,8 @@ export async function testActivity(page,url) {
     if(action==='records')return route.fulfill({json:{records:[]}});
     if(action==='accounts')return route.fulfill({json:{accounts:streamingAccount?[{id:'stream-account',label:'Stream account',type:'imap'}]:[]}});
     if(action==='sync'){if(syncHold)await syncHold;return route.fulfill({contentType:'application/x-ndjson',body:[
-      {type:'activity',entry:{id:5,time:new Date().toISOString(),level:'info',account:'Stream account',operation:'Synchronize account',message:'IMAP: reconnecting once.',duration_ms:null,phase:'progress'}},
-      {type:'activity',entry:{id:6,time:new Date().toISOString(),level:'error',account:'Stream account',operation:'Synchronize account',message:'IMAP: connection closed while opening folder.',duration_ms:20,phase:'error'}},
+      {type:'activity',entry:{id:6,time:new Date().toISOString(),level:'info',account:'Stream account',operation:'Synchronize account',message:'IMAP: reconnecting once.',duration_ms:null,phase:'progress'}},
+      {type:'activity',entry:{id:7,time:new Date().toISOString(),level:'error',account:'Stream account',operation:'Synchronize account',message:'IMAP: connection closed while opening folder.',duration_ms:20,phase:'error'}},
       {type:'result',status:503,body:{error:'Fixture: streamed connection failure'}},
     ].map(event=>JSON.stringify(event)).join('\n')+'\n'});}
     if(action==='activity'){
@@ -30,6 +31,7 @@ export async function testActivity(page,url) {
     await page.locator('#notice').filter({hasText:'Ready.'}).waitFor();
     const activityButton=page.locator('#view-activity');
     await page.getByRole('button',{name:'View activity (1 error)',exact:true}).waitFor();
+    assert.ok(!(await page.locator('#notice').textContent()).includes('diagnostic fixture'),'Diagnostics do not replace the user-facing status');
     assert.equal(await activityButton.getAttribute('data-attention'),'error');
     assert.equal(await activityButton.locator('svg[aria-hidden=true] circle').count(),1);
     const before=await page.locator('#notice').textContent();
@@ -42,7 +44,7 @@ export async function testActivity(page,url) {
     await modal.getByRole('button',{name:'Copy visible log',exact:true}).click();
     assert.ok((await page.evaluate(()=>window.activityCopied)).includes('IMAP timed out'));assert.ok(!(await page.evaluate(()=>window.activityCopied)).includes('Other account'));
     await modal.getByRole('button',{name:'Close activity',exact:true}).click();
-    entries.push({id:4,time:new Date().toISOString(),level:'warning',account:'Gmail fixture',operation:'Synchronize account',message:'Connection retried.',duration_ms:null,phase:'progress'});
+    entries.push({id:5,time:new Date().toISOString(),level:'warning',account:'Gmail fixture',operation:'Synchronize account',message:'Connection retried.',duration_ms:null,phase:'progress'});
     await page.getByRole('button',{name:'View activity (1 error, 1 warning)',exact:true}).waitFor();
     assert.equal(await activityButton.getAttribute('data-attention'),'error','Errors take priority over warnings');
     for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){

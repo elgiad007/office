@@ -34,6 +34,7 @@ let saveTimer: ReturnType<typeof setTimeout>, keySequence='', sequenceTime=0;
 let selectionAnchor: string | null=null,keyboardSelection=false;
 let sendingMail=false;
 const pendingMailDeletes=new Set<string>();
+const failedMailActions=new Map<string,string>();
 let mailDeleteVersion=0;
 const pendingMailReads=new Map<string, Promise<(MutationResult & {previousRevision: number}) | void>>();
 const mailAccountQueue=new Map<string, Promise<WireResult>>(),mailSnapshots=new Map<string, Map<number, MailSnapshot>>(),mailLatest=new Map<string, OfficeRecord>(),trashedMailCopies=new Map<string, OfficeRecord>();
@@ -49,7 +50,7 @@ function rememberMail(record?: OfficeRecord | null) {
   if(record?.kind!=='mail')return;
   let revisions=mailSnapshots.get(record.id);
   if(!revisions){revisions=new Map();mailSnapshots.set(record.id,revisions);}
-  const fields: (keyof ItemMeta)[]=['remote','account','source','serverFolder','uidValidity','providerId','folder'];
+  const fields: (keyof ItemMeta)[]=['remote','account','source','serverFolder','uidValidity','providerId','folder','headerOnly'];
   revisions.set(record.revision,{id:record.id,kind:record.kind,contentHash:record.contentHash??record.meta.rawBase64,meta:Object.fromEntries(fields.map(key=>[key,record.meta[key]]))});
   if(!mailLatest.has(record.id)||mailLatest.get(record.id)!.revision<=record.revision)mailLatest.set(record.id,structuredClone(record));
   if(revisions.size>16)revisions.delete(revisions.keys().next().value!);
@@ -57,12 +58,32 @@ function rememberMail(record?: OfficeRecord | null) {
 function latestMail(id?: string) {
   return id ? mailLatest.get(id) : undefined;
 }
-function sameMailTarget(a?: MailSnapshot,b?: MailSnapshot | null) {
+function sameMailIdentity(a?: MailSnapshot,b?: MailSnapshot | null) {
   if(!a||!b||a.id!==b.id||a.kind!=='mail'||b.kind!=='mail')return false;
   const x=a.meta,y=b.meta;
   return !!x.remote && !!y.remote && x.account===y.account && !!x.source && x.source===y.source
     && x.serverFolder===y.serverFolder && x.uidValidity===y.uidValidity && x.providerId===y.providerId
-    && x.folder===y.folder && (a.contentHash??x.rawBase64)===(b.contentHash??y.rawBase64);
+    && x.folder===y.folder;
+}
+function sameMailTarget(a?: MailSnapshot,b?: MailSnapshot | null) {
+  return sameMailIdentity(a,b) && (a!.contentHash??a!.meta.rawBase64)===(b!.contentHash??b!.meta.rawBase64);
+}
+function sameMailActionTarget(a?: MailSnapshot,b?: MailSnapshot | null) {
+  if(!sameMailIdentity(a,b))return false;
+  const m=a!.meta;
+  // IMAP UIDs identify immutable messages within a mailbox/UIDVALIDITY.
+  // Gmail message IDs are immutable across content downloads as well.
+  const complete=!!m.account && !!m.folder && !!m.providerId && (
+    (!!m.serverFolder && /^[1-9][0-9]*$/.test(m.uidValidity||'') && /^[1-9][0-9]*$/.test(m.providerId)
+      && m.source===`imap-folder:${encodeURIComponent(m.serverFolder).replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())}:${m.uidValidity}:${m.providerId}`)
+    || m.source===`gmail:${m.providerId}`);
+  return complete;
+}
+function logMailConflict(expected: MailSnapshot | undefined,current: OfficeRecord | undefined,payload: RequestPayload | undefined,retry: boolean) {
+  const fields=['account','source','serverFolder','uidValidity','providerId','folder','remote','headerOnly'] as const;
+  const changed: string[]=expected&&current?fields.filter(key=>expected.meta[key]!==current.meta[key]):['snapshot unavailable'];
+  if(expected&&current&&expected.contentHash!==current.contentHash)changed.push('contentHash');
+  activity.diagnostic(`Mail conflict: action=${payload?.action}; record=${payload?.id}; requested revision=${payload?.revision}; current revision=${current?.revision}; changed fields=${changed.join(', ')||'none'}; ${retry?'retrying once with verified server identity':'stopped; no automatic retry'}.`);
 }
 function refreshMailRecord(record: OfficeRecord) {
   rememberMail(record);
@@ -112,13 +133,18 @@ async function api<R extends ApiRoute>(route: R, data?: ApiData): Promise<ApiRes
     const moved=trashedMailCopies.get(payload?.id!);
     if(route==='mail-action'&&payload?.action==='trash'&&moved&&latestMail(moved.id)?.meta.folder==='Trash')return {record:moved,removedIds:[payload!.id!]};
     const latest=latestMail(payload?.id);
-    if(route==='mail-action'&&sameMailTarget(expected,latest))payload={...payload,revision:latest!.revision};
-    try{return await requestApi(route,payload);}
-    catch(cause) { const error=asError(cause);
-      // A revision rejection happens before any provider write. Never retry
-      // transport errors or uncertain moves, nor a message whose source changed.
-      if(route!=='mail-action'||error.status!==409||error.code!=='mail_revision_conflict'||!sameMailTarget(expected,error.record))throw error;
-      return requestApi(route,{...payload,revision:error.record!.revision});
+    if(route==='mail-action'&&sameMailActionTarget(expected,latest))payload={...payload,revision:latest!.revision};
+    for(let attempt=0;;attempt++){
+      try{return await requestApi(route,payload);}
+      catch(cause) { const error=asError(cause);
+        // Only explicit pre-write revision rejections can be retried. A network
+        // failure or an unconfirmed provider write must never repeat a move.
+        if(route!=='mail-action'||error.status!==409||error.code!=='mail_revision_conflict')throw error;
+        const retry=attempt===0&&sameMailActionTarget(expected,error.record);
+        logMailConflict(expected,error.record,payload,retry);
+        if(!retry)throw error;
+        payload={...payload,revision:error.record!.revision};
+      }
     }
   };
   const trackedRun=async()=>{activity.running(tracking);try{return await run();}finally{activity.done(tracking);}};
@@ -142,7 +168,7 @@ function applyTheme() {
   });
 }
 function authView(status: Status) {
-  mailSnapshots.clear();mailLatest.clear();trashedMailCopies.clear();
+  mailSnapshots.clear();mailLatest.clear();trashedMailCopies.clear();failedMailActions.clear();
   const setup=status.setup;
   root.innerHTML=`<main class="auth"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><h1>${setup?'Set up Office':'Sign in'}</h1><p>${setup?'Create your owner password to get started. Retrieve the setup token from <code>data/setup-token.txt</code> using your local file manager or cPanel File Manager.':'Enter your password.'}</p><form id="auth-form">${setup?field('Setup token','token','','text','required autocomplete="off"'):''}${field(setup?'Create password (at least 12 characters)':'Password','password','','password',`required ${setup?'minlength="12" autocomplete="new-password"':'autocomplete="current-password"'}`)}<button class="primary">${setup?'Create workspace':'Open workspace'}</button><p id="auth-error" class="error" role="alert"></p></form><p class="foot">PHP / SQLite · no scheduled jobs required</p></main>`;
   document.querySelector<HTMLFormElement>('#auth-form')!.onsubmit=async event=>{event.preventDefault(); const button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!; busyButton(button,true); try { const r=await api(setup?'setup':'login',Object.fromEntries(new FormData(event.target as HTMLFormElement))); state.csrf=r.csrf; await boot(); } catch(cause) { const error=asError(cause); document.querySelector<HTMLElement>('#auth-error')!.textContent=error.message; } finally { busyButton(button,false); } };
@@ -177,7 +203,7 @@ function filteredRows() { const q=state.search.toLocaleLowerCase(); return state
 async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<DeleteMail>[1]) {
   const ids=new Set(rows.map(r=>r.id)),visible=filteredRows().map(r=>r.id),currentId=state.current?.id!;
   const context=JSON.stringify([state.mailFolder,state.mailScope,state.search]);
-  for(const id of ids)pendingMailDeletes.add(id);
+  for(const id of ids){pendingMailDeletes.add(id);failedMailActions.delete(id);}
   mailDeleteVersion++;
   state.rows=state.rows.filter(r=>!ids.has(r.id));state.selected.clear();itemMenus.close();
   const advance=ids.has(currentId),index=visible.indexOf(currentId);
@@ -216,7 +242,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
     }
   }catch(cause) { const error=asError(cause);
     const remaining=rows.slice(count);
-    for(const row of remaining)pendingMailDeletes.delete(row.id);
+    for(const row of remaining){pendingMailDeletes.delete(row.id);failedMailActions.set(row.id,error.message);}
     mailDeleteVersion++;
     if(state.app==='mail'){
       for(const row of remaining)if(!state.rows.some(r=>r.id===row.id))state.rows.push(structuredClone(latestMail(row.id)||row));
@@ -225,7 +251,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
         state.current=filteredRows()[0]||null;renderDetail();
       }
     }
-    throw Error(rows.length>1?`${count} of ${rows.length} items updated. ${error.message}`:error.message);
+    throw Error((rows.length>1?`${count} of ${rows.length} items updated. `:'')+`Mail action failed; ${remaining.length===1?'message restored':'remaining messages restored'}. ${error.message}`);
   }finally{refresh();}
 }
 function mailDeletionReload() {
@@ -306,7 +332,7 @@ function renderList() {
     const readState=state.app==='mail'?(r.meta.read?'read':'unread'):'';
     const readStatus=readState?`<span class="mail-read-status"><span class="file-input">${readState==='unread'?'Unread':'Read'}</span></span>`:'';
     const badges=state.app==='mail'?'':`<span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span>`;
-    return `<button class="item ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>`}${badges}</button>`;
+    return `<button class="item ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>`}${badges}</button>`;
   }).join(''):`<div class="list-empty">${state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
   if(visible.length<rows.length){const button=document.createElement('button');button.textContent='Show next 100 messages';button.onclick=()=>{mailListLimit+=100;renderList();};document.querySelector('#items')!.append(button);}
 }
@@ -338,6 +364,8 @@ function renderDetail() {
   const remote=!!r.meta.remote;
   const mailBadges=state.app==='mail'?`${r.meta.folder?`<span class="badge">${e(mailLocation(r))}</span>`:''}${remote?'<span class="badge">Cached</span>':''}`:'';
   panel.innerHTML=`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':'Saved'}</span>${['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?'<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>':''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>${detailContent(r)}`;
+  const failure=state.app==='mail'?failedMailActions.get(r.id):undefined;
+  if(failure)panel.insertAdjacentHTML('afterbegin',`<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
   const form=panel.querySelector<HTMLFormElement>('#record-form')!;
   if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail);
   if(state.app==='mail')bindAttachments(panel,r,{api,commit,notice,modal,update:record=>{
@@ -415,7 +443,7 @@ function updateMailListItem(id: string) {
   const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
   if(!row||!button)return;
   const selected=state.current?.id===id;
-  const copy=button.querySelector('.item-copy');if(copy)copy.outerHTML=renderMailListCopy(row,state.prefs.mailList);
+  const copy=button.querySelector('.item-copy');if(copy)copy.outerHTML=renderMailListCopy(row,state.prefs.mailList,failedMailActions.get(row.id));
   button.classList.toggle('selected',selected);button.classList.toggle('mail-read',!!row.meta.read);button.classList.toggle('mail-unread',!row.meta.read);
   button.setAttribute('aria-pressed',String(selected||state.selected.has(id)));
   if(selected)button.id='selected-item';else button.removeAttribute('id');

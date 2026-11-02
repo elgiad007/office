@@ -44,7 +44,7 @@ export function createActivity({csrf}: {csrf: () => string}) {
   function receive(newEntries: ActivityEntry[]) {
     const byId=new Map(entries.map(entry=>[entry.id,entry]));for(const entry of newEntries)byId.set(entry.id,entry);
     entries=[...byId.values()].sort((a,b)=>a.id-b.id).slice(-500);cursor=entries.at(-1)?.id||cursor;
-    const latest=entries.at(-1);if(!latest)return;
+    const latest=entries.filter(entry=>entry.phase!=='diagnostic').at(-1);if(!latest){renderStatus();renderEntries();return;}
     lastMessage=(latest.account?latest.account+': ':'')+latest.message;lastError=latest.level==='error';
     if(['progress','sync-progress'].includes(latest.phase)&&tasks.size){
       const active=[...tasks.values()].filter(task=>task.active),task=active.find(task=>latest.account&&task.message.startsWith(latest.account+': '))||(!latest.account?active.at(-1):undefined);
@@ -92,6 +92,7 @@ export function createActivity({csrf}: {csrf: () => string}) {
     receive(entry: ActivityEntry): void{if(enabled)receive([entry]);},
     configure(value: boolean){enabled=value;button.disabled=!value;if(!value){generation++;entries=[];cursor=0;tasks.clear();clearTimeout(idleTimer);idle=true;lastMessage='Ready.';lastError=false;if(dialog.open)dialog.close();renderStatus();}else void poll();},
     notice(message: string,error=false){lastMessage=message;lastError=error;markBusy();settle();renderStatus();if(enabled)void request({action:'notice',message:String(message).slice(0,1000),error}).then(()=>poll()).catch(()=>{});},
+    diagnostic(message: string){if(enabled)void request({action:'diagnostic',message:message.slice(0,1000)}).catch(()=>{});},
     queued(message: string | null){if(!message)return null;markBusy();const id=++sequence;tasks.set(id,{message,active:false});renderStatus();return id;},
     running(id: number | null){if(id!==null&&tasks.has(id)){tasks.get(id)!.active=true;renderStatus();}},
     done(id: number | null){if(id===null)return;const task=tasks.get(id);if(task){if(!enabled&&!lastError)lastMessage='Finished: '+task.message.replace(/…$/,'');tasks.delete(id);settle();renderStatus();void poll();}},

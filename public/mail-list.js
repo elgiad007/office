@@ -13,7 +13,7 @@ export function mailListLayout(value) {
     const slot = (value, base) => ({ field: value && Object.hasOwn(fields, value.field) ? value.field : base.field, size: value && ['small', 'normal', 'large'].includes(value.size) ? value.size : base.size });
     return { sender: ['both', 'name', 'email'].includes(input.sender || '') ? input.sender : fallback.sender, rows: fallback.rows.map((row, i) => ({ left: slot(input.rows[i]?.left, row.left), right: slot(input.rows[i]?.right, row.right) })) };
 }
-export function renderMailListCopy(record, value) {
+export function renderMailListCopy(record, value, failure = '') {
     const layout = mailListLayout(value), raw = record.meta.from || record.meta.to || 'Unknown sender';
     const match = raw.match(/^\s*(.*?)\s*<([^>]+)>\s*$/), name = match?.[1].replace(/^"|"$/g, '') || match?.[2] || raw, email = match?.[2] || raw;
     const sender = layout.sender === 'name' ? name : layout.sender === 'email' ? email : match ? `${name} <${email}>` : raw;
@@ -26,7 +26,7 @@ export function renderMailListCopy(record, value) {
         const attachment = slot.field === 'attachment';
         return `<span class="mail-list-cell mail-list-${side} mail-list-${slot.size} mail-field-${slot.field}" title="${e(text)}"${attachment && text ? ` role="img" aria-label="${e(text)}"` : ''}>${attachment ? (text ? (record.meta.hasAttachments === true ? '&#128206;' : '?') : '') : e(text)}</span>`;
     };
-    return `<span class="item-copy mail-list-copy">${layout.rows.map(row => row.left.field === 'none' && row.right.field === 'none' ? '' : `<span class="mail-list-line">${cell(row.left, 'left')}${cell(row.right, 'right')}</span>`).join('')}</span>`;
+    return `<span class="item-copy mail-list-copy">${layout.rows.map(row => row.left.field === 'none' && row.right.field === 'none' ? '' : `<span class="mail-list-line">${cell(row.left, 'left')}${cell(row.right, 'right')}</span>`).join('')}${failure ? `<small class="mail-action-failure" title="${e(failure)}">Mail action failed — restored</small>` : ''}</span>`;
 }
 export function bindMailListSettings(container, value, onSave) {
     let layout = mailListLayout(value);

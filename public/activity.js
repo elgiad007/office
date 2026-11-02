@@ -52,9 +52,12 @@ export function createActivity({ csrf }) {
             byId.set(entry.id, entry);
         entries = [...byId.values()].sort((a, b) => a.id - b.id).slice(-500);
         cursor = entries.at(-1)?.id || cursor;
-        const latest = entries.at(-1);
-        if (!latest)
+        const latest = entries.filter(entry => entry.phase !== 'diagnostic').at(-1);
+        if (!latest) {
+            renderStatus();
+            renderEntries();
             return;
+        }
         lastMessage = (latest.account ? latest.account + ': ' : '') + latest.message;
         lastError = latest.level === 'error';
         if (['progress', 'sync-progress'].includes(latest.phase) && tasks.size) {
@@ -155,6 +158,8 @@ export function createActivity({ csrf }) {
             void poll(); },
         notice(message, error = false) { lastMessage = message; lastError = error; markBusy(); settle(); renderStatus(); if (enabled)
             void request({ action: 'notice', message: String(message).slice(0, 1000), error }).then(() => poll()).catch(() => { }); },
+        diagnostic(message) { if (enabled)
+            void request({ action: 'diagnostic', message: message.slice(0, 1000) }).catch(() => { }); },
         queued(message) { if (!message)
             return null; markBusy(); const id = ++sequence; tasks.set(id, { message, active: false }); renderStatus(); return id; },
         running(id) { if (id !== null && tasks.has(id)) {

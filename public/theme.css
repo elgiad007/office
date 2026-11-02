@@ -18,6 +18,7 @@
 .item.mail-read strong, .item.mail-read small { font-weight: 400; }
 .item.mail-unread strong, .item.mail-unread small { font-weight: 700; }
 .item.mail-unread small { color: var(--text); }
+.mail-action-failure, .item.mail-unread .mail-action-failure { color: var(--danger); font-weight: 600; }
 .mail-list-copy { display: grid; gap: 5px; }
 .mail-list-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .mail-list-cell { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
