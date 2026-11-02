@@ -25,6 +25,7 @@ export interface ItemMeta {
   headersBase64?: string;
   hasHtml?: boolean;
   headerOnly?: boolean;
+  hasAttachments?: boolean;
   messageSize?: number;
   due?: string;
   priority?: string;
@@ -58,12 +59,16 @@ export interface Account {
   folders?: MailFolder[]; last_sync?: string | null; error?: string | null;
 }
 export interface Preferences {
+  mailList?: MailListLayout;
   theme?: string; density?: string; accent?: string;
   keys?: Record<string, string>;
   mailDisplay?: string; defaultMailAccount?: string;
   keepRecoveryCopies?: boolean; confirmBeforeSend?: boolean;
   mailOffline?: boolean;
 }
+export type MailListField = 'none' | 'sender' | 'date' | 'subject' | 'attachment' | 'preview';
+export interface MailListSlot {field: MailListField; size: 'small' | 'normal' | 'large'}
+export interface MailListLayout {sender: 'both' | 'name' | 'email'; rows: {left: MailListSlot; right: MailListSlot}[]}
 export interface MailScope { account: string; folder: string; limit: number }
 export interface AppState {
   app: AppName; rows: OfficeRecord[]; current: OfficeRecord | null;

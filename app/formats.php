@@ -68,6 +68,31 @@ function eml_html(string $raw): array {
     $part=eml_text($headers,$body,0,$remaining,true,$images);
     return ['html'=>$part['body']??'','images'=>$images];
 }
+/** Attachment presence only: never decode or retain attachment bytes. */
+function eml_has_attachments(string $raw,int $depth=0,?int &$remaining=null): ?bool {
+    if ($remaining===null) $remaining=500;
+    if ($depth>20 || --$remaining<0) return null;
+    [$headers,$body]=eml_entity($raw);
+    $type=$headers['content-type']??'text/plain';
+    $disposition=$headers['content-disposition']??'';
+    $inline=str_starts_with(strtolower(trim(explode(';',$type,2)[0])),'image/') && (strtolower(trim(explode(';',$disposition,2)[0]))==='inline' || isset($headers['content-id']));
+    if (strtolower(trim(explode(';',$disposition,2)[0]))==='attachment' || (!$inline && (eml_parameter($disposition,'filename')!==null || eml_parameter($type,'name')!==null))) return true;
+    if (!str_starts_with(strtolower($type),'multipart/')) return false;
+    $boundary=eml_parameter($type,'boundary');
+    if (!$boundary || strlen($boundary)>200 || strpbrk($boundary,"\r\n")!==false) return null;
+    preg_match_all('/^--'.preg_quote($boundary,'/').'(--)?[ \t]*(?:\r?\n|$)/m',$body,$matches,PREG_OFFSET_CAPTURE);
+    if (count($matches[0])<2) return null;
+    $unknown=false;
+    for ($i=0;$i<count($matches[0])-1;$i++) {
+        if (($matches[1][$i][0]??'')==='--') break;
+        $offset=$matches[0][$i][1]+strlen($matches[0][$i][0]);
+        $found=eml_has_attachments(substr($body,$offset,$matches[0][$i+1][1]-$offset),$depth+1,$remaining);
+        if ($found===true) return true;
+        if ($found===null) $unknown=true;
+        if ($remaining<=0) return null;
+    }
+    return $unknown?null:false;
+}
 function parse_eml(string $raw): array {
     [$headers,$body]=eml_entity($raw);
     $decode=static function(string $v): string { return function_exists('iconv_mime_decode') ? (iconv_mime_decode($v,ICONV_MIME_DECODE_CONTINUE_ON_ERROR,'UTF-8') ?: $v) : $v; };
@@ -75,6 +100,8 @@ function parse_eml(string $raw): array {
     $remaining=500; $text=eml_text($headers,$body,0,$remaining);
     $body=$text['body']??'No readable message body was found. Download the original EML to view attachments or unsupported message formats in a full mail client.';
     $parsed=['title'=>$decode($headers['subject']??'(No subject)'),'body'=>$body,'meta'=>['from'=>$decode($headers['from']??''),'to'=>$decode($headers['to']??''),'date'=>$headers['date']??'','multipart'=>$multipart,'bodyParserVersion'=>1,'hasHtml'=>eml_html($raw)['html']!=='']];
+    $attachments=eml_has_attachments($raw);
+    if ($attachments!==null) $parsed['meta']['hasAttachments']=$attachments;
     return json_decode(json_encode($parsed,JSON_INVALID_UTF8_SUBSTITUTE|JSON_THROW_ON_ERROR),true,64,JSON_THROW_ON_ERROR);
 }
 function ics_unescape(string $value): string { return str_replace(['\\n','\\N','\\,','\\;','\\\\'],["\n","\n",',',';','\\'],$value); }

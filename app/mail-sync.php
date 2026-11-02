@@ -33,6 +33,7 @@ function imap_download_sizes(mixed $s,array $ids): array {
 }
 function imap_header_download(array $a,string $source,string $headers,array $meta,int $size): array {
     $parsed=parse_eml($headers);
+    unset($parsed['meta']['hasAttachments']); // Headers alone cannot establish attachment presence.
     return ['kind'=>'mail','title'=>$parsed['title']?:'(Untitled)','body'=>'','meta'=>array_merge($parsed['meta'],$meta,[
         'headerOnly'=>true,'messageSize'=>$size,'headersBase64'=>base64_encode($headers),'remote'=>true,
         'account'=>$a['id'],'accountLabel'=>$a['label'],'source'=>$source])];

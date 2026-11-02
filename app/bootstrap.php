@@ -104,6 +104,14 @@ function record_row(array $row): array {
             $row['body']=parse_eml($raw)['body'];
         }
     }
+    if ($row['kind']==='mail' && !array_key_exists('hasAttachments',$row['meta']) && empty($row['meta']['headerOnly'])) {
+        $raw=isset($row['meta']['rawBase64']) && is_string($row['meta']['rawBase64']) && strlen($row['meta']['rawBase64'])<=1866668 ? base64_decode($row['meta']['rawBase64'],true) : ($row['meta']['raw']??'');
+        if (is_string($raw) && $raw!=='' && strlen($raw)<=1400000) {
+            require_once __DIR__.'/formats.php';
+            $attachments=eml_has_attachments($raw);
+            if ($attachments!==null) $row['meta']['hasAttachments']=$attachments;
+        } elseif (($row['meta']['folder']??'')==='Drafts') $row['meta']['hasAttachments']=false;
+    }
     // Empty PHP maps otherwise serialize as [], which loses named cell edits in JavaScript.
     if ($row['kind']==='sheets') foreach ($row['meta']['workbook']['sheets'] as &$sheet) $sheet['cells']=(object)$sheet['cells'];
     if($row['kind']==='mail' && !empty($row['meta']['remote']))$row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');

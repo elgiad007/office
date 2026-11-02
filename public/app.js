@@ -8,6 +8,7 @@ import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMov
 import { mailBody, bindMailReader } from './mail-reader.js';
 import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
+import { renderMailListCopy, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
 const apps = {
     mail: { name: 'Mail', singular: 'message', empty: 'No messages yet.', hint: 'Connect an account in Settings, import an EML file, or compose your first message.', icon: 'M3 5h18v14H3z M3 5l9 7 9-7' },
@@ -467,7 +468,7 @@ function renderList() {
         const readState = state.app === 'mail' ? (r.meta.read ? 'read' : 'unread') : '';
         const readStatus = readState ? `<span class="mail-read-status"><span class="file-input">${readState === 'unread' ? 'Unread' : 'Read'}</span></span>` : '';
         const badges = state.app === 'mail' ? '' : `<span>${r.meta.folder ? `<span class="badge">${e(r.meta.folder)}</span>` : ''}${r.meta.remote ? '<span class="badge">Synced</span>' : ''}</span>`;
-        return `<button class="item ${readState ? 'mail-' + readState : ''} ${selected ? 'selected' : ''} ${state.selected.has(r.id) ? 'multi-selected' : ''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id) || selected}" aria-haspopup="menu" ${selected ? 'id="selected-item"' : ''}>${readStatus}<span class="item-icon">${state.selected.has(r.id) ? '✓' : icon(state.app)}</span><span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>${badges}</button>`;
+        return `<button class="item ${readState ? 'mail-' + readState : ''} ${selected ? 'selected' : ''} ${state.selected.has(r.id) ? 'multi-selected' : ''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id) || selected}" aria-haspopup="menu" ${selected ? 'id="selected-item"' : ''}>${readStatus}<span class="item-icon">${state.selected.has(r.id) ? '✓' : icon(state.app)}</span>${state.app === 'mail' ? renderMailListCopy(r, state.prefs.mailList) : `<span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>`}${badges}</button>`;
     }).join('') : `<div class="list-empty">${state.search ? 'No matching items. Try a different search.' : 'No items yet.'}</div>`;
     if (visible.length < rows.length) {
         const button = document.createElement('button');
@@ -492,8 +493,11 @@ async function hydrateMailBody(record, manual = false) {
         const result = await api('mail-content', { id: record.id, account: record.meta.account });
         refreshMailRecord(result.record);
         bodyFailures.delete(record.id);
-        if (state.app === 'mail' && state.current?.id === record.id)
-            renderDetail();
+        if (state.app === 'mail') {
+            updateMailListItem(record.id);
+            if (state.current?.id === record.id)
+                renderDetail();
+        }
     }
     catch (cause) {
         bodyFailures.add(record.id);
@@ -688,6 +692,9 @@ function updateMailListItem(id) {
     if (!row || !button)
         return;
     const selected = state.current?.id === id;
+    const copy = button.querySelector('.item-copy');
+    if (copy)
+        copy.outerHTML = renderMailListCopy(row, state.prefs.mailList);
     button.classList.toggle('selected', selected);
     button.classList.toggle('mail-read', !!row.meta.read);
     button.classList.toggle('mail-unread', !row.meta.read);
@@ -1390,6 +1397,8 @@ function insertLink() {
 function renderSettings() {
     const p = state.prefs;
     document.querySelector('#main').innerHTML = `<section class="view-head"><div><h1>Settings</h1><p>Preferences, connected accounts, and backups.</p></div></section><div class="settings"><div class="settings-grid"><section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences"><label>Theme<select name="theme" aria-label="Theme">${['system', 'light', 'dark'].map(x => `<option ${p.theme === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Accent<select name="accent" aria-label="Accent">${['green', 'blue', 'plum'].map(x => `<option ${p.accent === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Density<select name="density" aria-label="Density"><option value="comfortable">Comfortable</option><option value="compact" ${p.density === 'compact' ? 'selected' : ''}>Compact</option></select></label><button class="primary">Save preferences</button></form></section><section class="card"><h2>Data and backups</h2><p>Your database and content live inside this application folder. Backups include local records, cached messages, revisions and preferences. Account credentials and your password are excluded.</p><button id="backup">↓ Download full backup</button><p>Restore into an empty installation. Synced copies become local archives; reconnect providers separately. Never copy a live SQLite file as a backup.</p><button id="restore">↑ Restore backup</button><p>Documents: basic formatting and HTML/text. Calendar: agenda, no local recurrence expansion or invitations. Sheets: simple formulas. See README for version limits.</p></section><section class="card full"><h2>Mail</h2><form id="mail-preferences"><label>Default email display<select name="mailDisplay" aria-label="Default email display"><option value="html" ${p.mailDisplay !== 'text' ? 'selected' : ''}>HTML</option><option value="text" ${p.mailDisplay === 'text' ? 'selected' : ''}>Text only</option></select></label><label class="check-label"><input type="checkbox" name="mailOffline" ${p.mailOffline === true ? 'checked' : ''}> Download message contents during sync for offline use</label><label>Default mail account<select name="defaultMailAccount" aria-label="Default mail account"><option value="">Automatic (only account, when available)</option>${mailAccounts().map(a => `<option value="${e(a.id)}" ${p.defaultMailAccount === a.id ? 'selected' : ''}>${e(a.label)}</option>`).join('')}</select></label><p>New drafts use the selected message’s account first, then this default. Saved drafts keep their chosen account.</p><button class="primary">Save mail preferences</button></form></section><section class="card full" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section><section class="card full"><h2>Connected accounts</h2><p>Only checked while this page is visible and you have used it within two minutes. Automatic checks every two minutes; Sync now is always available. Inbox, Archive and Trash: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync ? 'Last checked ' + e(new Date(a.last_sync).toLocaleString()) : 'Not checked yet'}${a.error ? ' · ' + e(a.error) : ''}</small></div><div class="actions">${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button><label class="check-label"><input id="keep-recovery" type="checkbox" ${p.keepRecoveryCopies !== false ? 'checked' : ''}> Keep recovery copies of messages absent from synchronized folders</label><p>Recovery copies are excluded from All cached mail. Save them in Local mail or discard them. Turning this off removes absent cached copies on the next successful sync; local mail is kept.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, configure Google integration once above.</p></section><section class="card full"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action, key]) => field(action, 'key_' + action, keys()[action], 'text', 'required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section></div></div>`;
+    document.querySelector('#mail-preferences').closest('section').insertAdjacentHTML('afterend', '<section class="card full" id="mail-list-settings"></section>');
+    bindMailListSettings(document.querySelector('#mail-list-settings'), p.mailList, async (layout) => { await attempt(async () => { const preferences = { ...state.prefs, mailList: layout }; await api('preferences', { preferences }); state.prefs = preferences; notice('List appearance saved.'); }); });
     document.querySelector('#mail-preferences button').insertAdjacentHTML('beforebegin', `<label class="check-label"><input type="checkbox" name="confirmBeforeSend" ${p.confirmBeforeSend !== false ? 'checked' : ''}> Confirm before sending</label>`);
     void renderGoogleSettings(document.querySelector('#google-integration'), api);
     document.querySelector('#preferences').onsubmit = ev => { ev.preventDefault(); void attempt(async () => { state.prefs = { ...state.prefs, ...Object.fromEntries(new FormData(ev.target)) }; await api('preferences', { preferences: state.prefs }); applyTheme(); notice('Preferences saved.'); }); };
