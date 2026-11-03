@@ -315,10 +315,8 @@ async function deleteMailImmediately(rows, operation) {
     renderList();
     if (advance)
         renderDetail();
-    if (advance) {
-        (document.querySelector('#selected-item') || document.querySelector('#main'))?.focus({ preventScroll: true });
-        document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
-    }
+    (document.querySelector('#selected-item') || document.querySelector('#main'))?.focus({ preventScroll: true });
+    document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     let count = 0;
     const reconciled = new Set();
     const refresh = () => {
@@ -404,13 +402,17 @@ function mailDeletionReload() {
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     };
 }
-async function load(preferId, { selectFirst = true } = {}) {
+async function load(preferId, { selectFirst = true, preserveSelection = false } = {}) {
     await waitForAttachments();
     if (state.app !== 'mail')
         displayedMailId = null;
     itemMenus.close();
-    selectionAnchor = null;
-    keyboardSelection = false;
+    if (!preserveSelection) {
+        selectionAnchor = null;
+        keyboardSelection = false;
+        state.selected.clear();
+    }
+    const selectionContext = JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]);
     document.querySelectorAll('[data-app]').forEach(b => { const active = b.dataset.app === state.app; b.classList.toggle('active', active); if (active)
         b.setAttribute('aria-current', 'page');
     else
@@ -435,6 +437,9 @@ async function load(preferId, { selectFirst = true } = {}) {
         if (state.app !== app)
             return;
     } while (app === 'mail' && version !== mailDeleteVersion + mailReadVersion);
+    if (preserveSelection && selectionContext !== JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]))
+        return;
+    const focusedId = preserveSelection ? document.activeElement?.closest('#items [data-id]')?.dataset.id : undefined;
     state.rows = records.filter(r => !pendingMailDeletes.has(r.id));
     if (state.app === 'mail')
         state.rows.sort(compareMail);
@@ -448,8 +453,17 @@ async function load(preferId, { selectFirst = true } = {}) {
         if (!state.current && selectFirst)
             state.current = filteredRows()[0] || null;
     }
-    state.selected.clear();
+    if (preserveSelection) {
+        const visible = new Set(filteredRows().map(r => r.id));
+        for (const id of state.selected)
+            if (!visible.has(id))
+                state.selected.delete(id);
+        if (selectionAnchor && !visible.has(selectionAnchor))
+            selectionAnchor = null;
+    }
     renderWorkspace();
+    if (focusedId)
+        document.querySelector(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
 }
 function renderWorkspace() {
     const a = apps[state.app];
@@ -468,6 +482,8 @@ function renderWorkspace() {
                 state.mailScope = null;
                 state.current = filteredRows()[0] || null;
                 state.selected.clear();
+                selectionAnchor = null;
+                keyboardSelection = false;
                 setMode('normal');
                 renderWorkspace();
                 if (matchMedia('(max-width: 800px)').matches)
@@ -808,6 +824,7 @@ async function clickRecord(id, event) {
             state.selected.clear();
         selectionAnchor = id;
     }
+    renderList();
     await selectRecord(id, true);
 }
 function mailAccounts() { return state.accounts.filter(a => ['imap', 'google'].includes(a.type)); }
@@ -1045,7 +1062,7 @@ async function syncAccounts(manual = true) {
                     else
                         pendingHistory.delete(a.id);
                     if (state.app === 'mail' && !state.dirty)
-                        await load();
+                        await load(undefined, { preserveSelection: true });
                     if (!result.more || document.hidden)
                         break;
                 }
@@ -1095,11 +1112,11 @@ async function syncAccounts(manual = true) {
     if (state.app === 'settings')
         renderSettings();
     else if (!state.dirty && !editable(document.activeElement))
-        await load();
+        await load(undefined, { preserveSelection: state.app === 'mail' });
 }
 function help() {
     const k = keys();
-    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete current item / move connected mail to Trash'], [k.archive, 'Archive selected messages'], [k.move, 'Quick Move to folder'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
+    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete selected mail, or current item; connected mail moves to Trash'], [k.archive, 'Archive selected messages'], [k.move, 'Quick Move to folder'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
 }
 async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
@@ -1153,7 +1170,7 @@ async function handleClick(event) {
         if (action === 'file-mail')
             await fileMail(mailFolderEnv());
         if (action === 'trash-mail')
-            await mailAction('trash');
+            await deleteSelectedMail();
         if (action === 'restore-mail')
             await mailAction('restore');
         if (action === 'keep-local')
@@ -1191,13 +1208,12 @@ async function handleClick(event) {
         }
         if (action === 'history')
             await history();
-        if (action === 'delete')
-            confirmation('Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async () => { await commit(); const record = state.current; if (state.app === 'mail')
-                await deleteMailImmediately([record], r => api('delete', { id: r.id, revision: r.revision }));
-            else {
-                await api('delete', { id: record.id, revision: record.revision });
-                await load();
-            } notice('Item deleted.'); });
+        if (action === 'delete') {
+            if (state.app === 'mail')
+                await deleteSelectedMail();
+            else
+                confirmation('Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async () => { await commit(); const record = state.current; await api('delete', { id: record.id, revision: record.revision }); await load(); notice('Item deleted.'); });
+        }
         if (action === 'logout') {
             await commit();
             await api('logout', {});
@@ -1289,6 +1305,33 @@ async function sendMail() {
         sendingMail = false;
         busyButton(document.querySelector('#detail [data-action="send"]'), false);
     }
+}
+async function deleteSelectedMail() {
+    if (state.app !== 'mail')
+        return;
+    await commit();
+    const visible = filteredRows();
+    const rows = state.selected.size ? visible.filter(r => state.selected.has(r.id)) : [state.current].filter(isPresent);
+    if (!rows.length)
+        return;
+    const protectedMail = (r) => r.meta.remote && ['Trash', 'Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '');
+    if (rows.some(protectedMail))
+        throw Error('The selection includes protected mail. Deselect messages in Trash or recovery copies before deleting.');
+    const ids = rows.map(r => r.id), local = rows.filter(r => !r.meta.remote).length;
+    const apply = async () => {
+        if (state.app !== 'mail')
+            throw Error('The application changed. Select the messages again.');
+        await commit();
+        const current = ids.map(id => state.rows.find(r => r.id === id));
+        if (current.some(r => !r || protectedMail(r) || !!r.meta.remote !== !!rows.find(original => original.id === r.id).meta.remote))
+            throw Error('The selected messages changed. Select them again.');
+        await deleteMailImmediately(current.filter(isPresent), r => r.meta.remote ? api('mail-action', { id: r.id, revision: r.revision, action: 'trash' }) : api('delete', { id: r.id, revision: r.revision }));
+        notice(rows.length === 1 ? (local ? 'Item deleted.' : 'Moved to Trash.') : `${rows.length} items updated.`);
+    };
+    if (local)
+        confirmation(rows.length === 1 ? 'Delete item' : 'Delete selected messages', `Permanently delete ${local} local message(s) and their revision history?${local < rows.length ? ` Also move ${rows.length - local} connected message(s) to Trash.` : ''}`, apply);
+    else
+        await apply();
 }
 async function archiveLocal() {
     if (state.app !== 'mail')
@@ -1600,9 +1643,12 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'delete') {
         event.preventDefault();
-        // Use the current item's available action, preserving confirmation and read-only restrictions.
-        if (!event.repeat && state.current)
-            document.querySelector('#detail [data-action="trash-mail"], #detail [data-action="delete"]')?.click();
+        if (!event.repeat) {
+            if (state.app === 'mail')
+                void attempt(deleteSelectedMail);
+            else if (state.current)
+                document.querySelector('#detail [data-action="delete"]')?.click();
+        }
         return;
     }
     if (action === 'archive') {
@@ -1631,6 +1677,7 @@ document.addEventListener('keydown', event => {
         else
             state.selected.add(id);
         renderList();
+        document.querySelector('#selected-item')?.focus({ preventScroll: true });
         return;
     }
     if (state.app === 'sheets' && state.current && event.target.closest('.sheet-wrap') && ([k.left, k.right, k.down, k.up, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'Tab'].includes(key))) {

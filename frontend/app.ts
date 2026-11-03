@@ -212,10 +212,8 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
     state.current=state.rows.find(r=>r.id===next)||null;
   }
   renderList();if(advance)renderDetail();
-  if(advance){
-    (document.querySelector<HTMLElement>('#selected-item')!||document.querySelector<HTMLElement>('#main')!)?.focus({preventScroll:true});
-    document.querySelector<HTMLElement>('#selected-item')!?.scrollIntoView({block:'nearest'});
-  }
+  (document.querySelector<HTMLElement>('#selected-item')!||document.querySelector<HTMLElement>('#main')!)?.focus({preventScroll:true});
+  document.querySelector<HTMLElement>('#selected-item')!?.scrollIntoView({block:'nearest'});
   let count=0;
   const reconciled=new Set<string>();
   const refresh=()=>{
@@ -271,10 +269,12 @@ function mailDeletionReload() {
     document.querySelector<HTMLElement>('#selected-item')!?.scrollIntoView({block:'nearest'});
   };
 }
-async function load(preferId?: string,{selectFirst=true}={}) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false}={}) {
   await waitForAttachments();
   if(state.app!=='mail')displayedMailId=null;
-  itemMenus.close();selectionAnchor=null;keyboardSelection=false;
+  itemMenus.close();
+  if(!preserveSelection){selectionAnchor=null;keyboardSelection=false;state.selected.clear();}
+  const selectionContext=JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]);
   document.querySelectorAll<HTMLElement>('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   document.querySelector<HTMLElement>('#crumb')!.textContent=apps[state.app]?.name||'Settings';
   document.querySelector<HTMLElement>('.shell')!.classList.toggle('mail-active',state.app==='mail');
@@ -285,6 +285,8 @@ async function load(preferId?: string,{selectFirst=true}={}) {
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
   do{version=mailDeleteVersion+mailReadVersion;records=(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
+  if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
+  const focusedId=preserveSelection?(document.activeElement as HTMLElement)?.closest<HTMLElement>('#items [data-id]')?.dataset.id:undefined;
   state.rows=records.filter(r=>!pendingMailDeletes.has(r.id));
   if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
@@ -294,7 +296,13 @@ async function load(preferId?: string,{selectFirst=true}={}) {
     if(state.mailScope&&state.current&&!editingDraft&&!matchesMailScope(state.current,state.mailScope,state.accounts))state.current=null;
     if(!state.current&&selectFirst)state.current=filteredRows()[0]||null;
   }
-  state.selected.clear();renderWorkspace();
+  if(preserveSelection){
+    const visible=new Set(filteredRows().map(r=>r.id));
+    for(const id of state.selected)if(!visible.has(id))state.selected.delete(id);
+    if(selectionAnchor&&!visible.has(selectionAnchor))selectionAnchor=null;
+  }
+  renderWorkspace();
+  if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
 }
 function renderWorkspace() {
   const a=apps[state.app];
@@ -308,7 +316,7 @@ function renderWorkspace() {
       const select=(event.target as HTMLSelectElement), folder=select.value; select.disabled=true;
       try {
         await commit();
-        state.mailFolder=folder; state.mailScope=null; state.current=filteredRows()[0]||null; state.selected.clear(); setMode('normal');
+        state.mailFolder=folder; state.mailScope=null; state.current=filteredRows()[0]||null; state.selected.clear(); selectionAnchor=null;keyboardSelection=false;setMode('normal');
         renderWorkspace();
         if(matchMedia('(max-width: 800px)').matches)setMailFolderPanel(false);
       } finally { select.value=state.mailFolder; select.disabled=false; }
@@ -467,7 +475,7 @@ async function clickRecord(id: string,event: MouseEvent) {
     if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);
     selectionAnchor=id;
   }else{if(!keyboardSelection)state.selected.clear();selectionAnchor=id;}
-  await selectRecord(id,true);
+  renderList();await selectRecord(id,true);
 }
 function mailAccounts() { return state.accounts.filter(a=>['imap','google'].includes(a.type)); }
 function draftAccount(context?: OfficeRecord | null) {
@@ -560,7 +568,7 @@ async function syncAccounts(manual=true) {
         active.set(a.id,`${a.label} · batch ${batch+1}${pendingHistory.has(a.id)?' · downloading older mail':''}`);showActive();
         const result=await api('sync',{id:a.id});
         if(result.more)pendingHistory.add(a.id);else pendingHistory.delete(a.id);
-        if(state.app==='mail'&&!state.dirty)await load();if(!result.more||document.hidden)break;
+        if(state.app==='mail'&&!state.dirty)await load(undefined,{preserveSelection:true});if(!result.more||document.hidden)break;
       }}catch(cause) { const error=asError(cause);errors++;if(manual)notice(a.label+': '+error.message,true);}finally{active.delete(a.id);if(active.size)showActive();}
     }
   };
@@ -578,10 +586,10 @@ async function syncAccounts(manual=true) {
   const scope=state.mailScope,scopeAccount=state.accounts.find(a=>a.id===scope?.account),scopeFolder=scopeAccount?.folders?.find(f=>f.id===scope?.folder);
   if(state.app==='mail'&&scope&&!state.dirty&&(scope.limit>100||!['Inbox','Archive','Trash'].includes(scopeFolder?.role||''))){try{await syncOpenFolder(mailFolderEnv());}catch(cause) { const error=asError(cause);if(manual)notice(error.message,true);}}
   // Never replace an active editor with network data.
-  if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load();
+  if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }
 function help() {
-  const k=keys();modal('Keyboard shortcuts',`<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down+' / '+k.up,'Next / previous item'],[k.left+' / '+k.right,'Focus list / selected item'],['gg / G','First / last item'],['g 1 … g 7','Switch applications'],[k.search,'Search this application'],['n / N','Next / previous search result'],[k.new,'Create an item / compose'],[k.edit,'Enter edit mode'],['Escape','Leave editing and save'],[k.select,'Toggle selection'],[k.save+' / Ctrl or Cmd+S','Save changes'],[k.delete,'Delete current item / move connected mail to Trash'],[k.archive,'Archive selected messages'],[k.move,'Quick Move to folder'],[k.reply,'Reply to message'],['Ctrl+Enter','Send current draft'],['Sheets: h j k l / arrows','Move between cells'],['Sheets: i / Enter','Edit selected cell'],['Sheets: Tab / Shift+Tab','Next / previous cell']].map(([key,meaning])=>`<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
+  const k=keys();modal('Keyboard shortcuts',`<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down+' / '+k.up,'Next / previous item'],[k.left+' / '+k.right,'Focus list / selected item'],['gg / G','First / last item'],['g 1 … g 7','Switch applications'],[k.search,'Search this application'],['n / N','Next / previous search result'],[k.new,'Create an item / compose'],[k.edit,'Enter edit mode'],['Escape','Leave editing and save'],[k.select,'Toggle selection'],[k.save+' / Ctrl or Cmd+S','Save changes'],[k.delete,'Delete selected mail, or current item; connected mail moves to Trash'],[k.archive,'Archive selected messages'],[k.move,'Quick Move to folder'],[k.reply,'Reply to message'],['Ctrl+Enter','Send current draft'],['Sheets: h j k l / arrows','Move between cells'],['Sheets: i / Enter','Edit selected cell'],['Sheets: Tab / Shift+Tab','Next / previous cell']].map(([key,meaning])=>`<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
 }
 async function history() {await commit();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
 async function handleClick(event: MouseEvent) {
@@ -599,7 +607,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='help')help();
     if(action==='sync')await syncAccounts();
     if(action==='file-mail')await fileMail(mailFolderEnv());
-    if(action==='trash-mail')await mailAction('trash');
+    if(action==='trash-mail')await deleteSelectedMail();
     if(action==='restore-mail')await mailAction('restore');
     if(action==='keep-local')await mailAction('keep-local');
     if(action==='discard-copy'){const record=state.current!;confirmation('Discard copy','Permanently remove this cached recovery copy from Office? Your server mailbox is unaffected.',()=>mailAction('discard',record));}
@@ -612,7 +620,10 @@ async function handleClick(event: MouseEvent) {
     if(action==='text'){await commit();const html=safeDocument(state.current!.body).replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi,'\n').replace(/<br\s*\/?\s*>/gi,'\n');const doc=new DOMParser().parseFromString(html,'text/html');download(state.current!.title+'.txt',doc.body.textContent);}
     if(action==='wiki-mode'){await commit();state.wikiPreview=!state.wikiPreview;renderDetail();if(!state.wikiPreview)enterEdit();}
     if(action==='history')await history();
-    if(action==='delete')confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current!;if(state.app==='mail')await deleteMailImmediately([record],r=>api('delete',{id:r.id,revision:r.revision}));else{await api('delete',{id:record.id,revision:record.revision});await load();}notice('Item deleted.');});
+    if(action==='delete'){
+      if(state.app==='mail')await deleteSelectedMail();
+      else confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current!;await api('delete',{id:record.id,revision:record.revision});await load();notice('Item deleted.');});
+    }
     if(action==='logout'){await commit();await api('logout',{});await boot();}
     if(action==='eml'){const record=await fullMailRecord(state.current!);download(record.title+'.eml',originalMail(record),'message/rfc822');}
     if(action==='original-ics')download(state.current!.title+'.ics',state.current!.meta.rawIcs||state.current!.meta.raw||'','text/calendar');
@@ -657,6 +668,26 @@ async function sendMail() {
   }finally{
     sendingMail=false;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,false);
   }
+}
+async function deleteSelectedMail() {
+  if(state.app!=='mail')return;
+  await commit();
+  const visible=filteredRows();
+  const rows=state.selected.size?visible.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
+  if(!rows.length)return;
+  const protectedMail=(r: OfficeRecord)=>r.meta.remote&&['Trash','Recovery copies','Not in Inbox'].includes(r.meta.folder||'');
+  if(rows.some(protectedMail))throw Error('The selection includes protected mail. Deselect messages in Trash or recovery copies before deleting.');
+  const ids=rows.map(r=>r.id),local=rows.filter(r=>!r.meta.remote).length;
+  const apply=async()=>{
+    if(state.app!=='mail')throw Error('The application changed. Select the messages again.');
+    await commit();
+    const current=ids.map(id=>state.rows.find(r=>r.id===id));
+    if(current.some(r=>!r||protectedMail(r)||!!r.meta.remote!==!!rows.find(original=>original.id===r.id)!.meta.remote))throw Error('The selected messages changed. Select them again.');
+    await deleteMailImmediately(current.filter(isPresent),r=>r.meta.remote?api('mail-action',{id:r.id,revision:r.revision,action:'trash'}):api('delete',{id:r.id,revision:r.revision}));
+    notice(rows.length===1?(local?'Item deleted.':'Moved to Trash.'):`${rows.length} items updated.`);
+  };
+  if(local)confirmation(rows.length===1?'Delete item':'Delete selected messages',`Permanently delete ${local} local message(s) and their revision history?${local<rows.length?` Also move ${rows.length-local} connected message(s) to Trash.`:''}`,apply);
+  else await apply();
 }
 async function archiveLocal() {
   if(state.app!=='mail')return;await commit();const ids=state.selected.size?[...state.selected]:[state.current?.id].filter(isPresent);let count=0;
@@ -785,14 +816,16 @@ document.addEventListener('keydown',event=>{
   if(action==='save'){event.preventDefault();void attempt(commit);return;}
   if(action==='delete'){
     event.preventDefault();
-    // Use the current item's available action, preserving confirmation and read-only restrictions.
-    if(!event.repeat&&state.current)document.querySelector<HTMLButtonElement>('#detail [data-action="trash-mail"], #detail [data-action="delete"]')!?.click();
+    if(!event.repeat){
+      if(state.app==='mail')void attempt(deleteSelectedMail);
+      else if(state.current)document.querySelector<HTMLButtonElement>('#detail [data-action="delete"]')!?.click();
+    }
     return;
   }
   if(action==='archive'){event.preventDefault();void attempt(archiveLocal);return;}
   if(action==='move'&&state.app==='mail'){event.preventDefault();if(!event.repeat)void attempt(()=>quickMoveMail(mailFolderEnv()));return;}
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector<HTMLButtonElement>('[data-action=reply]')!?.click();return;}
-  if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);renderList();return;}
+  if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);renderList();document.querySelector<HTMLElement>('#selected-item')?.focus({preventScroll:true});return;}
   if(state.app==='sheets'&&state.current&&(event.target as HTMLElement).closest<HTMLElement>('.sheet-wrap')&&([k.left,k.right,k.down,k.up,'ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key===k.left||key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key===k.right||key==='ArrowRight'||key==='Tab')c++;else if(key===k.up||key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
   if(action==='left'){event.preventDefault();document.querySelector<HTMLElement>('#selected-item')!?.focus();return;}
   if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else{document.querySelector<HTMLElement>('#detail')!?.setAttribute('tabindex','-1');document.querySelector<HTMLElement>('#detail')!?.focus();}return;}

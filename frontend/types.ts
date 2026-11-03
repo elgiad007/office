@@ -132,7 +132,7 @@ export type Confirmation = (title: string, message: string, action: () => unknow
 export type DeleteResult = {ok?: boolean; record?: OfficeRecord | null; removedIds?: string[]};
 export type DeleteMail = (rows: OfficeRecord[], operation: (row: OfficeRecord) => Promise<DeleteResult>) => Promise<void>;
 export interface FolderEnvironment {
-  state: AppState; api: RequestApi; commit: () => Promise<void>; load: () => Promise<void>;
+  state: AppState; api: RequestApi; commit: () => Promise<void>; load: (preferId?: string, options?: {preserveSelection?: boolean}) => Promise<void>;
   notice: (text: string, error?: boolean) => void; modal: (title: string, body: string) => void;
   dialog: HTMLDialogElement; e: (value: unknown) => string;
   field: (label: string, name: string, value?: string, type?: string, extra?: string) => string;

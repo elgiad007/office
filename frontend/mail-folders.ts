@@ -13,15 +13,15 @@ async function busy<T>(env: FolderEnvironment,run: () => Promise<T>): Promise<T>
   buttons.forEach(([button])=>button.disabled=true);
   try {return await run();} finally {env.state.syncing=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);}
 }
-async function reloadMail(env: FolderEnvironment) {
+async function reloadMail(env: FolderEnvironment,preserveSelection=false) {
   // A request may finish after the owner has opened an editor in another app.
-  if(env.state.app==='mail'&&!env.state.dirty&&!env.state.savePromise)await env.load();
+  if(env.state.app==='mail'&&!env.state.dirty&&!env.state.savePromise)await env.load(undefined,{preserveSelection});
 }
 export async function syncOpenFolder(env: FolderEnvironment,more=false) {
   const scope=env.state.mailScope;if(!scope)return;
   const limit=100;
-  await busy(env,async()=>{for(let batch=0;batch<(more?1:5);batch++){const result=await env.api('mail-folder-sync',{account:scope.account,folder:scope.folder,limit});await reloadMail(env);if(!result.more||document.hidden)break;}});
-  scope.limit=limit;await reloadMail(env);
+  await busy(env,async()=>{for(let batch=0;batch<(more?1:5);batch++){const result=await env.api('mail-folder-sync',{account:scope.account,folder:scope.folder,limit});await reloadMail(env,true);if(!result.more||document.hidden)break;}});
+  scope.limit=limit;await reloadMail(env,true);
 }
 function tree(folders: MailFolder[],e: (value: unknown) => string,account: string,path='',depth=0): string {
   // Construct missing parent containers as well as selectable nested folders.

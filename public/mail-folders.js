@@ -21,10 +21,10 @@ async function busy(env, run) {
         buttons.forEach(([button, disabled]) => button.disabled = disabled);
     }
 }
-async function reloadMail(env) {
+async function reloadMail(env, preserveSelection = false) {
     // A request may finish after the owner has opened an editor in another app.
     if (env.state.app === 'mail' && !env.state.dirty && !env.state.savePromise)
-        await env.load();
+        await env.load(undefined, { preserveSelection });
 }
 export async function syncOpenFolder(env, more = false) {
     const scope = env.state.mailScope;
@@ -33,12 +33,12 @@ export async function syncOpenFolder(env, more = false) {
     const limit = 100;
     await busy(env, async () => { for (let batch = 0; batch < (more ? 1 : 5); batch++) {
         const result = await env.api('mail-folder-sync', { account: scope.account, folder: scope.folder, limit });
-        await reloadMail(env);
+        await reloadMail(env, true);
         if (!result.more || document.hidden)
             break;
     } });
     scope.limit = limit;
-    await reloadMail(env);
+    await reloadMail(env, true);
 }
 function tree(folders, e, account, path = '', depth = 0) {
     // Construct missing parent containers as well as selectable nested folders.

@@ -67,6 +67,35 @@ export async function testMailDeleteSelection(page,url) {
     await reset(['a','b','c','d']);await item('b').click();await item('c').click({modifiers:['Control']});await menuTrash('b');await selected('d');
     assert.equal(await page.locator('.multi-selected').count(),0);
 
+    // The delete shortcut uses explicit selection, even when the reader is elsewhere.
+    await reset(['a','b','c','d']);await item('a').click();await page.keyboard.press('v');
+    await page.keyboard.press('j');await page.keyboard.press('v');await page.keyboard.press('j');
+    await page.keyboard.press('d');await selected('c');
+    assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
+
+    await reset(['a','b','c','d']);await item('a').click();await item('b').click({modifiers:['Shift']});
+    await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await selected('c');
+    assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
+
+    await reset(['a','b','c'],false);await item('a').click();await page.keyboard.press('v');
+    await page.keyboard.press('j');await page.keyboard.press('v');await page.keyboard.press('d');
+    await page.locator('#cancel').click();assert.equal(await page.locator('.multi-selected').count(),2);
+    await page.keyboard.press('d');await page.locator('#confirm').click();await selected('c');
+    assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
+
+    await reset(['a','b','c']);await item('a').click();await item('b').click({modifiers:['Control']});rejectId='b';
+    await page.keyboard.press('d');await page.locator('#notice').filter({hasText:'1 of 2 items updated.'}).waitFor();
+    await selected('c');assert.equal(await item('b').count(),1);
+
+    // Mixed selections keep confirmation for local deletion and trash connected mail.
+    await reset(['a','b','c']);messages[0]=fixture('a',false);await page.reload();
+    await item('a').click();await item('b').click({modifiers:['Control']});await page.keyboard.press('d');
+    await page.locator('#cancel').click();assert.equal(messages.length,3);assert.equal(messages[1].meta.folder,'Inbox');
+    await page.keyboard.press('d');await page.locator('#confirm').click();await selected('c');
+    assert.equal(messages.some(r=>r.id==='a'),false);assert.equal(messages.find(r=>r.id==='b').meta.folder,'Trash');
+    await page.locator('#mail-folder').selectOption('Trash');await item('b').click();await page.keyboard.press('v');await page.keyboard.press('d');
+    await page.locator('#notice').filter({hasText:'The selection includes protected mail.'}).waitFor();
+    assert.equal(await item('b').count(),1);assert.equal(messages.find(r=>r.id==='b').meta.folder,'Trash');
     // A partial failure restores the rejected mail without interrupting the next selection.
     await reset(['a','b','c']);await item('a').click();await item('b').click({modifiers:['Control']});rejectId='b';await menuTrash('a');
     await page.locator('#notice').filter({hasText:'1 of 2 items updated.'}).waitFor();await selected('c');assert.equal(await item('b').count(),1);

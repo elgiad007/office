@@ -7,6 +7,7 @@ import {testDensity} from './density.browser.mjs';
 import {testScrolling} from './scrolling.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
 import {testMailDeleteSelection} from './mail-delete-selection.browser.mjs';
+import {testMailSelectionSync} from './mail-selection-sync.browser.mjs';
 import {testMailSort} from './mail-sort.browser.mjs';
 import {testMailReply} from './mail-reply.browser.mjs';
 import {testMailSend} from './mail-send.browser.mjs';
@@ -81,6 +82,7 @@ try{
  const first=rows.records[0];const stale=await page.request.post(url+'api.php?r=save',{headers:{'X-CSRF-Token':status.csrf},data:{...first,revision:first.revision-1}});assert.equal(stale.status(),409);
  await testDeleteHotkey(page,url);
  await testMailDeleteSelection(page,url);
+ await testMailSelectionSync(page,url);
  await testMailSort(page,url);
  await testMailReply(page,url);
  await testMailSend(page,url);
