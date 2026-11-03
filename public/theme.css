@@ -14,6 +14,7 @@
 .folder-link:hover, .folder-link:focus-visible { background: var(--wash); }
 .folder-link[aria-current="location"] { background: var(--wash); font-weight: 650; }
 .folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
+.items > .item:focus-visible { outline-offset: -2px; }
 .item .badge { max-width: 125px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .item.mail-read strong, .item.mail-read small { font-weight: 400; }
 .item.mail-unread strong, .item.mail-unread small { font-weight: 700; }
