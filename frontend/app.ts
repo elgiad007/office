@@ -270,6 +270,27 @@ function mailDeletionReload() {
   };
 }
 interface MailReaderSnapshot {id: string; open: string[]; focus?: {disclosure: string; selector: string}}
+interface MailListViewport {scrollTop: number; visible: {id: string; top: number}[]}
+function captureMailListViewport(): MailListViewport | undefined {
+  if(state.app!=='mail')return;
+  const list=document.querySelector<HTMLElement>('#items');
+  if(!list)return;
+  const bounds=list.getBoundingClientRect();
+  return {scrollTop:list.scrollTop,visible:Array.from(list.querySelectorAll<HTMLElement>('[data-id]'))
+    .filter(row=>{const rect=row.getBoundingClientRect();return rect.bottom>bounds.top&&rect.top<bounds.bottom;})
+    .map(row=>({id:row.dataset.id!,top:row.getBoundingClientRect().top-bounds.top}))};
+}
+function restoreMailListViewport(snapshot: MailListViewport | undefined) {
+  if(!snapshot)return;
+  const list=document.querySelector<HTMLElement>('#items');
+  if(!list)return;
+  if(snapshot.scrollTop===0){list.scrollTop=0;return;}
+  const anchor=snapshot.visible.find(row=>list.querySelector(`[data-id="${CSS.escape(row.id)}"]`));
+  if(anchor){
+    const row=list.querySelector<HTMLElement>(`[data-id="${CSS.escape(anchor.id)}"]`)!;
+    list.scrollTop+=row.getBoundingClientRect().top-list.getBoundingClientRect().top-anchor.top;
+  }else list.scrollTop=snapshot.scrollTop;
+}
 function captureMailReader(): MailReaderSnapshot | undefined {
   const panel=document.querySelector<HTMLElement>('#detail');
   if(state.app!=='mail'||!displayedMailId||!panel?.classList.contains('mail-reader'))return;
@@ -301,6 +322,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
   const app=state.app;let records,version;
   do{version=mailDeleteVersion+mailReadVersion;records=(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
+  const listViewport=preserveSelection?captureMailListViewport():undefined;
   const readerSnapshot=preserveSelection?captureMailReader():undefined;
   const focusedId=preserveSelection?(document.activeElement as HTMLElement)?.closest<HTMLElement>('#items [data-id]')?.dataset.id:undefined;
   state.rows=records.filter(r=>!pendingMailDeletes.has(r.id));
@@ -313,12 +335,18 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
     if(!state.current&&selectFirst)state.current=filteredRows()[0]||null;
   }
   if(preserveSelection){
-    const visible=new Set(filteredRows().map(r=>r.id));
+    const rows=filteredRows(),visible=new Set(rows.map(r=>r.id));
     for(const id of state.selected)if(!visible.has(id))state.selected.delete(id);
     if(selectionAnchor&&!visible.has(selectionAnchor))selectionAnchor=null;
+    if(listViewport?.scrollTop){
+      const bottommostSurvivor=[...listViewport.visible].reverse().find(row=>visible.has(row.id));
+      // Keep a viewport of rows after the anchor so the restored offset does not clamp at the paging cutoff.
+      if(bottommostSurvivor)mailListLimit=Math.max(mailListLimit,rows.findIndex(row=>row.id===bottommostSurvivor.id)+1+listViewport.visible.length);
+    }
   }
   renderWorkspace(readerSnapshot);
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
+  restoreMailListViewport(listViewport);
 }
 function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   const a=apps[state.app];
