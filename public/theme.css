@@ -262,6 +262,7 @@
   .list-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0; }
   .items, .compact .items { min-height: 0; max-height: none; }
   .detail { min-height: 0; overflow: auto; }
+  .detail.mail-reader, .compact .detail.mail-reader { padding-bottom: 0; }
   .items, .detail, .application-nav, #main, #mail-folder-navigation { overscroll-behavior: contain; }
 }
 @media screen and (max-width: 800px) {
