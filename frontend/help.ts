@@ -4,10 +4,11 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   const rows: HelpEntry[]=[];
   const add=(shortcut: string,action: string,context='Normal mode',options='')=>rows.push({shortcut,action,context,options});
   add(k.help,'Open keyboard and command help','Normal mode, including Settings','Remappable in Settings.');
-  add(k.down+' / '+k.up,'Next / previous item');add(k.left+' / '+k.right,'Focus list / selected item');
-  add('gg / G','First / last item','Normal mode','Press g twice within 900 ms for first item.');
+  add(k.down+' / '+k.up,'Next / previous item or scroll content','Normal mode','Acts on the focused pane; focused spreadsheet cells move between cells.');add(k.left+' / '+k.right,'Focus list / selected item');
+  add('gg / G','First / last item or content beginning / end','Normal mode','Acts on the focused pane. Press g twice within 900 ms.');
+  add('Tab / Shift+Tab','Enter selected content / return to list','Selected list row / content entry','Enters without editing. Standard controls and spreadsheet cells retain native Tab behavior.');
   add('g 1 … g 7','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets. Sequence timeout: 900 ms.');
-  add(k.search,'Search current application');add('n / N','Next / previous item in search results');
+  add(k.search,'Search current application');add('n / N','Next / previous item in search results or scroll content','Normal mode','Acts on the focused pane.');
   add(k.new,'Create an item / compose');add(k.edit,'Enter edit mode');add(k.select,'Toggle current item selection');add(k.save,'Save changes');
   add('Ctrl+S / Cmd+S','Save changes','Normal or insert mode, outside dialogs');
   add('Escape','Leave editor and save; clear selection otherwise','Outside dialogs','In formula input, return focus to selected cell.');

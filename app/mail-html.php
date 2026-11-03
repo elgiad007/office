@@ -2,7 +2,8 @@
 declare(strict_types=1);
 
 // Relative colors keep the sender's hue while bringing text and surfaces into
-// separate lightness ranges. This runs on CSS only; the email stays script-free.
+// separate lightness ranges. Sanitized sender content stays script-free;
+// mail-view.php adds only its nonce-protected first-party keyboard bridge.
 function dark_mail_css(string $css): string {
     $quoted='"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'|/\*.*?\*/';
     $pattern='~(?:'.$quoted.')(*SKIP)(*F)|(?<![\w-])(?<property>color|background-color|background-image|background|-webkit-text-fill-color|text-decoration-color)\s*:\s*(?<value>(?:(?:'.$quoted.')|(?<parens>\((?:[^()"\']+|"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'|(?&parens))*\))|[^;{}()"\'])+)~is';

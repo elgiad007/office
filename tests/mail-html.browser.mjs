@@ -27,7 +27,32 @@ export async function testMailHtml(page,url) {
     await page.locator('.item').filter({hasText:'HTML reader verification'}).click();
     const frame=page.frameLocator('.mail-html');
     await frame.getByText('Styled newsletter',{exact:true}).waitFor();
-    assert.equal(await frame.locator('script,form,iframe,meta[http-equiv]').count(),0);
+    assert.equal(await frame.locator('form,iframe,meta[http-equiv]').count(),0);
+    assert.equal(await frame.locator('script').count(),1,'Only the trusted keyboard bridge survives');
+    assert.ok(await frame.locator('script').evaluate(node=>node.nonce));
+    assert.equal((await page.locator('.mail-html').getAttribute('sandbox')).includes('allow-same-origin'),false);
+    // Exercise the real opaque-origin reader, not a same-origin fixture frame.
+    await frame.locator('body').evaluate(node=>{const div=document.createElement('div');div.style.height='3000px';node.append(div);});
+    await page.locator('#selected-item').focus();await page.keyboard.press('Tab');
+    assert.equal(await page.locator('.mail-html').evaluate(node=>node===document.activeElement),true);
+    assert.equal(await page.locator('#detail').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
+    const selected=await page.locator('#selected-item').getAttribute('data-id');
+    await page.keyboard.press('j');
+    await page.waitForFunction(()=>document.activeElement?.classList.contains('mail-html'));
+    await frame.locator('body').evaluate(()=>new Promise(resolve=>setTimeout(resolve,50)));
+    assert.ok(await frame.locator('body').evaluate(()=>scrollY)>0,'HTML keyboard navigation scrolls its own viewport');
+    await page.keyboard.press('G');
+    assert.ok(await frame.locator('body').evaluate(()=>scrollY)>1000);
+    await page.keyboard.press('g');await page.keyboard.press('g');
+    assert.equal(await frame.locator('body').evaluate(()=>scrollY),0);
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected);
+    // Forged sibling/top messages cannot act as an iframe keyboard event.
+    await page.evaluate(()=>window.postMessage({type:'office-mail-key',key:'h',shiftKey:false},'*'));
+    await frame.locator('body').evaluate(()=>parent.postMessage({type:'office-mail-key',key:'h',shiftKey:'invalid'},'*'));
+    await page.waitForTimeout(30);
+    assert.equal(await page.locator('.mail-html').evaluate(node=>node===document.activeElement),true);
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.locator('#selected-item').evaluate(node=>node===document.activeElement),true);
     assert.equal(await frame.getByAltText('Embedded logo').evaluate(img=>img.complete && img.naturalWidth),1);
     assert.equal(await frame.getByAltText('Remote logo').getAttribute('src'),null);
     assert.equal(remoteRequests,0);
@@ -95,7 +120,9 @@ export async function testMailHtml(page,url) {
     }
     const src=await page.locator('.mail-html').getAttribute('src');
     const response=await page.request.get(new URL(src,url).href);
-    assert.match(response.headers()['content-security-policy'],/sandbox allow-popups/);
+    assert.match(response.headers()['content-security-policy'],/sandbox allow-scripts allow-popups/);
+    assert.match(response.headers()['content-security-policy'],/script-src 'nonce-[^']+'/);
+    assert.doesNotMatch(response.headers()['content-security-policy'],/allow-same-origin|unsafe-eval/);
     const anonymous=await fetch(new URL(src,url));assert.equal(anonymous.status,401);
     await page.screenshot({path:'test-results/mail-html.png',fullPage:true});
     await openMailMore(page);await page.getByRole('button',{name:'Text only',exact:true}).click();

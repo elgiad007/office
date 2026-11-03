@@ -494,6 +494,7 @@ async function hydrateMailBody(record: OfficeRecord,manual=false) {
 }
 function renderDetail(readerSnapshot=captureMailReader()) {
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
+  const contentFocused=!!r&&document.activeElement===contentEntry();
   const openedMail=state.app==='mail'&&r?r.id:null, newlyOpened=openedMail!==displayedMailId;
   const restore=readerSnapshot?.id===openedMail?readerSnapshot:undefined;
   displayedMailId=openedMail;
@@ -513,7 +514,8 @@ function renderDetail(readerSnapshot=captureMailReader()) {
   const failure=state.app==='mail'?failedMailActions.get(r.id):undefined;
   if(failure)panel.insertAdjacentHTML('afterbegin',`<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
   const form=panel.querySelector<HTMLFormElement>('#record-form')!;
-  if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail);
+  if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail,keys());
+  if(contentFocused)focusContent();
   if(state.app==='mail')bindAttachments(panel,r,{api,commit,notice,modal,update:record=>{
     if(state.current?.id===record.id){state.current.revision=record.revision;state.current.meta.attachments=record.meta.attachments;state.current.meta.hasAttachments=record.meta.hasAttachments;}
     const row=state.rows.find(row=>row.id===record.id);if(row){row.revision=record.revision;row.meta.attachments=record.meta.attachments;row.meta.hasAttachments=record.meta.hasAttachments;}
@@ -957,6 +959,28 @@ function accountDialog() {
   }});
 }
 const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+function contentEntry() {
+  const panel=document.querySelector<HTMLElement>('#detail');
+  return panel?.querySelector<HTMLElement>('.mail-html, .mail-body, .sheet-wrap')||panel;
+}
+function focusContent() {
+  if(!state.current)return;
+  const entry=contentEntry();
+  if(entry){entry.tabIndex=-1;entry.focus({preventScroll:true});}
+}
+function scrollContent(direction: 'up'|'down'|'start'|'end') {
+  const frame=document.querySelector<HTMLIFrameElement>('.mail-html');
+  if(frame){frame.contentWindow?.postMessage({type:'office-mail-scroll',direction},'*');return;}
+  const panel=document.querySelector<HTMLElement>('#detail');
+  const body=panel?.querySelector<HTMLElement>('.sheet-wrap, #rich-editor, textarea.body-editor');
+  const target=body&&body.scrollHeight>body.clientHeight?body:panel;
+  if(!target)return;
+  target.scrollTo({top:direction==='start'?0:direction==='end'?target.scrollHeight:target.scrollTop+(direction==='up'?-1:1)*Math.max(40,target.clientHeight*.15),behavior:'instant'});
+  if(panel&&target!==panel){
+    if(direction==='start'||direction==='end')panel.scrollTop=direction==='start'?0:panel.scrollHeight;
+    else if(target.getBoundingClientRect().top>panel.getBoundingClientRect().bottom)target.scrollIntoView({block:'nearest'});
+  }
+}
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
   if(commandInput){if(event.key==='Escape'){event.preventDefault();closeCommand(true);}return;}
@@ -974,11 +998,15 @@ document.addEventListener('keydown',event=>{
   if(event.key==='Escape'){if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{state.selected.clear();if(state.app!=='settings')renderList();}return;}
   if(editable((event.target as HTMLElement))){setMode('insert');return;}
   if(event.ctrlKey||event.metaKey||event.altKey)return;
+  const target=event.target as HTMLElement;
+  if(event.key==='Tab'&& !event.shiftKey && target.matches('#selected-item')){event.preventDefault();keySequence='';focusContent();return;}
+  if(event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';document.querySelector<HTMLElement>('#selected-item')?.focus({preventScroll:true});return;}
   if(event.key===':'&&!event.isComposing&&state.mode==='normal'){event.preventDefault();if(!event.repeat)openCommand();return;}
   const k=keys(), key=event.key;setMode('normal');
   if(Date.now()-sequenceTime>900)keySequence='';sequenceTime=Date.now();
   if(keySequence==='g'&&/^[1-7]$/.test(key)){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
-  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();const row=filteredRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
+  const inContent=!!target.closest('#detail');
+  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inContent)scrollContent('start');else{const row=filteredRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));}return;}
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
   const action=Object.keys(k).find(action=>k[action]===key);
   if(action==='help'){event.preventDefault();help();return;}
@@ -1000,9 +1028,10 @@ document.addEventListener('keydown',event=>{
   if(action==='move'&&state.app==='mail'){event.preventDefault();if(!event.repeat)void attempt(()=>quickMoveMail(mailFolderEnv()));return;}
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector<HTMLButtonElement>('[data-action=reply]')!?.click();return;}
   if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);renderList();document.querySelector<HTMLElement>('#selected-item')?.focus({preventScroll:true});return;}
-  if(state.app==='sheets'&&state.current&&(event.target as HTMLElement).closest<HTMLElement>('.sheet-wrap')&&([k.left,k.right,k.down,k.up,'ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key===k.left||key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key===k.right||key==='ArrowRight'||key==='Tab')c++;else if(key===k.up||key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
+  if(state.app==='sheets'&&state.current&&target.closest<HTMLElement>('[data-cell]')&&([k.left,k.right,k.down,k.up,'ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key===k.left||key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key===k.right||key==='ArrowRight'||key==='Tab')c++;else if(key===k.up||key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
   if(action==='left'){event.preventDefault();document.querySelector<HTMLElement>('#selected-item')!?.focus();return;}
-  if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else{document.querySelector<HTMLElement>('#detail')!?.setAttribute('tabindex','-1');document.querySelector<HTMLElement>('#detail')!?.focus();}return;}
+  if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
+  if(inContent&&(action==='down'||action==='up'||key==='n'||key==='N'||key==='G')){event.preventDefault();scrollContent(key==='G'?'end':action==='up'||key==='N'?'up':'down');return;}
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=filteredRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
 });
 document.addEventListener('focusin',event=>{if((event.target as HTMLElement).id!=='command-input'&&editable((event.target as HTMLElement)))setMode('insert');});

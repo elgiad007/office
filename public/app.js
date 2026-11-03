@@ -776,6 +776,7 @@ async function hydrateMailBody(record, manual = false) {
 }
 function renderDetail(readerSnapshot = captureMailReader()) {
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
+    const contentFocused = !!r && document.activeElement === contentEntry();
     const openedMail = state.app === 'mail' && r ? r.id : null, newlyOpened = openedMail !== displayedMailId;
     const restore = readerSnapshot?.id === openedMail ? readerSnapshot : undefined;
     displayedMailId = openedMail;
@@ -799,7 +800,9 @@ function renderDetail(readerSnapshot = captureMailReader()) {
         panel.insertAdjacentHTML('afterbegin', `<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
     const form = panel.querySelector('#record-form');
     if (state.app === 'mail' && r.meta.folder !== 'Drafts')
-        bindMailReader(panel, r, renderDetail);
+        bindMailReader(panel, r, renderDetail, keys());
+    if (contentFocused)
+        focusContent();
     if (state.app === 'mail')
         bindAttachments(panel, r, { api, commit, notice, modal, update: record => {
                 if (state.current?.id === record.id) {
@@ -1789,6 +1792,38 @@ function accountDialog() {
         } });
 }
 const itemMenus = installItemMenus({ state, e, commit, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, waitForMailRead: id => pendingMailReads.get(id), mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
+function contentEntry() {
+    const panel = document.querySelector('#detail');
+    return panel?.querySelector('.mail-html, .mail-body, .sheet-wrap') || panel;
+}
+function focusContent() {
+    if (!state.current)
+        return;
+    const entry = contentEntry();
+    if (entry) {
+        entry.tabIndex = -1;
+        entry.focus({ preventScroll: true });
+    }
+}
+function scrollContent(direction) {
+    const frame = document.querySelector('.mail-html');
+    if (frame) {
+        frame.contentWindow?.postMessage({ type: 'office-mail-scroll', direction }, '*');
+        return;
+    }
+    const panel = document.querySelector('#detail');
+    const body = panel?.querySelector('.sheet-wrap, #rich-editor, textarea.body-editor');
+    const target = body && body.scrollHeight > body.clientHeight ? body : panel;
+    if (!target)
+        return;
+    target.scrollTo({ top: direction === 'start' ? 0 : direction === 'end' ? target.scrollHeight : target.scrollTop + (direction === 'up' ? -1 : 1) * Math.max(40, target.clientHeight * .15), behavior: 'instant' });
+    if (panel && target !== panel) {
+        if (direction === 'start' || direction === 'end')
+            panel.scrollTop = direction === 'start' ? 0 : panel.scrollHeight;
+        else if (target.getBoundingClientRect().top > panel.getBoundingClientRect().bottom)
+            target.scrollIntoView({ block: 'nearest' });
+    }
+}
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented)
         return;
@@ -1854,6 +1889,19 @@ document.addEventListener('keydown', event => {
     }
     if (event.ctrlKey || event.metaKey || event.altKey)
         return;
+    const target = event.target;
+    if (event.key === 'Tab' && !event.shiftKey && target.matches('#selected-item')) {
+        event.preventDefault();
+        keySequence = '';
+        focusContent();
+        return;
+    }
+    if (event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
+        event.preventDefault();
+        keySequence = '';
+        document.querySelector('#selected-item')?.focus({ preventScroll: true });
+        return;
+    }
     if (event.key === ':' && !event.isComposing && state.mode === 'normal') {
         event.preventDefault();
         if (!event.repeat)
@@ -1871,12 +1919,17 @@ document.addEventListener('keydown', event => {
         void attempt(() => changeApp(Object.keys(apps)[Number(key) - 1]));
         return;
     }
+    const inContent = !!target.closest('#detail');
     if (keySequence === 'g' && key === 'g') {
         keySequence = '';
         event.preventDefault();
-        const row = filteredRows()[0];
-        if (row)
-            void attempt(() => selectRecord(row.id, true));
+        if (inContent)
+            scrollContent('start');
+        else {
+            const row = filteredRows()[0];
+            if (row)
+                void attempt(() => selectRecord(row.id, true));
+        }
         return;
     }
     if (key === 'g') {
@@ -1958,7 +2011,7 @@ document.addEventListener('keydown', event => {
         document.querySelector('#selected-item')?.focus({ preventScroll: true });
         return;
     }
-    if (state.app === 'sheets' && state.current && event.target.closest('.sheet-wrap') && ([k.left, k.right, k.down, k.up, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'Tab'].includes(key))) {
+    if (state.app === 'sheets' && state.current && target.closest('[data-cell]') && ([k.left, k.right, k.down, k.up, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'Tab'].includes(key))) {
         event.preventDefault();
         let [r, c] = cellPosition(state.cell);
         if (key === k.left || key === 'ArrowLeft' || key === 'Tab' && event.shiftKey)
@@ -1981,10 +2034,13 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         if (state.app === 'sheets' && state.current)
             selectCell(state.cell, true);
-        else {
-            document.querySelector('#detail')?.setAttribute('tabindex', '-1');
-            document.querySelector('#detail')?.focus();
-        }
+        else
+            focusContent();
+        return;
+    }
+    if (inContent && (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G')) {
+        event.preventDefault();
+        scrollContent(key === 'G' ? 'end' : action === 'up' || key === 'N' ? 'up' : 'down');
         return;
     }
     if (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G') {

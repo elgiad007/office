@@ -1,4 +1,4 @@
-param([string]$PhpBinary='php',[string]$PhpExtensionDir,[string]$NodeModuleManifest,[string]$BrowserChannel,[int]$Port=8787,[switch]$Apache)
+param([string]$PhpBinary='php',[string]$PhpExtensionDir,[string]$NodeModuleManifest,[string]$BrowserChannel,[int]$Port=8787,[switch]$Apache,[string]$TestScript='browser.mjs')
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 & node (Join-Path $officeRoot 'scripts/frontend.mjs') --check
@@ -21,7 +21,7 @@ try {
         if($officeServer -and $officeServer.HasExited){throw 'Test server exited before becoming ready.'}
         try{$officeStatus=Invoke-RestMethod -Uri ($env:OFFICE_TEST_URL+'api.php?r=status') -TimeoutSec 1;if($officeStatus.setup){break}}catch{Start-Sleep -Milliseconds 150}
     }
-    & node (Join-Path $PSScriptRoot 'browser.mjs')
+    & node (Join-Path $PSScriptRoot $TestScript)
     if($LASTEXITCODE -ne 0){throw 'Browser checks failed. Screenshots are in test-results/.'}
 } finally {
     if($Apache){if(Test-Path -LiteralPath (Join-Path $officeTestData 'local-server.json')){& (Join-Path $officeRoot 'scripts/stop-windows.ps1') -DataDirectory $officeTestData}}
