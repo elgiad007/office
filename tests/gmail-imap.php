@@ -107,5 +107,6 @@ try {
     ],function($s){check(imap_move_verified($s,'1','[Gmail]/Trash','Move','INBOX',true)['providerId']==='77','large Gmail message can be trashed using identity verification without body download');});
     echo "PASS Gmail IMAP folder collision, message identity, verified Trash, large-message sync and cache reconciliation fixtures (no live moves).\n";
 } finally {
+    foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');
     foreach (glob($testDir.'/*')?:[] as $file) @unlink($file); @rmdir($testDir);
 }

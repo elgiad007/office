@@ -57,5 +57,6 @@ try{
     $before=$copies;rejected(fn()=>$run($row),'previous copy could not be confirmed');check($copies===$before,'uncertain write is never repeated');
     $row['id']='large';$before=$copies;rejected(fn()=>transfer_remote_mail($row,$dest,'Travel',fn()=>str_repeat('x',IMAP_BODY_LIMIT+1),$copy,$verify,$trash),'complete original');check($copies===$before,'oversized message fails before copying');
 }finally{
+    foreach(glob($testDir.'/locks/*')?:[] as $file)@unlink($file);@rmdir($testDir.'/locks');
     foreach(glob($testDir.'/*')?:[] as $file)@unlink($file);@rmdir($testDir);
 }

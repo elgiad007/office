@@ -327,7 +327,9 @@ function imap_move_verified(mixed $s,string $id,string $folder,string $operation
 }
 /** Serialize provider mutations and the brief cache-publication phase. */
 function with_account_mail_lock(string $accountId,callable $operation): mixed {
-    $lock=fopen(data_dir().'/mail-'.hash('sha256',$accountId).'.lock','c');
+    $directory=data_dir().'/locks';
+    if (!is_dir($directory) && !@mkdir($directory,0700) && !is_dir($directory)) fail('Cannot create the mail lock directory.',503);
+    $lock=fopen($directory.'/mail-'.hash('sha256',$accountId).'.lock','c');
     if ($lock===false) fail('Cannot lock this account for synchronization.',503);
     try {
         if (!flock($lock,LOCK_EX|LOCK_NB)) fail('This account is syncing or updating mail. Try again when it finishes.',409);

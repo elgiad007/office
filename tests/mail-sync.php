@@ -251,5 +251,6 @@ try {
     check(setting('imap-repair:'.$busy['id'])['INBOX']['ids']===[] && !array_filter(mail_cache_rows($busy['id']),fn($r)=>!empty($r['meta']['headerOnly'])),'later normal syncs complete all 270 repair bodies without restarting');
     echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
+    foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');
     foreach (glob($testDir.'/*')?:[] as $file) @unlink($file); @rmdir($testDir);
 }

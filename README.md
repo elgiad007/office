@@ -138,6 +138,7 @@ Additional checks:
 php tests/backend.php
 php tests/attachments.php
 php tests/mail-sync.php
+php tests/mail-lock.php
 php tests/gmail-imap.php
 php tests/mail-transfer.php
 php tests/activity.php
