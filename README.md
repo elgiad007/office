@@ -97,6 +97,8 @@ Calendar imports retain raw event sources for original download when available. 
 
 ## Keyboard operation
 
+In Mail, `u` undoes the last deletion gesture, including a selected batch. It waits for pending deletions and restores only confirmed successes. Local messages retain their original ID, full content, attachments and revision history; connected messages return to their original server folder or Gmail memberships. This is separate from Restore to Inbox. The binding is remappable in Settings and applies outside editors and dialogs. Undo is available in the current page for fifteen minutes; reloading clears the shortcut's history. The server retains up to 100 receipts and 64 MB of undo data, and refuses further undoable deletions when full. Failed or uncertain provider operations require checking and synchronizing the mailbox before another action; undo never automatically repeats an uncertain provider write.
+
 Right-click an item in any application's list to open its action menu. Ctrl/Cmd-click toggles individual items; Shift-click selects a range. Right-clicking within a selection keeps that selection, while right-clicking another item targets that item alone. Menus show actions available for the entire selection, including bulk task completion, mail actions, export, and local deletion. Local deletion and discarding recovery copies require confirmation. Bulk changes run one item at a time; a failure reports how many completed and refreshes the view before retrying.
 
 With an item focused, Shift+F10 or the Menu key opens the same menu. Use arrows, Home/End and Enter to choose an action, or Escape to close it. Text fields and editors retain their normal browser context menus.

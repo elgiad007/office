@@ -381,7 +381,7 @@ function smtp_expect(mixed $s,array $allowed): void {
     do { $line=fgets($s,8192); if ($line===false || ++$count>100) fail('SMTP connection interrupted. Delivery may be uncertain; check Sent before retrying.'); } while (isset($line[3]) && $line[3]==='-');
     if (!in_array((int)substr($line,0,3),$allowed,true)) fail('SMTP server rejected this operation.');
 }
-function remote_mail_action(array $r,string $action): array {
+function remote_mail_action(array $r,string $action,?array &$undoBefore=null): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote'])) fail('Choose a synchronized message.');
     if (!in_array($action,['archive','trash','restore','read','unread'],true)) fail('Unknown mail action.');
     if (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('This is a recovery copy. Save it locally or discard it.');
@@ -407,12 +407,13 @@ function remote_mail_action(array $r,string $action): array {
         if (!ctype_digit($id)) fail('Invalid IMAP message identifier.');
         $path=$r['meta']['serverFolder']??(($r['meta']['folder']==='Inbox')?'INBOX':null);
         if ($path===null) fail('This cached message needs Repair / resync before processing.');
-        $r=imap_with_connection($a,function($s) use($a,$r,$path,$id,$destination,$action,&$relatedIds) {
+        $r=imap_with_connection($a,function($s) use($a,$r,$path,$id,$destination,$action,&$relatedIds,&$undoBefore) {
             activity_step('IMAP: opening source folder '.$path.'.');
             $validity=imap_validity(imap_command($s,'SELECT '.imap_quote($path)));
             if (mail_row_source($r)!==mail_source($path,$validity,$id)) fail('Mailbox identifiers changed. Use Repair / resync before processing this message.',409);
             if ($destination!==null) {
                 $gmail=imap_is_gmail($a);
+                if($gmail&&$undoBefore!==null)$undoBefore['meta']['imapLabels']=imap_undo_labels($s,$id);
                 $gmailId=null;if ($gmail) $relatedIds=imap_gmail_move_copies($a,$s,$r,$path,$id,$gmailId);
                 // The archive preflight checks MOVE and never creates or expunges folders.
                 $cachedRaw=isset($r['meta']['rawBase64'])?base64_decode($r['meta']['rawBase64'],true):false;
@@ -431,6 +432,7 @@ function remote_mail_action(array $r,string $action): array {
                     $location=imap_move_verified($s,$id,$target,'Move',$path,$gmail,$a,$gmailId,$cachedRaw===false?null:$cachedRaw);
                 }
                 $r['meta']=array_merge($r['meta'],$location,['folder'=>$destination]);
+                if($gmail&&$undoBefore!==null)$undoBefore['meta']['imapTrashLabels']=imap_undo_labels($s,(string)$location['providerId']);
             } else {
                 if (!in_array($id,imap_search_ids($s,'UID '.$id),true)) fail('This message left its server folder. Use Sync now to update its location.',409);
                 imap_command($s,'UID STORE '.$id.' '.($action==='read'?'+':'-').'FLAGS.SILENT (\\Seen)');

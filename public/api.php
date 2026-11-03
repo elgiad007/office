@@ -7,6 +7,7 @@ require dirname(__DIR__).'/app/account-setup.php';
 require dirname(__DIR__).'/app/google.php';
 require dirname(__DIR__).'/app/mail-folders.php';
 require dirname(__DIR__).'/app/mail-transfer.php';
+require dirname(__DIR__).'/app/mail-undo.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -55,7 +56,7 @@ try {
         $diagnostic=$input['action']==='diagnostic';
         activity_event($input['message'],!$diagnostic&&!empty($input['error'])?'error':'info',$diagnostic?'diagnostic':'notice');json_response(['ok'=>true]);
     }
-    $activityNames=['save'=>'Save item','delete'=>'Delete item','preferences'=>'Save preferences','account-save'=>'Save account','account-delete'=>'Remove account','account-test'=>'Test connection','google-settings'=>'Save Google integration','google-connect'=>'Connect Google account','sync'=>'Synchronize account','send'=>'Send mail','mail-folders'=>'Discover folders','mail-folder-sync'=>'Refresh folder','mail-folder-manage'=>'Manage folder','mail-action'=>'Update mail','backup'=>'Download backup','restore'=>'Restore backup','import'=>'Import items','import-items'=>'Import items'];
+    $activityNames=['mail-undo'=>'Undo mail deletion','save'=>'Save item','delete'=>'Delete item','preferences'=>'Save preferences','account-save'=>'Save account','account-delete'=>'Remove account','account-test'=>'Test connection','google-settings'=>'Save Google integration','google-connect'=>'Connect Google account','sync'=>'Synchronize account','send'=>'Send mail','mail-folders'=>'Discover folders','mail-folder-sync'=>'Refresh folder','mail-folder-manage'=>'Manage folder','mail-action'=>'Update mail','backup'=>'Download backup','restore'=>'Restore backup','import'=>'Import items','import-items'=>'Import items'];
     if(isset($activityNames[$route]) && ($method==='POST'||$route==='backup')) {
         $label='';$accountId=$input['account']??($route==='sync'?($input['id']??null):null);
         if($route==='mail-action'){$mail=get_record((string)($input['id']??''));$accountId=$mail['meta']['account']??null;}
@@ -100,6 +101,7 @@ try {
     if ($route==='delete' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision']) fail('Item changed elsewhere. Reopen it.',409);
         if (!empty($r['meta']['remote'])) fail('Remote items are read-only. Remove the account to clear its cache.');
+        if($r['kind']==='mail'&&($input['undoable']??false)===true)json_response(delete_local_mail($r));
         $q=db()->prepare('DELETE FROM records WHERE id=? AND revision=?'); $q->execute([$r['id'],$r['revision']]); if (!$q->rowCount()) fail('Item changed elsewhere.',409); json_response(['ok'=>true]);
     }
     if ($route==='history' && $method==='GET') { get_record((string)($_GET['id']??'')); $q=db()->prepare('SELECT revision,snapshot FROM revisions WHERE record_id=? ORDER BY revision DESC LIMIT 50'); $q->execute([$_GET['id']]); json_response(['revisions'=>array_map(static fn($r)=>['revision'=>(int)$r['revision'],'snapshot'=>json_decode($r['snapshot'],true)],$q->fetchAll())]); }
@@ -232,15 +234,38 @@ try {
             $ids=db()->prepare("SELECT id FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
             $ids->execute([$accountId]);$before=$ids->fetchAll(PDO::FETCH_COLUMN);
             $destination=(string)($input['destinationAccount']??'');
+            $undoBefore=null;
+            $undoToken=null;
+            if($action==='trash'&&($input['undoable']??false)===true){
+                if(($current['meta']['folder']??'')==='Trash')fail('The message is already in Trash.');
+                $undoBefore=$current;$a=account($accountId);
+                if($a['type']==='google'){
+                    $live=google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($current['meta']['providerId']).'?format=minimal',google_token($a));
+                    if(!is_array($live['labelIds']??null)||in_array('TRASH',$live['labelIds'],true))fail('Message membership changed. Sync before deleting.',409);
+                    $undoBefore['meta']['labelIds']=$live['labelIds'];
+                }
+                $undoBefore=['id'=>$undoBefore['id'],'meta'=>$undoBefore['meta']];
+                unset($undoBefore['meta']['rawBase64'],$undoBefore['meta']['raw'],$undoBefore['meta']['headersBase64']);
+                $undoToken=mail_undo_receipt(['before'=>$undoBefore],'pending');
+            }
             $record=$action==='move' && $destination!=='' && $destination!==$accountId
                 ?with_account_mail_mutation($destination,fn()=>transfer_remote_mail($current,account($destination),(string)($input['folder']??'')))
                 :(in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''),$destination!=='')
-                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action)));
+                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action,$undoBefore)));
             $ids->execute([$accountId]);
-            return ['record'=>$record,'removedIds'=>array_values(array_diff($before,$ids->fetchAll(PDO::FETCH_COLUMN)))];
+            $result=['record'=>$record,'removedIds'=>array_values(array_diff($before,$ids->fetchAll(PDO::FETCH_COLUMN)))];
+            if($undoBefore!==null&&($record['meta']['folder']??'')==='Trash'){
+                $after=['id'=>$record['id'],'meta'=>array_intersect_key($record['meta'],array_flip(['account','providerId','serverFolder','uidValidity','source','labelIds']))];
+                db()->prepare("UPDATE mail_undo SET state='ready',payload=? WHERE token=?")->execute([json_encode(['before'=>$undoBefore,'after'=>$after],JSON_THROW_ON_ERROR),$undoToken]);$result['undoToken']=$undoToken;
+            }
+            return $result;
         });
         if(($input['summary']??false)===true && $result['record']!==null)$result['record']=mail_list_record($result['record']);
         json_response($result);
+    }
+    if($route==='mail-undo'&&$method==='POST'){
+        session_write_close();$result=undo_mail_delete((string)($input['token']??''));
+        $result['record']=mail_list_record($result['record']);json_response($result);
     }
     fail('Route not found.',404);
 } catch (HttpError $e) { json_response(['error'=>$e->getMessage()],$e->getCode() ?: 400); }

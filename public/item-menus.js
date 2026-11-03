@@ -87,7 +87,7 @@ export function installItemMenus(env) {
             await env.commit();
             let count = 0;
             if (app === 'mail' && (['delete', 'trash', 'discard'].includes(id) || (id === 'archive' && rows.every(row => row.meta.remote)))) {
-                await env.deleteMailImmediately(rows, row => id === 'delete' ? env.api('delete', { id: row.id, revision: row.revision }) : env.api('mail-action', { id: row.id, revision: row.revision, action: id }));
+                await env.deleteMailImmediately(rows, row => id === 'delete' ? env.api('delete', { id: row.id, revision: row.revision, undoable: true }) : env.api('mail-action', { id: row.id, revision: row.revision, action: id, undoable: id === 'trash' }), ['delete', 'trash'].includes(id));
                 env.notice(`${rows.length} ${rows.length === 1 ? 'item' : 'items'} updated.`);
                 return;
             }
@@ -133,7 +133,7 @@ export function installItemMenus(env) {
             env.notice(`${count} ${count === 1 ? 'item' : 'items'} updated.`);
         };
         if (id === 'delete' || id === 'discard')
-            env.confirmation(id === 'delete' ? 'Delete selected items' : 'Discard copies', id === 'delete' ? `Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.` : `Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`, apply);
+            env.confirmation(id === 'delete' ? 'Delete selected items' : 'Discard copies', id === 'delete' ? (app === 'mail' ? `Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.` : `Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`) : `Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`, apply);
         else
             await apply();
     }

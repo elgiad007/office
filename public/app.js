@@ -21,7 +21,7 @@ const apps = {
     wiki: { name: 'Wiki', singular: 'page', empty: 'No pages yet.', hint: 'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].', icon: 'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3' },
     sheets: { name: 'Sheets', singular: 'workbook', empty: 'No workbooks yet.', hint: 'Create a workbook or import a CSV file.', icon: 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18' },
 };
-const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd' };
+const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd', undoDelete: 'u' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
@@ -29,6 +29,7 @@ let saveTimer, keySequence = '', sequenceTime = 0;
 let selectionAnchor = null, keyboardSelection = false;
 let sendingMail = false;
 const pendingMailDeletes = new Set();
+let lastMailDelete, undoingMailDelete = false;
 const failedMailActions = new Map();
 let mailDeleteVersion = 0;
 const pendingMailReads = new Map();
@@ -164,9 +165,9 @@ async function api(route, data) {
         if (result && payload.revision === result.previousRevision)
             payload = { ...payload, revision: result.record.revision };
     }
-    const account = ['mail-action', 'mail-files'].includes(route) ? expected?.meta.account || latestMail(payload?.id)?.meta.account
+    const account = route === 'mail-undo' ? payload?.account : ['mail-action', 'mail-files'].includes(route) ? expected?.meta.account || latestMail(payload?.id)?.meta.account
         : route === 'sync' ? payload?.id : ['mail-content', 'mail-folder-sync', 'mail-folders', 'mail-folder-manage'].includes(route) ? payload?.account : null;
-    const names = { 'mail-action': ({ trash: 'Moving mail to Trash', archive: 'Archiving mail', restore: 'Restoring mail to Inbox', read: 'Marking mail read', unread: 'Marking mail unread', move: 'Moving mail', discard: 'Discarding cached copy', 'keep-local': 'Saving local copy' })[payload?.action || ''] || 'Updating mail', sync: 'Synchronizing mail', 'mail-folders': 'Discovering folders', 'mail-folder-sync': 'Refreshing folder', 'mail-folder-manage': 'Updating folders', 'account-test': 'Testing connection', save: 'Saving item', delete: 'Deleting item', send: 'Sending mail', backup: 'Preparing backup', restore: 'Restoring backup', import: 'Importing items', 'import-items': 'Importing items' };
+    const names = { 'mail-undo': 'Undoing mail deletion', 'mail-action': ({ trash: 'Moving mail to Trash', archive: 'Archiving mail', restore: 'Restoring mail to Inbox', read: 'Marking mail read', unread: 'Marking mail unread', move: 'Moving mail', discard: 'Discarding cached copy', 'keep-local': 'Saving local copy' })[payload?.action || ''] || 'Updating mail', sync: 'Synchronizing mail', 'mail-folders': 'Discovering folders', 'mail-folder-sync': 'Refreshing folder', 'mail-folder-manage': 'Updating folders', 'account-test': 'Testing connection', save: 'Saving item', delete: 'Deleting item', send: 'Sending mail', backup: 'Preparing backup', restore: 'Restoring backup', import: 'Importing items', 'import-items': 'Importing items' };
     const label = state.accounts.find(row => row.id === account)?.label;
     const tracking = activity.queued(names[route] ? (label ? label + ': ' : '') + names[route] + '…' : null);
     const run = async () => {
@@ -251,6 +252,7 @@ function authView(status) {
     } };
 }
 async function boot() {
+    lastMailDelete = undefined;
     try {
         const status = await api('status');
         state.csrf = status.csrf;
@@ -297,9 +299,18 @@ function searchableText(record) {
     return (record.title + ' ' + record.body + ' ' + JSON.stringify(meta)).toLocaleLowerCase();
 }
 function filteredRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'mail' || (state.mailScope ? matchesMailScope(r, state.mailScope, state.accounts) : state.mailFolder === 'all' ? !['Recovery copies', 'Not in Inbox', 'Trash'].includes(r.meta.folder || '') : state.mailFolder === 'Recovery copies' ? ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '') : (r.meta.folder || 'Archive') === state.mailFolder)) && (!q || searchableText(r).includes(q))); }
-async function deleteMailImmediately(rows, operation) {
+async function deleteMailImmediately(rows, operation, undoable = false) {
     const ids = new Set(rows.map(r => r.id)), visible = filteredRows().map(r => r.id), currentId = state.current?.id;
     const context = JSON.stringify([state.mailFolder, state.mailScope, state.search]);
+    let gesture;
+    if (undoable) {
+        if (undoingMailDelete)
+            throw Error('Wait for deletion undo to finish.');
+        let finish;
+        const done = new Promise(resolve => { finish = resolve; });
+        gesture = { receipts: [], done, finish, currentId, context };
+        lastMailDelete = gesture;
+    }
     for (const id of ids) {
         pendingMailDeletes.add(id);
         failedMailActions.delete(id);
@@ -313,6 +324,8 @@ async function deleteMailImmediately(rows, operation) {
         const next = [...visible.slice(index + 1), ...visible.slice(0, index).reverse()].find(id => !ids.has(id));
         state.current = state.rows.find(r => r.id === next) || null;
     }
+    if (gesture)
+        gesture.nextId = state.current?.id;
     renderList();
     if (advance)
         renderDetail();
@@ -339,6 +352,8 @@ async function deleteMailImmediately(rows, operation) {
             count++;
             pendingMailDeletes.delete(row.id);
             mailDeleteVersion++;
+            if (gesture && result.undoToken)
+                gesture.receipts.push({ token: result.undoToken, account: row.meta.account, id: row.id, postId: result.record?.id });
             for (const id of result?.removedIds || [])
                 reconciled.add(id);
             if (state.app === 'mail' && result?.removedIds?.length) {
@@ -381,7 +396,51 @@ async function deleteMailImmediately(rows, operation) {
         throw Error((rows.length > 1 ? `${count} of ${rows.length} items updated. ` : '') + `Mail action failed; ${remaining.length === 1 ? 'message restored' : 'remaining messages restored'}. ${error.message}`);
     }
     finally {
+        gesture?.finish();
         refresh();
+    }
+}
+async function undoMailDelete() {
+    if (state.app !== 'mail' || undoingMailDelete)
+        return;
+    const gesture = lastMailDelete;
+    if (!gesture) {
+        notice('No mail deletion to undo.');
+        return;
+    }
+    undoingMailDelete = true;
+    const selectedAtUndo = state.current?.id;
+    try {
+        await gesture.done;
+        const failures = [], restored = [];
+        for (const receipt of [...gesture.receipts]) {
+            try {
+                const result = await api('mail-undo', { token: receipt.token, account: receipt.account });
+                mailDeleteVersion++;
+                gesture.receipts = gesture.receipts.filter(r => r !== receipt);
+                restored.push(result.record.id);
+                for (const [id, copy] of trashedMailCopies)
+                    if (copy.id === receipt.id || copy.id === receipt.postId || id === receipt.id)
+                        trashedMailCopies.delete(id);
+            }
+            catch (cause) {
+                failures.push(asError(cause).message);
+            }
+        }
+        if (state.app === 'mail' && restored.length) {
+            const sameContext = gesture.context === JSON.stringify([state.mailFolder, state.mailScope, state.search]) && selectedAtUndo === gesture.nextId && state.current?.id === selectedAtUndo;
+            await load(sameContext && restored.includes(gesture.currentId) ? gesture.currentId : undefined, { preserveSelection: true, selectFirst: false });
+            if (sameContext)
+                document.querySelector('#selected-item')?.focus({ preventScroll: true });
+        }
+        if (!gesture.receipts.length && lastMailDelete === gesture)
+            lastMailDelete = undefined;
+        if (failures.length)
+            throw Error(`${restored.length} messages restored. ${failures.join(' ')}`);
+        notice(restored.length ? `${restored.length} ${restored.length === 1 ? 'message' : 'messages'} restored.` : 'No confirmed deletions to undo.');
+    }
+    finally {
+        undoingMailDelete = false;
     }
 }
 function mailDeletionReload() {
@@ -1204,7 +1263,7 @@ async function syncAccounts(manual = true) {
 }
 function help() {
     const k = keys();
-    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete selected mail, or current item; connected mail moves to Trash'], [k.archive, 'Archive selected messages'], [k.move, 'Quick Move to folder'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
+    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete selected mail, or current item; connected mail moves to Trash'], [k.undoDelete, 'Undo the last mail deletion (15 minutes)'], [k.archive, 'Archive selected messages'], [k.move, 'Quick Move to folder'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
 }
 async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
@@ -1423,11 +1482,11 @@ async function deleteSelectedMail() {
         const current = ids.map(id => state.rows.find(r => r.id === id));
         if (current.some(r => !r || protectedMail(r) || !!r.meta.remote !== !!rows.find(original => original.id === r.id).meta.remote))
             throw Error('The selected messages changed. Select them again.');
-        await deleteMailImmediately(current.filter(isPresent), r => r.meta.remote ? api('mail-action', { id: r.id, revision: r.revision, action: 'trash' }) : api('delete', { id: r.id, revision: r.revision }));
+        await deleteMailImmediately(current.filter(isPresent), r => r.meta.remote ? api('mail-action', { id: r.id, revision: r.revision, action: 'trash', undoable: true }) : api('delete', { id: r.id, revision: r.revision, undoable: true }), true);
         notice(rows.length === 1 ? (local ? 'Item deleted.' : 'Moved to Trash.') : `${rows.length} items updated.`);
     };
     if (local)
-        confirmation(rows.length === 1 ? 'Delete item' : 'Delete selected messages', `Permanently delete ${local} local message(s) and their revision history?${local < rows.length ? ` Also move ${rows.length - local} connected message(s) to Trash.` : ''}`, apply);
+        confirmation(rows.length === 1 ? 'Delete item' : 'Delete selected messages', `Delete ${local} local message(s)? Undo is available for fifteen minutes.${local < rows.length ? ` Also move ${rows.length - local} connected message(s) to Trash.` : ''}`, apply);
     else
         await apply();
 }
@@ -1481,7 +1540,7 @@ async function mailAction(action, record = state.current) {
         return;
     await commit();
     if (['trash', 'discard'].includes(action)) {
-        await deleteMailImmediately([record], r => api('mail-action', { id: r.id, revision: r.revision, action }));
+        await deleteMailImmediately([record], r => api('mail-action', { id: r.id, revision: r.revision, action, undoable: action === 'trash' }), action === 'trash');
         notice(action === 'trash' ? 'Moved to Trash.' : 'Cached copy discarded.');
         return;
     }
@@ -1758,6 +1817,12 @@ document.addEventListener('keydown', event => {
             else if (state.current)
                 document.querySelector('#detail [data-action="delete"]')?.click();
         }
+        return;
+    }
+    if (action === 'undoDelete' && state.app === 'mail') {
+        event.preventDefault();
+        if (!event.repeat && !event.isComposing)
+            void attempt(undoMailDelete);
         return;
     }
     if (action === 'archive') {

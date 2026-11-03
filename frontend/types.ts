@@ -95,13 +95,14 @@ export interface Status {
   csrf: string; preferences: Preferences;
 }
 export interface MutationResult { record: OfficeRecord; removedIds?: string[] }
-export interface MailActionResult { record: OfficeRecord | null; removedIds?: string[] }
+export interface MailActionResult { record: OfficeRecord | null; removedIds?: string[]; undoToken?: string }
 export interface ApiError extends Error { status?: number; code?: string; record?: OfficeRecord }
 export interface ApiResponses {
   status: Status;
   accounts: { accounts: Account[] };
   setup: { csrf: string }; login: { csrf: string }; logout: { ok: boolean };
-  save: MutationResult; delete: { ok: boolean }; 'mail-action': MailActionResult;
+  save: MutationResult; delete: { ok: boolean; undoToken?: string }; 'mail-action': MailActionResult;
+  'mail-undo': MutationResult;
   send: { ok: boolean };
   'mail-folders': { folders: MailFolder[] };
   'mail-folder-manage': { folders: MailFolder[] };
@@ -129,8 +130,8 @@ export interface RequestApi {
 }
 export type Attempt = <T>(fn: () => T | Promise<T>) => Promise<T | undefined>;
 export type Confirmation = (title: string, message: string, action: () => unknown) => void;
-export type DeleteResult = {ok?: boolean; record?: OfficeRecord | null; removedIds?: string[]};
-export type DeleteMail = (rows: OfficeRecord[], operation: (row: OfficeRecord) => Promise<DeleteResult>) => Promise<void>;
+export type DeleteResult = {ok?: boolean; record?: OfficeRecord | null; removedIds?: string[]; undoToken?: string};
+export type DeleteMail = (rows: OfficeRecord[], operation: (row: OfficeRecord) => Promise<DeleteResult>, undoable?: boolean) => Promise<void>;
 export interface FolderEnvironment {
   state: AppState; api: RequestApi; commit: () => Promise<void>; load: (preferId?: string, options?: {preserveSelection?: boolean}) => Promise<void>;
   notice: (text: string, error?: boolean) => void; modal: (title: string, body: string) => void;

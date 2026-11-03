@@ -24,6 +24,19 @@ async function start(){
 async function setup(c){const before=c.cookie;const result=await c.call('setup',{token:(await readFile(c.dir+'/setup-token.txt','utf8')).trim(),password:'test-password-only-123'});c.csrf=result.csrf;assert.notEqual(c.cookie,before);}
 try{
  const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ const undoMail=(await a.call('save',{kind:'mail',title:'HTTP undo mail',body:'Complete local mail body',meta:{folder:'Archive',rawBase64:Buffer.from('Original EML').toString('base64')}})).record;
+ const undoHistory=await a.call('history&id='+undoMail.id);
+ await a.call('delete',{id:undoMail.id,revision:undoMail.revision,undoable:true},403,'bad-token');
+ const undoDeleted=await a.call('delete',{id:undoMail.id,revision:undoMail.revision,undoable:true});assert.match(undoDeleted.undoToken,/^[a-f0-9]{48}$/);
+ await a.call('record&id='+undoMail.id,undefined,404);
+ await a.call('mail-undo',{token:undoDeleted.undoToken},403,'bad-token');
+ const undoRestored=await a.call('mail-undo',{token:undoDeleted.undoToken});assert.equal(undoRestored.record.id,undoMail.id);
+ assert.deepEqual((await a.call('record&id='+undoMail.id)).record,undoMail);assert.deepEqual(await a.call('history&id='+undoMail.id),undoHistory);
+ await a.call('mail-undo',{token:undoDeleted.undoToken},409);await a.call('mail-undo',{token:'unknown'},410);
+ await a.call('delete',{id:undoMail.id,revision:undoMail.revision});
+ const undoTask=(await a.call('save',{kind:'tasks',title:'Generic delete remains distinct',body:'',meta:{}})).record;
+ const genericDelete=await a.call('delete',{id:undoTask.id,revision:undoTask.revision,undoable:true});assert.equal(genericDelete.undoToken,undefined);
+ console.log('PASS HTTP mail delete/undo authentication, CSRF, full record/history, one-use receipt and non-mail isolation');
  await a.call('activity',{action:'clear'},403,'bad-token');
  await a.call('activity',{action:'notice',message:'Activity visibility fixture',error:true});
  assert.ok((await a.call('activity')).entries.some(entry=>entry.message==='Activity visibility fixture'&&entry.level==='error'));
