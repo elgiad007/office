@@ -6,7 +6,7 @@
     "build": "node scripts/frontend.mjs",
     "build:check": "node scripts/frontend.mjs --check",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/frontend.mjs --check && node --test tests/formats.test.mjs"
+    "test": "node scripts/frontend.mjs --check && node --test tests/formats.test.mjs tests/message-headers.test.mjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

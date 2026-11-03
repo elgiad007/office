@@ -1,3 +1,4 @@
+import {testMessageHeaders} from './message-headers.browser.mjs';
 import {createRequire} from 'node:module';
 import {readFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
@@ -104,7 +105,7 @@ try{
  await testQuickMove(page,url);
  await testMailHtml(page,url);
  await testMailCompact(page,url);
- await testMailReaderSync(page,url);
+ await testMessageHeaders(page,url);await testMailReaderSync(page,url);
  await testItemMenus(page,url);
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.screenshot({path:'test-results/mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
  assert.deepEqual(errors,[]);console.log('PASS browser: setup, all local apps, Vim navigation, autosave, persistence, wiki safety/backlinks, formulas, theme, mobile layout, CSRF, imports and stale writes.');

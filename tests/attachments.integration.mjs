@@ -1,3 +1,4 @@
+import {testMessageHeaders} from './message-headers.browser.mjs';
 import {createRequire} from 'node:module';
 import {spawn} from 'node:child_process';
 import {mkdir,mkdtemp,readFile} from 'node:fs/promises';
@@ -37,7 +38,7 @@ try{
     await page.goto(url);await page.getByLabel('Setup token',{exact:true}).fill((await readFile(data+'/setup-token.txt','utf8')).trim());
     await page.getByLabel('Create password (at least 12 characters)',{exact:true}).fill('attachment-tests-only-123');
     await page.getByRole('button',{name:'Create workspace',exact:true}).click();await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();
-    await testMailReaderSync(page,url);await testMailCompact(page,url);await testAttachments(page,url);await testMailHtml(page,url);await testMailCache(page,url);await testMailHeaders(page,url);await testLargeMail(page,url);
+    await testMessageHeaders(page,url);await testMailReaderSync(page,url);await testMailCompact(page,url);await testAttachments(page,url);await testMailHtml(page,url);await testMailCache(page,url);await testMailHeaders(page,url);await testLargeMail(page,url);
     if(errors.length)throw Error(errors.join('\n'));
     console.log('PASS attachment integration and mail HTML, original-cache, header and large-message regressions.');
   }catch(error){console.error('Browser errors:',errors,'Pending requests:',Array.from(requests));console.error(serverLog.join('').slice(-3000));console.error((await page.locator('body').innerText()).slice(-1600));await page.screenshot({path:'test-results/attachments-failure.png',fullPage:true});throw error;}

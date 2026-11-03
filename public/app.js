@@ -6,6 +6,7 @@ import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
 import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail } from './mail-folders.js';
 import { mailBody, mailDisplayControls, bindMailReader } from './mail-reader.js';
+import { messageHeaders, setupHeaderViewer } from './mail-headers.js';
 import { attachmentSection, bindAttachments, waitForAttachments } from './mail-attachments.js';
 import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
@@ -708,7 +709,7 @@ function detailContent(r) {
         const account = state.accounts.find(a => a.id === m.account);
         const metadata = [['From', m.from || 'Unknown'], ['To', m.to || ''], ['Date', date], ...(validDate ? [['Local time', parsed.toLocaleString()]] : []), ...(m.account ? [['Account', account?.label || m.account]] : []), ['Location', mailLocation(r)], ...(m.serverFolder ? [['Server folder', m.serverFolder]] : []), ...(m.source ? [['Source', m.source]] : [])];
         const provenance = m.remote ? `<p class="muted">Downloaded copy from ${e(mailLocation(r))}. Mail actions update the provider; Sync now refreshes its location.${m.headerOnly ? ' Only headers are cached.' : ''}</p>` : '';
-        return `<header class="mail-reader-header"><div class="mail-subject-row"><h1>${e(r.title)}</h1><div class="mail-header-badges">${m.folder ? `<span class="badge">${e(mailLocation(r))}</span>` : ''}${m.remote ? '<span class="badge">Cached</span>' : ''}</div></div><div class="mail-envelope-row"><span class="mail-correspondents" title="${e((m.from || 'Unknown') + ' → ' + (m.to || ''))}">${e(m.from || 'Unknown')} <span aria-hidden="true">→</span><span class="file-input">to</span> ${e(m.to || 'Unspecified recipient')}</span><span class="mail-compact-date" title="${e(date)}">${e(compactDate)}</span><details data-mail-disclosure="metadata" class="mail-metadata"><summary>Details</summary><div class="mail-reader-popover mail-metadata-popover"><dl>${metadata.map(([label, value]) => `<div><dt>${e(label)}</dt><dd>${e(value)}</dd></div>`).join('')}</dl>${provenance}</div></details></div>${recovery ? '<p class="recurrence-note" role="status">This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.</p>' : ''}<div class="head-actions mail-reader-actions">${m.from ? '<button data-action="reply">Reply</button>' : ''}<button data-action="forward">Forward</button>${actions}${attachmentSection(r)}<details data-mail-disclosure="more" class="mail-reader-more"><summary>More</summary><div class="mail-reader-popover mail-more-popover">${!recovery && m.remote ? '<button data-action="file-mail">Move / Labels</button>' : ''}${!recovery ? `<button data-action="read">Mark ${m.read ? 'unread' : 'read'}</button>` : ''}<button data-action="export">Export</button>${(m.rawBase64 || m.raw || r.hasOriginal) ? '<button data-action="eml">Download original EML</button>' : ''}${mailDisplayControls(r, state.prefs)}</div></details></div></header>${mailBody(r, state.prefs)}`;
+        return `<header class="mail-reader-header"><div class="mail-subject-row"><h1>${e(r.title)}</h1><div class="mail-header-badges">${m.folder ? `<span class="badge">${e(mailLocation(r))}</span>` : ''}${m.remote ? '<span class="badge">Cached</span>' : ''}</div></div><div class="mail-envelope-row"><span class="mail-correspondents" title="${e((m.from || 'Unknown') + ' → ' + (m.to || ''))}">${e(m.from || 'Unknown')} <span aria-hidden="true">→</span><span class="file-input">to</span> ${e(m.to || 'Unspecified recipient')}</span><span class="mail-compact-date" title="${e(date)}">${e(compactDate)}</span><details data-mail-disclosure="metadata" class="mail-metadata"><summary>Details</summary><div class="mail-reader-popover mail-metadata-popover"><dl>${metadata.map(([label, value]) => `<div><dt>${e(label)}</dt><dd>${e(value)}</dd></div>`).join('')}</dl>${provenance}<button data-action="message-headers">View message headers</button></div></details></div>${recovery ? '<p class="recurrence-note" role="status">This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.</p>' : ''}<div class="head-actions mail-reader-actions">${m.from ? '<button data-action="reply">Reply</button>' : ''}<button data-action="forward">Forward</button>${actions}${attachmentSection(r)}<details data-mail-disclosure="more" class="mail-reader-more"><summary>More</summary><div class="mail-reader-popover mail-more-popover">${!recovery && m.remote ? '<button data-action="file-mail">Move / Labels</button>' : ''}${!recovery ? `<button data-action="read">Mark ${m.read ? 'unread' : 'read'}</button>` : ''}<button data-action="export">Export</button>${(m.rawBase64 || m.raw || r.hasOriginal) ? '<button data-action="eml">Download original EML</button>' : ''}${mailDisplayControls(r, state.prefs)}</div></details></div></header>${mailBody(r, state.prefs)}`;
     }
     if (state.app === 'wiki' && state.wikiPreview)
         return `<span class="eyebrow">${e(r.title.split(':').slice(0, -1).join(' / ') || 'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x => x.id !== r.id && x.body.includes('[[' + r.title + ']]')).map(x => `<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('') || '<p class="muted">No pages link here yet.</p>'}</div>`;
@@ -987,6 +988,22 @@ function modal(title, body) { dialog.innerHTML = `<div class="dialog-head"><h2 i
 function confirmation(title, message, action) { modal(title, `<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`); dialog.querySelector('#cancel').onclick = () => dialog.close(); dialog.querySelector('#cancel').focus(); dialog.querySelector('#confirm').onclick = async () => { dialog.close(); await attempt(action); }; }
 function download(name, text, type = 'text/plain') { const url = URL.createObjectURL(new Blob([text], { type })); const a = document.createElement('a'); a.href = url; a.download = name.replace(/[\\/:*?"<>|]/g, '_'); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function originalMail(record) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64), c => c.charCodeAt(0)) : record.meta.raw || ''; }
+async function viewMessageHeaders() {
+    const original = state.current;
+    // Read the local record only: mail-content can contact the provider.
+    const record = original.summary ? (await api(`record&id=${encodeURIComponent(original.id)}`)).record : original;
+    if (state.current?.id !== original.id || state.app !== 'mail')
+        return;
+    const headers = messageHeaders(record.meta);
+    document.querySelector('#detail [data-mail-disclosure="metadata"]').open = false;
+    modal('Message headers', headers ? '<div class="message-headers-tools"><label>Search headers <input type="search" data-header-search aria-describedby="header-search-help" autocomplete="off" spellcheck="false"></label><span data-header-count role="status"></span><button data-header-previous disabled>Previous</button><button data-header-next disabled>Next</button><button data-header-copy>Copy all headers</button></div><p id="header-search-help" class="recurrence-note">/ focuses search; n / p move between matches. In search, Enter / Shift+Enter move between matches.</p><p data-header-status role="status"></p><pre class="message-headers" tabindex="0" aria-label="Original message headers"></pre>' : '<p>Original message headers are unavailable for this message.</p>');
+    if (headers)
+        setupHeaderViewer(dialog, headers);
+    dialog.addEventListener('close', () => {
+        if (state.current?.id === original.id)
+            document.querySelector('#detail [data-mail-disclosure="metadata"] > summary')?.focus();
+    }, { once: true });
+}
 async function fullMailRecord(record) {
     if (record.meta.headerOnly) {
         await pendingMailReads.get(record.id);
@@ -1298,6 +1315,8 @@ async function handleClick(event) {
             await api('logout', {});
             await boot();
         }
+        if (action === 'message-headers')
+            await viewMessageHeaders();
         if (action === 'eml') {
             const record = await fullMailRecord(state.current);
             download(record.title + '.eml', originalMail(record), 'message/rfc822');

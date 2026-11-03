@@ -281,3 +281,14 @@
 .quick-move-results [aria-selected="true"] { background: var(--wash); border-color: var(--accent); }
 .quick-move-results small { color: var(--muted); }
 #quick-move-search { width: 100%; }
+
+#dialog:has(.message-headers) { width: min(1000px, 93vw); max-height: 92dvh; }
+.message-headers-tools ~ .message-headers { max-height: min(55vh, 45dvh); }
+.message-headers { max-height: 65vh; overflow: auto; white-space: pre; user-select: text; padding: 12px; border: 1px solid var(--line); }
+.message-headers-tools { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
+.message-headers-tools label { flex: 1 1 220px; min-width: 0; }
+.message-headers-tools input { display: block; width: 100%; }
+.message-headers-tools [data-header-count] { align-self: center; }
+.message-headers mark { background: #f8dc78; color: #181818; }
+.message-headers mark.active { background: #ef9d37; color: #181818; outline: 2px solid currentColor; }
+.mail-metadata-popover > button { margin-top: 12px; }
