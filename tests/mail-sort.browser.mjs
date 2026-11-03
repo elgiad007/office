@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {openMailMore} from './mail-reader-ui.mjs';
 
 export async function testMailSort(page,url) {
   const mail=(id,date,extra={})=>({id,kind:'mail',title:'Sort '+id,body:'Body '+id,revision:1,updated:'2026-10-29T20:00:00Z',meta:{remote:true,account:'sort-account',folder:'Inbox',from:'sender@example.com',date,...extra}});
@@ -31,10 +32,11 @@ export async function testMailSort(page,url) {
     await page.goto(url+'#mail');await page.reload();await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
     await selected('newest');assert.deepEqual(await order(),expected);
     await page.locator('[data-id="tie-a"]').click();
+    await openMailMore(page);
     await page.getByRole('button',{name:'Mark unread',exact:true}).waitFor();
     assert.deepEqual(await order(),expected);await selected('tie-a');
     await page.getByRole('button',{name:'Mark unread',exact:true}).click();
-    await page.getByRole('button',{name:'Mark read',exact:true}).waitFor();assert.deepEqual(await order(),expected);
+    await page.getByRole('button',{name:'Mark read',exact:true,includeHidden:true}).waitFor({state:'attached'});assert.deepEqual(await order(),expected);
     const refreshed=page.waitForResponse(response=>response.url().includes('r=records'));
     await page.locator('#sync-button').click();await (await refreshed).finished();
     await selected('tie-a');assert.deepEqual(await order(),expected);assert.ok(syncs>=2);

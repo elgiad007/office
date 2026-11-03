@@ -12,7 +12,9 @@ let lastError='';
 export async function waitForAttachments(){const active=pending;await active;if(active && lastError)throw Error(lastError);}
 export function attachmentSection(record: OfficeRecord) {
   const draft=record.meta.folder==='Drafts';
-  return `<section class="mail-attachments" aria-label="Attachments" data-mail-files><div class="head-actions"><strong>Attachments</strong>${draft?'<button type="button" data-attach>Add files</button><input class="file-input" type="file" multiple data-attach-input aria-label="Attach files">':'<button type="button" data-file-list>Show attachments</button>'}<button type="button" data-save-files hidden>Save all</button></div><div data-file-rows></div><p class="muted" data-file-status role="status">${draft?'Choose files or drop them into this message. Up to 10 MB per file, 20 MB total.':'Files download when you choose Preview, Download, or Save all.'}</p></section>`;
+  if(!draft&&record.meta.hasAttachments===false&&!record.meta.attachments?.length)return '';
+  const contents=`<div class="head-actions">${draft?'<strong>Attachments</strong><button type="button" data-attach>Add files</button><input class="file-input" type="file" multiple data-attach-input aria-label="Attach files">':'<button type="button" data-file-list>Check attachments</button>'}<button type="button" data-save-files hidden>Save all</button></div><div data-file-rows></div><p class="muted" data-file-status role="status">${draft?'Choose files or drop them into this message. Up to 10 MB per file, 20 MB total.':'Files download when you choose Preview, Download, or Save all.'}</p>`;
+  return draft?`<section class="mail-attachments" aria-label="Attachments" data-mail-files>${contents}</section>`:`<details class="mail-files-disclosure" data-mail-disclosure="files" data-mail-files><summary>Attachments${record.meta.attachments?.length?' ('+record.meta.attachments.length+')':''}</summary><section class="mail-reader-popover mail-files-popover" aria-label="Attachments">${contents}</section></details>`;
 }
 const fileUrl=(id: string,part?: string)=>`mail-file.php?id=${encodeURIComponent(id)}${part===undefined?'&all=1':'&part='+encodeURIComponent(part)}`;
 function saveUrl(url: string) {const link=document.createElement('a');link.href=url;link.download='';document.body.append(link);link.click();link.remove();}
@@ -37,12 +39,17 @@ export function bindAttachments(panel: HTMLElement,record: OfficeRecord,env: Att
   const request=async(action: string,extra: object={})=>{
     await env.commit();
     const response=await env.api('mail-files',{id:record.id,revision:record.revision,action,...extra});
-    record.revision=response.record.revision;files=response.attachments;record.meta.attachments=files;
+    record.revision=response.record.revision;files=response.attachments;record.meta.attachments=files;record.meta.hasAttachments=response.record.meta.hasAttachments;
+    const summary=section.querySelector('summary');if(summary)summary.textContent=files.length?'Attachments ('+files.length+')':'Attachments (none)';
     env.update(response.record);render();return response;
   };
   const prepare=async(part?: string)=>{await request('prepare',part===undefined?{}:{part});status.textContent='Available offline.';};
   const load=section.querySelector<HTMLButtonElement>('[data-file-list]');
   if(load)load.onclick=()=>run('Loading attachment list…',async()=>{await request('list');status.textContent=files.length?'Choose a file to preview or download.':'No file attachments.';});
+  // Fetch only the manifest when opened. File bytes remain on demand.
+  if(!draft)section.addEventListener('toggle',()=>{
+    if((section as HTMLDetailsElement).open&&!files.length&&record.meta.hasAttachments!==false)load?.click();
+  });
   saveAll.onclick=()=>run('Preparing all attachments…',async()=>{await prepare();saveUrl(fileUrl(record.id));});
   rows.onclick=event=>{
     const button=(event.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button)return;

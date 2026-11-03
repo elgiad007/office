@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {openMailAttachments} from './mail-reader-ui.mjs';
 
 function samplePdf(){
   const stream='BT /F1 18 Tf 30 100 Td (Attachment PDF preview) Tj ET';
@@ -41,6 +42,7 @@ export async function testAttachments(page,url){
   const full=await(await page.request.get(url+'api.php?r=record&id='+draft.id)).json();draft=full.record;
   const archived=await post('save',{...draft,meta:{...draft.meta,folder:'Archive',from:'sender@example.com'}});draft=archived.record;
   await page.reload();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'Attachment workflow test'}).click();
+  await openMailAttachments(page);
   await page.locator('.mail-attachment').filter({hasText:'logo.png'}).getByRole('button',{name:'Preview',exact:true}).click();
   await page.locator('#dialog iframe').waitFor();
   const previewUrl=await page.locator('#dialog iframe').getAttribute('src'),preview=await page.request.get(url+previewUrl);assert.equal(preview.status(),200);assert.equal(preview.headers()['content-type'],'image/png');assert.match(preview.headers()['content-security-policy'],/sandbox/);
@@ -61,12 +63,13 @@ export async function testAttachments(page,url){
   const unauth=await page.context().browser().newContext();try{const response=await unauth.request.get(url+'mail-file.php?id='+draft.id+'&part='+restored.attachments[0].part);assert.equal(response.status(),401);}finally{await unauth.close();}
   const pdf=samplePdf();await post('import',{format:'eml',base64:Buffer.from('Subject: PDF preview verification\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=sample.pdf\r\nContent-Transfer-Encoding: base64\r\n\r\n'+pdf.toString('base64')).toString('base64')});
   await page.reload();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'PDF preview verification'}).click();
+  await openMailAttachments(page);
   await page.getByRole('button',{name:'Preview',exact:true}).click();await page.locator('#dialog iframe').waitFor();
   const pdfPreview=await page.request.get(url+await page.locator('#dialog iframe').getAttribute('src'));assert.equal(pdfPreview.status(),200);assert.equal(pdfPreview.headers()['content-type'],'application/pdf');assert.deepEqual(await pdfPreview.body(),pdf);
   await page.locator('#dialog iframe').evaluate(frame=>new Promise(resolve=>{if(frame.contentDocument?.readyState==='complete')resolve();else {const timer=setTimeout(resolve,2000);frame.addEventListener('load',()=>{clearTimeout(timer);resolve();},{once:true});}}));
   await page.waitForTimeout(1500); // Let the browser's native PDF renderer paint its first page.
   await page.screenshot({path:'test-results/attachment-pdf-preview.png',fullPage:true});await page.getByRole('button',{name:'Close dialog',exact:true}).click();
-  await page.reload();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'Attachment workflow test'}).click();await page.screenshot({path:'test-results/attachments-desktop.png',fullPage:true});
+  await page.reload();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'Attachment workflow test'}).click();await openMailAttachments(page);await page.screenshot({path:'test-results/attachments-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});await page.locator('[data-mail-files]').scrollIntoViewIfNeeded();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:'test-results/attachments-mobile.png',fullPage:true});await page.setViewportSize({width:1440,height:1000});
   console.log('PASS attachment UI/API: attach, drag/drop, download bytes, reload, remove, preview isolation, ZIP, forward/reply, backup/restore, authentication and active-content rejection.');
 }

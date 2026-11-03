@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {openMailMore} from './mail-reader-ui.mjs';
 
 export async function testMailHtml(page,url) {
   const status=await (await page.request.get(url+'api.php?r=status')).json();
@@ -9,6 +10,14 @@ export async function testMailHtml(page,url) {
   const raw=['Subject: HTML reader verification','Content-Type: multipart/related; boundary=related','','--related','Content-Type: multipart/alternative; boundary=alternative','','--alternative','Content-Type: text/plain; charset=UTF-8','','Newsletter text alternative','--alternative','Content-Type: text/html; charset=UTF-8','',''+themedHtml,'--alternative--','--related','Content-Type: image/png','Content-ID: <logo>','Content-Disposition: inline; filename=logo.png','Content-Transfer-Encoding: base64','',pixel,'--related--',''].join('\r\n');
   const imported=await page.request.post(url+'api.php?r=import',{headers,data:{format:'eml',base64:Buffer.from(raw).toString('base64')}});
   assert.equal(imported.status(),200);
+  const marginCases=[
+    ['CSS','<html><head><style>body{margin:24px 12px 18px 9px}</style></head><body><div>Sender margins</div></body></html>',['24px','12px','18px','9px']],
+    ['inline','<html><body style="margin:27px 13px 19px 8px"><div>Sender margins</div></body></html>',['27px','13px','19px','8px']],
+  ];
+  for(const [name,body] of marginCases){
+    const source='Subject: Sender margin '+name+'\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n'+body;
+    assert.equal((await page.request.post(url+'api.php?r=import',{headers,data:{format:'eml',base64:Buffer.from(source).toString('base64')}})).status(),200);
+  }
   let remoteRequests=0;
   const routePattern='https://mail-images.invalid/**';
   await page.route(routePattern,route=>{remoteRequests++;return route.fulfill({contentType:'image/png',body:Buffer.from(pixel,'base64')});});
@@ -24,6 +33,14 @@ export async function testMailHtml(page,url) {
     assert.equal(remoteRequests,0);
     assert.equal(await page.evaluate(()=>window.mailExecuted),undefined);
     assert.equal(await frame.getByRole('link',{name:'Visit website',exact:true}).getAttribute('target'),'_blank');
+    const bodyMargins=()=>frame.locator('body').evaluate(node=>{const style=getComputedStyle(node);return [style.marginTop,style.marginRight,style.marginBottom,style.marginLeft];});
+    assert.deepEqual(await bodyMargins(),['0px','16px','16px','16px'],'Office adds no top body margin while retaining side/bottom spacing');
+    assert.equal(await page.locator('.mail-html').evaluate(node=>getComputedStyle(node).paddingTop),'8px','Reader inset sits outside sender-controlled HTML');
+    for(const [name,,margins] of marginCases){
+      await page.locator('.item').filter({hasText:'Sender margin '+name}).click();await frame.getByText('Sender margins',{exact:true}).waitFor();
+      assert.deepEqual(await bodyMargins(),margins,'Sender-authored '+name+' body margins are preserved');
+    }
+    await page.locator('.item').filter({hasText:'HTML reader verification'}).click();
     for(const theme of ['light','dark','system']) {
       await page.emulateMedia({colorScheme:'dark'});
       await page.request.post(url+'api.php?r=preferences',{headers,data:{preferences:{...status.preferences,theme,accent:'blue',mailDisplay:'html'}}});
@@ -52,7 +69,7 @@ export async function testMailHtml(page,url) {
           assert.ok(contrast>=4.5,`${selector} has readable dark-mode contrast: ${contrast}`);
         }
         await page.screenshot({path:'test-results/mail-html-dark.png',fullPage:true});
-        await page.getByRole('button',{name:'Original colors',exact:true}).click();
+        await openMailMore(page);await page.getByRole('button',{name:'Original colors',exact:true}).click();
         await frame.getByText('Sender colors',{exact:true}).waitFor();
         assert.equal(await page.getByRole('button',{name:'Original colors',exact:true}).getAttribute('aria-pressed'),'true');
       }
@@ -81,10 +98,10 @@ export async function testMailHtml(page,url) {
     assert.match(response.headers()['content-security-policy'],/sandbox allow-popups/);
     const anonymous=await fetch(new URL(src,url));assert.equal(anonymous.status,401);
     await page.screenshot({path:'test-results/mail-html.png',fullPage:true});
-    await page.getByRole('button',{name:'Text only',exact:true}).click();
+    await openMailMore(page);await page.getByRole('button',{name:'Text only',exact:true}).click();
     assert.equal(await page.locator('.mail-body').textContent(),'Newsletter text alternative');
     assert.equal(await page.locator('.mail-html').count(),0);
-    await page.getByRole('button',{name:'HTML',exact:true}).click();
+    await openMailMore(page);await page.getByRole('button',{name:'HTML',exact:true}).click();
     await page.getByRole('button',{name:'Load images',exact:true}).click();
     await frame.getByAltText('Remote logo').evaluate(img=>img.decode());
     assert.ok(remoteRequests>0);
@@ -97,7 +114,7 @@ export async function testMailHtml(page,url) {
     assert.equal(await page.locator('.mail-body').textContent(),'Newsletter text alternative');
     assert.equal(await page.locator('.mail-html').count(),0);
     await page.setViewportSize({width:390,height:844});
-    await page.getByRole('button',{name:'HTML',exact:true}).click();
+    await openMailMore(page);await page.getByRole('button',{name:'HTML',exact:true}).click();
     await frame.getByText('Styled newsletter',{exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await page.screenshot({path:'test-results/mail-html-mobile.png',fullPage:true});

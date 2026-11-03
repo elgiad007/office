@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {openMailMore} from './mail-reader-ui.mjs';
 
 export async function testMailCache(page,url) {
   await page.goto('about:blank');
@@ -21,6 +22,7 @@ export async function testMailCache(page,url) {
     assert.equal(originals,0,'Browsing text does not fetch original blobs');
     await page.locator('#search').fill('Searchable message body');assert.equal(await page.locator('#items .item').count(),1,'Body search works without originals');
     for(let attempt=0;attempt<2;attempt++){
+      await openMailMore(page);
       const downloaded=page.waitForEvent('download');
       await page.getByRole('button',{name:'Download original EML',exact:true}).click();
       const download=await downloaded;assert.equal(download.suggestedFilename(),'Cached original.eml');

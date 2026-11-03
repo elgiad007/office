@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {openMailMore} from './mail-reader-ui.mjs';
 
 export async function testAccountFolders(page,url) {
   const accounts=[
@@ -62,7 +63,7 @@ export async function testAccountFolders(page,url) {
     assert.ok(requests.some(r=>r.action==='mail-folder-sync'&&r.input.limit===100));
     await page.locator('.item').filter({hasText:'Personal trip'}).click();await page.locator('#main').focus();await page.keyboard.press('v');
     await page.locator('.item').filter({hasText:'Personal booking'}).click();await page.locator('#main').focus();await page.keyboard.press('v');
-    await page.getByRole('button',{name:'Move / Labels',exact:true}).click();
+    await openMailMore(page);await page.getByRole('button',{name:'Move / Labels',exact:true}).click();
     await page.locator('#file-mail-form [name="folder"]').selectOption('Travel/Orders');await page.locator('#file-mail-form button').click();
     await page.getByRole('heading',{name:'No messages in this folder.',exact:true}).waitFor();
     assert.equal(requests.filter(r=>r.action==='mail-action').length,2,'bulk move files each selected message');
@@ -71,7 +72,7 @@ export async function testAccountFolders(page,url) {
     await open('imap-b','Travel');await page.locator('.item').filter({hasText:'Work trip'}).waitFor();assert.equal(await page.locator('.item').count(),1);
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'Work trip','Switching accounts selects mail from the new account');
     await open('gmail-a','Travel');await page.locator('.item').filter({hasText:'Label message'}).click();
-    await page.getByRole('button',{name:'Move / Labels',exact:true}).click();
+    await openMailMore(page);await page.getByRole('button',{name:'Move / Labels',exact:true}).click();
     await page.getByRole('heading',{name:'Organize with labels',exact:true}).waitFor();
     assert.equal(await page.locator('#file-mail-form [name="folder"] option[value="INBOX"]').count(),0,'Gmail organization offers custom labels');
     await page.locator('#file-mail-form [name="folder"]').selectOption('Label_travel');await page.locator('#file-mail-form [name="action"]').selectOption('unlabel');await page.locator('#file-mail-form button').click();

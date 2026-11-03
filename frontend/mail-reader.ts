@@ -2,6 +2,14 @@ import type {OfficeRecord, Preferences} from './types.js';
 import {escapeHtml as e} from './formats.js';
 
 const modes=new Map<string, string>(), imageConsent=new Set<string>(), originalColors=new Set<string>();
+let readerSize: ResizeObserver | undefined;
+let moreOpening: MutationObserver | undefined;
+function displayMode(record: OfficeRecord,prefs: Preferences) {return modes.get(record.id)||(prefs.mailDisplay==='text'?'text':'html');}
+export function mailDisplayControls(record: OfficeRecord,prefs: Preferences) {
+  if(record.meta.headerOnly||!record.meta.hasHtml)return '';
+  const mode=displayMode(record,prefs);
+  return `<div class="mail-view-controls" role="group" aria-label="Email display"><button data-mail-mode="html" aria-pressed="${mode==='html'}">HTML</button><button data-mail-mode="text" aria-pressed="${mode==='text'}">Text only</button>${mode==='html'?`<button data-mail-colors aria-pressed="${originalColors.has(record.id)}">Original colors</button><button data-mail-images ${imageConsent.has(record.id)?'disabled':''}>${imageConsent.has(record.id)?'External images enabled':'Load images'}</button><small>External images may report that you opened this email.</small>`:''}</div>`;
+}
 export function mailBody(record: OfficeRecord,prefs: Preferences) {
   if(record.meta.headerOnly===true){
     if(Number(record.meta.messageSize||0)<=1400000)return '<div class="mail-body"><p class="recurrence-note">Message headers are available offline. The message body downloads when opened while connected.</p><button data-download-body>Download message body</button><span data-body-status role="status"></span></div>';
@@ -9,12 +17,43 @@ export function mailBody(record: OfficeRecord,prefs: Preferences) {
     return `<div class="mail-body"><p class="recurrence-note">This message is ${e(label)}. Office downloaded its headers. Download its text separately; files are available through Attachments.</p><button data-download-body>Download message body</button><span data-body-status role="status"></span></div>`;
   }
   const hasHtml=record.meta.hasHtml===true;
-  const mode=hasHtml ? modes.get(record.id)||(prefs.mailDisplay==='text'?'text':'html') : 'text';
+  const mode=hasHtml ? displayMode(record,prefs) : 'text';
   const theme=document.documentElement.dataset.theme==='dark'?'dark':'light';
   const accent=['green','blue','plum'].includes(document.documentElement.dataset.accent!)?document.documentElement.dataset.accent!:'green';
-  return `<div class="mail-view-controls" role="group" aria-label="Email display"><button data-mail-mode="html" aria-pressed="${mode==='html'}" ${hasHtml?'':'disabled'}>HTML</button><button data-mail-mode="text" aria-pressed="${mode==='text'}">Text only</button>${hasHtml&&mode==='html'?`<button data-mail-colors aria-pressed="${originalColors.has(record.id)}">Original colors</button><button data-mail-images ${imageConsent.has(record.id)?'disabled':''}>${imageConsent.has(record.id)?'External images enabled':'Load images'}</button><small>External images may report that you opened this email.</small>`:hasHtml?'':'<small>This email contains only text.</small>'}</div>${mode==='html'?`<iframe class="mail-html" title="HTML email" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id)?'&colors=original':''}${imageConsent.has(record.id)?'&images=1':''}"></iframe>`:`<div class="mail-body">${e(record.body)}</div>`}`;
+  return mode==='html'?`<iframe class="mail-html" title="HTML email" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id)?'&colors=original':''}${imageConsent.has(record.id)?'&images=1':''}"></iframe>`:`<div class="mail-body">${e(record.body)}</div>`;
 }
 export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: () => void) {
+  readerSize?.disconnect();
+  moreOpening?.disconnect();
+  const frame=panel.querySelector<HTMLIFrameElement>('.mail-html');
+  const header=panel.querySelector<HTMLElement>('.mail-reader-header')!;
+  const more=panel.querySelector<HTMLDetailsElement>('[data-mail-disclosure="more"]')!;
+  const fit=()=>{
+    if(!header.isConnected){readerSize?.disconnect();moreOpening?.disconnect();return;}
+    if(frame){
+      const padding=parseFloat(getComputedStyle(panel).paddingBottom);
+      const offset=frame.getBoundingClientRect().top-panel.getBoundingClientRect().top+panel.scrollTop;
+      frame.style.height=Math.max(180,panel.clientHeight-offset-padding)+'px';
+    }
+    if(more.open){
+      const popup=more.querySelector<HTMLElement>('.mail-more-popover')!,trigger=more.querySelector('summary')!;
+      const bounds=header.getBoundingClientRect(),button=trigger.getBoundingClientRect();
+      popup.style.left=Math.max(0,Math.min(button.left-bounds.left,header.clientWidth-popup.offsetWidth))+'px';
+      popup.style.top=button.bottom-bounds.top+4+'px';
+    }
+  };
+  // Native details toggles the attribute before painting; its toggle event may
+  // arrive later. Position in that mutation microtask to avoid an initial flash.
+  moreOpening=new MutationObserver(()=>{if(more.open)fit();});
+  moreOpening.observe(more,{attributes:true,attributeFilter:['open']});
+  readerSize=new ResizeObserver(fit);readerSize.observe(panel);readerSize.observe(header);fit();
+  panel.querySelectorAll<HTMLDetailsElement>('[data-mail-disclosure]').forEach(details=>{
+    details.ontoggle=()=>{if(details.open){panel.querySelectorAll<HTMLDetailsElement>('[data-mail-disclosure]').forEach(other=>{if(other!==details)other.open=false;});fit();}};
+  });
+  panel.onkeydown=event=>{
+    const details=(event.target as HTMLElement).closest<HTMLDetailsElement>('[data-mail-disclosure]');
+    if(event.key==='Escape'&&details?.open){details.open=false;details.querySelector<HTMLElement>('summary')!.focus();event.preventDefault();event.stopPropagation();}
+  };
   const colors=panel.querySelector<HTMLButtonElement>('[data-mail-colors]')!;
   if(colors) colors.onclick=()=>{if(originalColors.has(record.id))originalColors.delete(record.id);else originalColors.add(record.id);render();};
   panel.querySelectorAll<HTMLButtonElement>('[data-mail-mode]').forEach(button=>button.onclick=()=>{modes.set(record.id,button.dataset.mailMode!);render();});

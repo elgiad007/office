@@ -84,7 +84,7 @@ function safe_mail_html(string $html,array $images,bool $remote=false,string $th
     $text=$dark?'#e2e8df':'#282d27';
     $links=['green'=>['#426549','#a4c99e'],'blue'=>['#365d8a','#9dbfe7'],'plum'=>['#785279','#d3aed2']];
     $link=($links[$accent]??$links['green'])[$dark?1:0];
-    $defaults=$doc->createElement('style',":where(html){color-scheme:$scheme;background:$background;color:$text}:where(a){color:$link}body{margin:16px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}");
+    $defaults=$doc->createElement('style',":where(html){color-scheme:$scheme;background:$background;color:$text}:where(a){color:$link}:where(body){margin:0 16px 16px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}");
     $head->insertBefore($defaults,$head->firstChild);
     $charset=$doc->createElement('meta'); $charset->setAttribute('charset','utf-8'); $head->insertBefore($charset,$head->firstChild);
     foreach (iterator_to_array($doc->childNodes) as $node) if ($node->nodeType===XML_PI_NODE) $doc->removeChild($node);

@@ -5,7 +5,7 @@ import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, c
 import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
 import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail } from './mail-folders.js';
-import { mailBody, bindMailReader } from './mail-reader.js';
+import { mailBody, mailDisplayControls, bindMailReader } from './mail-reader.js';
 import { attachmentSection, bindAttachments, waitForAttachments } from './mail-attachments.js';
 import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
@@ -402,6 +402,20 @@ function mailDeletionReload() {
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     };
 }
+function captureMailReader() {
+    const panel = document.querySelector('#detail');
+    if (state.app !== 'mail' || !displayedMailId || !panel?.classList.contains('mail-reader'))
+        return;
+    const snapshot = { id: displayedMailId, open: Array.from(panel.querySelectorAll('[data-mail-disclosure][open]'), d => d.dataset.mailDisclosure) };
+    const focused = document.activeElement, disclosure = focused?.closest('[data-mail-disclosure]');
+    if (disclosure && panel.contains(disclosure)) {
+        const attribute = Array.from(focused.attributes).find(a => a.name.startsWith('data-'));
+        const selector = focused.matches('summary') ? 'summary' : attribute ? `[${attribute.name}="${CSS.escape(attribute.value)}"]` : '';
+        if (selector)
+            snapshot.focus = { disclosure: disclosure.dataset.mailDisclosure, selector };
+    }
+    return snapshot;
+}
 async function load(preferId, { selectFirst = true, preserveSelection = false } = {}) {
     await waitForAttachments();
     if (state.app !== 'mail')
@@ -442,6 +456,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
     } while (app === 'mail' && version !== mailDeleteVersion + mailReadVersion);
     if (preserveSelection && selectionContext !== JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]))
         return;
+    const readerSnapshot = preserveSelection ? captureMailReader() : undefined;
     const focusedId = preserveSelection ? document.activeElement?.closest('#items [data-id]')?.dataset.id : undefined;
     state.rows = records.filter(r => !pendingMailDeletes.has(r.id));
     if (state.app === 'mail')
@@ -464,11 +479,11 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
         if (selectionAnchor && !visible.has(selectionAnchor))
             selectionAnchor = null;
     }
-    renderWorkspace();
+    renderWorkspace(readerSnapshot);
     if (focusedId)
         document.querySelector(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
 }
-function renderWorkspace() {
+function renderWorkspace(readerSnapshot) {
     const a = apps[state.app];
     const header = state.app === 'mail' ? '<h1 class="file-input">Mail</h1>' : `<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ New ${a.singular}</button></div></section>`;
     document.querySelector('#main').innerHTML = `${header}<div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
@@ -506,7 +521,7 @@ function renderWorkspace() {
         renderMailFolders(mailFolderEnv());
     }
     renderList();
-    renderDetail();
+    renderDetail(readerSnapshot);
 }
 let mailListLimit = 100;
 function renderList() {
@@ -567,10 +582,13 @@ async function hydrateMailBody(record, manual = false) {
         bodyDownloads.delete(record.id);
     }
 }
-function renderDetail() {
+function renderDetail(readerSnapshot = captureMailReader()) {
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
     const openedMail = state.app === 'mail' && r ? r.id : null, newlyOpened = openedMail !== displayedMailId;
+    const restore = readerSnapshot?.id === openedMail ? readerSnapshot : undefined;
     displayedMailId = openedMail;
+    const viewingMail = state.app === 'mail' && !!r && r.meta.folder !== 'Drafts';
+    panel.classList.toggle('mail-reader', viewingMail);
     if (!r) {
         const emptyMail = state.app === 'mail' && !filteredRows().length;
         const heading = emptyMail ? (state.search ? 'No matching messages.' : 'No messages in this folder.') : (state.rows.length ? 'Select a ' + a.singular : a.empty);
@@ -582,7 +600,8 @@ function renderDetail() {
         r.meta.sendAccount = fillSender;
     const remote = !!r.meta.remote;
     const mailBadges = state.app === 'mail' ? `${r.meta.folder ? `<span class="badge">${e(mailLocation(r))}</span>` : ''}${remote ? '<span class="badge">Cached</span>' : ''}` : '';
-    panel.innerHTML = `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : 'Saved'}</span>${['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiPreview ? 'Edit' : 'Preview'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? '<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>' : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>${detailContent(r)}`;
+    panel.innerHTML = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : 'Saved'}</span>${['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiPreview ? 'Edit' : 'Preview'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? '<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>' : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+    panel.querySelectorAll('[data-mail-disclosure]').forEach(d => d.open = !!restore?.open.includes(d.dataset.mailDisclosure));
     const failure = state.app === 'mail' ? failedMailActions.get(r.id) : undefined;
     if (failure)
         panel.insertAdjacentHTML('afterbegin', `<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
@@ -603,6 +622,12 @@ function renderDetail() {
                     row.meta.hasAttachments = record.meta.hasAttachments;
                 }
             } });
+    if (restore?.focus) {
+        const disclosure = panel.querySelector(`[data-mail-disclosure="${CSS.escape(restore.focus.disclosure)}"]`);
+        const control = disclosure?.querySelector(restore.focus.selector);
+        const target = control && !control.matches(':disabled') && (control.matches('summary') || disclosure?.open) ? control : disclosure?.querySelector('summary');
+        target?.focus({ preventScroll: true });
+    }
     if (newlyOpened && openedMail)
         markOpenedMailRead(r);
     const bodyButton = panel.querySelector('[data-download-body]');
@@ -640,8 +665,13 @@ function detailContent(r) {
     const m = r.meta, disabled = m.remote ? 'disabled' : '';
     if (state.app === 'mail' && m.folder !== 'Drafts') {
         const recovery = !!m.remote && ['Recovery copies', 'Not in Inbox'].includes(m.folder || '');
-        const actions = recovery ? '<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>' : `${m.remote ? '<button data-action="file-mail">Move / Labels</button>' : ''}${m.folder !== 'Archive' ? `<button data-action="archive">${m.remote ? 'Archive' : 'Archive locally'}</button>` : ''}${m.remote ? m.folder === 'Trash' ? '<button data-action="restore-mail">Restore to Inbox</button>' : '<button data-action="trash-mail">Move to Trash</button>' : ''}<button data-action="read">Mark ${m.read ? 'unread' : 'read'}</button>`;
-        return `<h1>${e(r.title)}</h1><div class="meta-strip"><span>From: ${e(m.from || 'Unknown')}</span><span>To: ${e(m.to || '')}</span><span>${e(m.date || '')}</span></div>${m.remote ? `<p class="recurrence-note">${recovery ? 'This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.' : 'Downloaded copy from ' + e(mailLocation(r)) + '. Mail actions update the provider; Sync now refreshes its location.'}</p>` : ''}<div class="head-actions">${m.from ? '<button data-action="reply">Reply</button>' : ''}<button data-action="forward">Forward</button>${(m.rawBase64 || m.raw || r.hasOriginal) ? '<button data-action="eml">Download original EML</button>' : ''}${actions}</div><hr>${attachmentSection(r)}${mailBody(r, state.prefs)}`;
+        const actions = recovery ? '<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>' : `${m.folder !== 'Archive' ? `<button data-action="archive">${m.remote ? 'Archive' : 'Archive locally'}</button>` : ''}${m.remote ? m.folder === 'Trash' ? '<button data-action="restore-mail">Restore to Inbox</button>' : '<button data-action="trash-mail">Move to Trash</button>' : '<button class="danger quiet" data-action="delete">Delete</button>'}`;
+        const date = m.date || m.sentAt || '', parsed = new Date(date), validDate = Number.isFinite(parsed.getTime());
+        const compactDate = validDate ? parsed.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : date;
+        const account = state.accounts.find(a => a.id === m.account);
+        const metadata = [['From', m.from || 'Unknown'], ['To', m.to || ''], ['Date', date], ...(validDate ? [['Local time', parsed.toLocaleString()]] : []), ...(m.account ? [['Account', account?.label || m.account]] : []), ['Location', mailLocation(r)], ...(m.serverFolder ? [['Server folder', m.serverFolder]] : []), ...(m.source ? [['Source', m.source]] : [])];
+        const provenance = m.remote ? `<p class="muted">Downloaded copy from ${e(mailLocation(r))}. Mail actions update the provider; Sync now refreshes its location.${m.headerOnly ? ' Only headers are cached.' : ''}</p>` : '';
+        return `<header class="mail-reader-header"><div class="mail-subject-row"><h1>${e(r.title)}</h1><div class="mail-header-badges">${m.folder ? `<span class="badge">${e(mailLocation(r))}</span>` : ''}${m.remote ? '<span class="badge">Cached</span>' : ''}</div></div><div class="mail-envelope-row"><span class="mail-correspondents" title="${e((m.from || 'Unknown') + ' → ' + (m.to || ''))}">${e(m.from || 'Unknown')} <span aria-hidden="true">→</span><span class="file-input">to</span> ${e(m.to || 'Unspecified recipient')}</span><span class="mail-compact-date" title="${e(date)}">${e(compactDate)}</span><details data-mail-disclosure="metadata" class="mail-metadata"><summary>Details</summary><div class="mail-reader-popover mail-metadata-popover"><dl>${metadata.map(([label, value]) => `<div><dt>${e(label)}</dt><dd>${e(value)}</dd></div>`).join('')}</dl>${provenance}</div></details></div>${recovery ? '<p class="recurrence-note" role="status">This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.</p>' : ''}<div class="head-actions mail-reader-actions">${m.from ? '<button data-action="reply">Reply</button>' : ''}<button data-action="forward">Forward</button>${actions}${attachmentSection(r)}<details data-mail-disclosure="more" class="mail-reader-more"><summary>More</summary><div class="mail-reader-popover mail-more-popover">${!recovery && m.remote ? '<button data-action="file-mail">Move / Labels</button>' : ''}${!recovery ? `<button data-action="read">Mark ${m.read ? 'unread' : 'read'}</button>` : ''}<button data-action="export">Export</button>${(m.rawBase64 || m.raw || r.hasOriginal) ? '<button data-action="eml">Download original EML</button>' : ''}${mailDisplayControls(r, state.prefs)}</div></details></div></header>${mailBody(r, state.prefs)}`;
     }
     if (state.app === 'wiki' && state.wikiPreview)
         return `<span class="eyebrow">${e(r.title.split(':').slice(0, -1).join(' / ') || 'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x => x.id !== r.id && x.body.includes('[[' + r.title + ']]')).map(x => `<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('') || '<p class="muted">No pages link here yet.</p>'}</div>`;
@@ -1124,6 +1154,9 @@ function help() {
 }
 async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
+    const disclosure = event.target.closest('[data-mail-disclosure]')?.dataset.mailDisclosure;
+    document.querySelectorAll('#detail [data-mail-disclosure][open]').forEach(d => { if (d.dataset.mailDisclosure !== disclosure)
+        d.open = false; });
     const mailMenu = document.querySelector('#mail-actions-menu');
     if (mailMenu?.open && !event.target.closest('#mail-actions-menu'))
         mailMenu.open = false;
@@ -1566,6 +1599,8 @@ document.addEventListener('keydown', event => {
         return;
     }
     if (event.target.closest('#mail-actions-menu'))
+        return;
+    if (event.target.closest('[data-mail-disclosure]'))
         return;
     if (event.key === 'Enter' && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && state.app === 'mail' && state.current?.meta.folder === 'Drafts' && !state.current.meta.remote) {
         event.preventDefault();
