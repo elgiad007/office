@@ -18,11 +18,14 @@ export async function testSyncProgress(page,url){
   try{
     await page.goto(url+'?sync-progress#mail');
     await page.locator('#sync-status').filter({hasText:'batch 1'}).waitFor();
-    const bounds=()=>page.evaluate(()=>['.topbar','#main','.view-head','.work-grid','#items','#detail'].map(selector=>{
+    const bounds=()=>page.evaluate(()=>['.topbar','#main','#mail-toolbar','.work-grid','#items','#detail'].map(selector=>{
       const node=document.querySelector(selector),rect=node.getBoundingClientRect();
       return {selector,top:rect.top,height:rect.height};
     }));
     const initialBounds=await bounds();
+    assert.equal(await page.locator('#main > .view-head').count(),0,'Mail uses the topbar instead of a title panel');
+    assert.equal(await page.locator('#main > h1').textContent(),'Mail');
+    assert.equal(await page.locator('#mail-toolbar [data-action="new"]').textContent(),'+ Compose');
     assert.equal(await page.locator('#list-count').textContent(),'0 cached messages');
     assert.match(await page.locator('#list-count').getAttribute('title'),/older mail/);
     releaseFirst();await page.locator('#sync-status').filter({hasText:'batch 2 · downloading older mail'}).waitFor();
@@ -31,6 +34,13 @@ export async function testSyncProgress(page,url){
     releaseSecond();await page.locator('#sync-status').filter({hasText:'Older mail remains · continues on next check'}).waitFor();
     assert.equal(calls,5,'one check retains the five-batch limit');assert.equal(await page.locator('#sync-button').isEnabled(),true);
     assert.deepEqual(await bounds(),initialBounds,'Completing sync must keep pane positions steady');
+    await page.locator('#mail-actions-menu summary').click();
+    assert.equal(await page.locator('#mail-actions-menu [data-action="import"]').isVisible(),true);
+    assert.equal(await page.locator('#mail-actions-menu [data-action="export-all"]').isVisible(),true);
+    await page.locator('#mail-actions-menu summary').click();
+    await page.locator('[data-app="wiki"]').click();
+    assert.equal(await page.locator('#mail-toolbar').isVisible(),false,'Mail actions are hidden in other apps');
+    assert.equal(await page.locator('#main > .view-head h1').textContent(),'Wiki');
     // Isolate the activity controller from the app to test streamed progress ownership.
     await page.route(url+'progress-fixture',route=>route.fulfill({contentType:'text/html',body:'<footer id="activity-status"><div id="notice"></div><button id="view-activity"></button></footer><dialog id="activity-dialog"></dialog>'}));
     await page.goto(url+'progress-fixture');

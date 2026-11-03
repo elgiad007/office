@@ -275,7 +275,7 @@ async function boot() {
     }
 }
 function shell() {
-    root.innerHTML = `<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
     root.onclick = handleClick;
 }
 function setMailFolderPanel(open) {
@@ -419,6 +419,9 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
         b.removeAttribute('aria-current'); });
     document.querySelector('#crumb').textContent = apps[state.app]?.name || 'Settings';
     document.querySelector('.shell').classList.toggle('mail-active', state.app === 'mail');
+    document.querySelector('#mail-toolbar').hidden = state.app !== 'mail';
+    if (state.app !== 'mail')
+        document.querySelector('#mail-actions-menu').open = false;
     document.querySelector('#mail-folder-navigation').hidden = state.app !== 'mail';
     document.querySelector('#mail-folders-toggle').hidden = state.app !== 'mail';
     if (state.app !== 'mail')
@@ -467,7 +470,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
 }
 function renderWorkspace() {
     const a = apps[state.app];
-    document.querySelector('#main').innerHTML = `<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ ${state.app === 'mail' ? 'Compose' : 'New ' + a.singular}</button></div></section><div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+    const header = state.app === 'mail' ? '<h1 class="file-input">Mail</h1>' : `<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ New ${a.singular}</button></div></section>`;
+    document.querySelector('#main').innerHTML = `${header}<div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
     document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
     if (state.app === 'mail') {
         const folderNavigation = document.querySelector('#mail-folder-navigation');
@@ -1120,6 +1124,11 @@ function help() {
 }
 async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
+    const mailMenu = document.querySelector('#mail-actions-menu');
+    if (mailMenu?.open && !event.target.closest('#mail-actions-menu'))
+        mailMenu.open = false;
+    if (event.target.closest('#mail-actions-menu button') && mailMenu)
+        mailMenu.open = false;
     const button = event.target.closest('button');
     if (!button)
         return;
@@ -1548,6 +1557,15 @@ document.addEventListener('keydown', event => {
         return;
     state.lastActivity = Date.now();
     if (document.querySelector('dialog[open]'))
+        return;
+    const mailMenu = document.querySelector('#mail-actions-menu');
+    if (event.key === 'Escape' && mailMenu?.open) {
+        mailMenu.open = false;
+        mailMenu.querySelector('summary').focus();
+        event.preventDefault();
+        return;
+    }
+    if (event.target.closest('#mail-actions-menu'))
         return;
     if (event.key === 'Enter' && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && state.app === 'mail' && state.current?.meta.folder === 'Drafts' && !state.current.meta.remote) {
         event.preventDefault();
