@@ -5,12 +5,12 @@ export function createActivity({ csrf }) {
     const bar = document.querySelector('#activity-status'), status = document.querySelector('#notice'), button = document.querySelector('#view-activity'), dialog = document.querySelector('#activity-dialog');
     let enabled = false, entries = [], cursor = 0, polling = false, generation = 0, lastMessage = 'Ready.', lastError = false, sequence = 0;
     const tasks = new Map();
-    let idle = true, idleTimer;
-    const markBusy = () => { clearTimeout(idleTimer); idle = false; };
+    let idle = true, localErrorHeld = false, commandErrorHeld = false, idleTimer;
+    const markBusy = () => { clearTimeout(idleTimer); idle = false; localErrorHeld = false; commandErrorHeld = false; };
     const settle = () => {
         clearTimeout(idleTimer);
         if (!tasks.size)
-            idleTimer = setTimeout(() => { idle = true; renderStatus(); }, 1200);
+            idleTimer = setTimeout(() => { idle = true; localErrorHeld = false; commandErrorHeld = false; renderStatus(); }, lastError ? 8000 : 1200);
     };
     const request = async (data) => {
         const response = await fetch('api.php?r=activity' + (data ? '' : '&after=' + cursor), { method: data ? 'POST' : 'GET', headers: data ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() } : undefined, body: data ? JSON.stringify(data) : undefined, cache: 'no-store' });
@@ -52,6 +52,11 @@ export function createActivity({ csrf }) {
             byId.set(entry.id, entry);
         entries = [...byId.values()].sort((a, b) => a.id - b.id).slice(-500);
         cursor = entries.at(-1)?.id || cursor;
+        if (localErrorHeld) {
+            renderStatus();
+            renderEntries();
+            return;
+        }
         const latest = entries.filter(entry => entry.phase !== 'diagnostic').at(-1);
         if (!latest) {
             renderStatus();
@@ -92,13 +97,20 @@ export function createActivity({ csrf }) {
             polling = false;
         }
     }
-    button.onclick = () => {
+    function open(level = '') {
         if (!enabled)
             return;
+        if (dialog.open) {
+            dialog.querySelector('#activity-level').value = level;
+            renderEntries();
+            void poll();
+            return;
+        }
         dialog.innerHTML = `<div class="dialog-head"><h2 id="activity-title">Recent activity</h2><button type="button" id="activity-close" aria-label="Close activity">✕</button></div>
       <p>Connection progress and recent Office activity. Passwords, tokens, mail contents and raw commands are excluded.</p>
       <div class="activity-tools"><label>Level<select id="activity-level" aria-label="Level"><option value="">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="success">Success</option><option value="info">Information</option></select></label><label>Account<select id="activity-account" aria-label="Account"><option value="">All accounts</option></select></label><button type="button" id="activity-copy">Copy visible log</button><button type="button" id="activity-clear">Clear log</button></div>
       <p id="activity-count"></p><p id="activity-feedback" role="status"></p><ol id="activity-entries" tabindex="0" aria-label="Recent activity entries"></ol>`;
+        dialog.querySelector('#activity-level').value = level;
         dialog.showModal();
         dialog.querySelector('#activity-close').onclick = () => dialog.close();
         dialog.querySelectorAll('select').forEach(select => select.onchange = renderEntries);
@@ -122,6 +134,8 @@ export function createActivity({ csrf }) {
                 cursor = 0;
                 lastMessage = 'Activity log cleared.';
                 lastError = false;
+                localErrorHeld = false;
+                commandErrorHeld = false;
                 renderEntries();
                 renderStatus();
             }
@@ -134,11 +148,13 @@ export function createActivity({ csrf }) {
         };
         renderEntries();
         void poll();
-    };
+    }
+    button.onclick = () => open();
     dialog.addEventListener('close', () => button.focus());
     setInterval(() => void poll(), 2000);
     renderStatus();
     return {
+        open,
         receive(entry) { if (enabled)
             receive([entry]); },
         configure(value) { enabled = value; button.disabled = !value; if (!value) {
@@ -148,6 +164,8 @@ export function createActivity({ csrf }) {
             tasks.clear();
             clearTimeout(idleTimer);
             idle = true;
+            localErrorHeld = false;
+            commandErrorHeld = false;
             lastMessage = 'Ready.';
             lastError = false;
             if (dialog.open)
@@ -156,13 +174,17 @@ export function createActivity({ csrf }) {
         }
         else
             void poll(); },
-        notice(message, error = false) { lastMessage = message; lastError = error; markBusy(); settle(); renderStatus(); if (enabled)
+        clearCommandError() { if (!commandErrorHeld)
+            return; clearTimeout(idleTimer); localErrorHeld = false; commandErrorHeld = false; lastError = false; lastMessage = 'Ready.'; idle = !tasks.size; renderStatus(); },
+        notice(message, error = false, { log = true } = {}) { lastMessage = message; lastError = error; markBusy(); localErrorHeld = error; commandErrorHeld = error && !log; settle(); renderStatus(); if (enabled && log)
             void request({ action: 'notice', message: String(message).slice(0, 1000), error }).then(() => poll()).catch(() => { }); },
         diagnostic(message) { if (enabled)
             void request({ action: 'diagnostic', message: message.slice(0, 1000) }).catch(() => { }); },
         queued(message) { if (!message)
-            return null; markBusy(); const id = ++sequence; tasks.set(id, { message, active: false }); renderStatus(); return id; },
+            return null; markBusy(); lastError = false; const id = ++sequence; tasks.set(id, { message, active: false }); renderStatus(); return id; },
         running(id) { if (id !== null && tasks.has(id)) {
+            markBusy();
+            lastError = false;
             tasks.get(id).active = true;
             renderStatus();
         } },

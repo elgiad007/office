@@ -1,3 +1,4 @@
+import {testCommands} from './commands.browser.mjs';
 import {testMessageHeaders} from './message-headers.browser.mjs';
 import {createRequire} from 'node:module';
 import {readFile,mkdir} from 'node:fs/promises';
@@ -52,7 +53,12 @@ try{
  await page.getByRole('textbox',{name:'Title',exact:true}).fill('Keyboard workflow');await page.getByLabel('Notes',{exact:true}).fill('Changes persist in SQLite.');await page.keyboard.press('Escape');
  await page.getByText('Saved',{exact:true}).waitFor();
  await page.getByRole('button',{name:'+ New task',exact:true}).click();await page.getByRole('textbox',{name:'Title',exact:true}).fill('Second task');await page.keyboard.press('Escape');await page.getByText('Saved',{exact:true}).waitFor();
- await page.locator('#main').focus();await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await page.locator('.item.selected').count(),1);await page.keyboard.press('j');assert.equal(await page.locator('.item.selected').count(),1);await page.keyboard.press('?');await page.getByRole('heading',{name:'Keyboard shortcuts'}).waitFor();await page.keyboard.press('Escape');
+ await page.locator('#main').focus();await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await page.locator('.item.selected').count(),1);await page.keyboard.press('j');assert.equal(await page.locator('.item.selected').count(),1);await page.evaluate(()=>document.activeElement.setAttribute('data-help-opener',''));await page.keyboard.press('?');await page.getByRole('heading',{name:'Keyboard shortcuts and commands',exact:true}).waitFor();
+ assert.equal(await page.locator('[data-help-search]').evaluate(el=>el===document.activeElement),true);
+ await page.locator('[data-help-search]').fill(':warnings');assert.equal(await page.locator('.help-table tbody tr').count(),1);
+ await page.locator('[data-help-search]').fill('no-such-shortcut');assert.equal(await page.locator('[data-help-empty]').isVisible(),true);
+ await page.getByRole('button',{name:'Clear search',exact:true}).click();assert.ok(await page.locator('.help-table tbody tr').count()>30);
+ await page.keyboard.press('Escape');assert.equal(await page.locator('[data-help-opener]').evaluate(el=>el===document.activeElement),true);await page.keyboard.press(':');assert.equal(await page.locator('#command-input').count(),1);await page.keyboard.press('Escape');
  await page.reload();await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:/Keyboard workflow Changes persist/}).count();assert.ok((await page.locator('#items').textContent()).includes('Keyboard workflow'));
  await page.getByRole('button',{name:'Documents',exact:true}).click();await page.getByRole('button',{name:'+ New document',exact:true}).click();await page.getByRole('textbox',{name:'Title',exact:true}).fill('A place to think');await page.getByRole('textbox',{name:'Document content',exact:true}).fill('A simple document with room for your ideas.');await page.keyboard.press('Escape');await page.getByText('Saved',{exact:true}).waitFor();
  await page.screenshot({path:'test-results/document.png',fullPage:true});
@@ -107,7 +113,7 @@ try{
  await testQuickMove(page,url);
  await testMailHtml(page,url);
  await testMailCompact(page,url);
- await testMessageHeaders(page,url);await testMailReaderSync(page,url);
+ await testCommands(page,url);await testMessageHeaders(page,url);await testMailReaderSync(page,url);
  await testItemMenus(page,url);
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.screenshot({path:'test-results/mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
  assert.deepEqual(errors,[]);console.log('PASS browser: setup, all local apps, Vim navigation, autosave, persistence, wiki safety/backlinks, formulas, theme, mobile layout, CSRF, imports and stale writes.');

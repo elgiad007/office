@@ -29,7 +29,9 @@ export async function testDensity(page) {
   assert.deepEqual(await spacing(), compact);
   await page.screenshot({path:'test-results/settings-compact.png', fullPage:true});
   await page.getByRole('button', {name:'Keyboard shortcuts', exact:true}).click();
-  assert.equal(await page.locator('#dialog').evaluate(node => getComputedStyle(node).paddingTop), '14px');
+  const helpBounds=await page.locator('#dialog').evaluate(node=>{const r=node.getBoundingClientRect();return {width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight};});
+  assert.equal(helpBounds.width,helpBounds.viewportWidth);assert.equal(helpBounds.height,helpBounds.viewportHeight);
+  assert.equal(await page.locator('.help-results').evaluate(node=>getComputedStyle(node).overflowY),'auto');
   await page.keyboard.press('Escape');
   await page.getByRole('button', {name:'Tasks', exact:true}).click();
   assert.equal(await page.locator('.item').first().evaluate(node => getComputedStyle(node).paddingTop), '7px');

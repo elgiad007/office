@@ -1,3 +1,5 @@
+import {openHelp} from './help.js';
+import {CommandError,resolveCommand} from './commands.js';
 import {asError} from './utils.js';
 import {isPresent} from './utils.js';
 import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, DeleteMail, ItemInput, ItemKind, ItemMeta, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
@@ -49,6 +51,55 @@ const dateLabel = (value: string) => { const date=new Date(value); return Number
 const field = (label: string,name: string,value='',type='text',extra='') => `<label>${e(label)}<input type="${type}" name="${name}" value="${e(value)}" ${extra}></label>`;
 const busyButton = (button: HTMLButtonElement | null,busy: boolean) => { if (button) button.disabled=busy; };
 function notice(text: string,error=false) { activity.notice(text,error); }
+let commandInput: HTMLInputElement | null=null,commandFocus: HTMLElement | null=null,commandBusy=false;
+function closeCommand(restore=false) {
+  const input=commandInput;commandInput=null;input?.remove();
+  document.querySelector<HTMLElement>('#notice')!.hidden=false;setMode('normal');
+  if(restore)(commandFocus?.isConnected?commandFocus:document.querySelector<HTMLElement>('#main'))?.focus({preventScroll:true});
+  commandFocus=null;
+}
+async function signOut() {await waitForAttachments();await commit();await api('logout',{});await boot();}
+const commandHandlers={
+  mail:()=>changeApp('mail'),
+  calendar:()=>changeApp('calendar'),
+  tasks:()=>changeApp('tasks'),
+  contacts:()=>changeApp('contacts'),
+  docs:()=>changeApp('documents'),
+  sheets:()=>changeApp('sheets'),
+  wiki:()=>changeApp('wiki'),
+  settings:()=>changeApp('settings'),
+  head:async()=>{if(state.app!=='mail'||!state.current)throw new CommandError('Select a mail message before using :head.');await viewMessageHeaders();},
+  q:signOut,
+  log:()=>activity.open(),
+  errors:()=>activity.open('error'),
+  warnings:()=>activity.open('warning'),
+  new:async(type?: string)=>{
+    const target=type as AppName | undefined;
+    if(!target&&!apps[state.app])throw new CommandError('Specify an item type for :new in Settings.');
+    if(target&&target!==state.app)await changeApp(target);
+    await createRecord();
+  },
+};
+function openCommand() {
+  if(commandBusy||commandInput)return;
+  commandFocus=document.activeElement as HTMLElement;keySequence='';setMode('command');
+  const input=document.createElement('input');commandInput=input;
+  input.id='command-input';input.setAttribute('aria-label','Command');input.autocomplete='off';input.spellcheck=false;input.value=':';
+  document.querySelector<HTMLElement>('#notice')!.hidden=true;
+  document.querySelector<HTMLElement>('#activity-status')!.prepend(input);input.focus();
+  input.addEventListener('blur',()=>{if(commandInput===input){closeCommand();if(editable(document.activeElement))setMode('insert');}});
+  input.addEventListener('keydown',event=>{
+    state.lastActivity=Date.now();event.stopPropagation();
+    if(event.key==='Escape'){event.preventDefault();closeCommand(true);return;}
+    if(event.key!=='Enter'||event.isComposing)return;
+    event.preventDefault();if(event.repeat||commandBusy)return;
+    let command: ReturnType<typeof resolveCommand>;
+    try{command=resolveCommand(input.value);}catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});closeCommand(true);return;}
+    activity.clearCommandError();
+    commandBusy=true;closeCommand(true);
+    void (async()=>{try{await commandHandlers[command.name](command.argument);}catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});}finally{commandBusy=false;}})();
+  });
+}
 function rememberMail(record?: OfficeRecord | null) {
   if(record?.kind!=='mail')return;
   let revisions=mailSnapshots.get(record.id);
@@ -699,9 +750,7 @@ async function syncAccounts(manual=true) {
   // Never replace an active editor with network data.
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }
-function help() {
-  const k=keys();modal('Keyboard shortcuts',`<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down+' / '+k.up,'Next / previous item'],[k.left+' / '+k.right,'Focus list / selected item'],['gg / G','First / last item'],['g 1 … g 7','Switch applications'],[k.search,'Search this application'],['n / N','Next / previous search result'],[k.new,'Create an item / compose'],[k.edit,'Enter edit mode'],['Escape','Leave editing and save'],[k.select,'Toggle selection'],[k.save+' / Ctrl or Cmd+S','Save changes'],[k.delete,'Delete selected mail, or current item; connected mail moves to Trash'],[k.undoDelete,'Undo the last mail deletion (15 minutes)'],[k.archive,'Archive selected messages'],[k.move,'Quick Move to folder'],[k.reply,'Reply to message'],['Ctrl+Enter','Send current draft'],['Sheets: h j k l / arrows','Move between cells'],['Sheets: i / Enter','Edit selected cell'],['Sheets: Tab / Shift+Tab','Next / previous cell']].map(([key,meaning])=>`<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
-}
+function help() {openHelp(dialog,keys(),e,()=>setMode('normal'));}
 async function history() {await commit();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
 async function handleClick(event: MouseEvent) {
   const disclosure=(event.target as HTMLElement).closest<HTMLElement>('[data-mail-disclosure]')?.dataset.mailDisclosure;
@@ -740,7 +789,7 @@ async function handleClick(event: MouseEvent) {
       if(state.app==='mail')await deleteSelectedMail();
       else confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current!;await api('delete',{id:record.id,revision:record.revision});await load();notice('Item deleted.');});
     }
-    if(action==='logout'){await commit();await api('logout',{});await boot();}
+    if(action==='logout')await signOut();
     if(action==='message-headers')await viewMessageHeaders();
     if(action==='eml'){const record=await fullMailRecord(state.current!);download(record.title+'.eml',originalMail(record),'message/rfc822');}
     if(action==='original-ics')download(state.current!.title+'.ics',state.current!.meta.rawIcs||state.current!.meta.raw||'','text/calendar');
@@ -910,6 +959,8 @@ function accountDialog() {
 const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
+  if(commandInput){if(event.key==='Escape'){event.preventDefault();closeCommand(true);}return;}
+  if(!document.querySelector('.shell'))return;
   state.lastActivity=Date.now();if(document.querySelector<HTMLDialogElement>('dialog[open]')!)return;
   const mailMenu=document.querySelector<HTMLDetailsElement>('#mail-actions-menu');
   if(event.key==='Escape'&&mailMenu?.open){mailMenu.open=false;mailMenu.querySelector<HTMLElement>('summary')!.focus();event.preventDefault();return;}
@@ -923,6 +974,7 @@ document.addEventListener('keydown',event=>{
   if(event.key==='Escape'){if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{state.selected.clear();if(state.app!=='settings')renderList();}return;}
   if(editable((event.target as HTMLElement))){setMode('insert');return;}
   if(event.ctrlKey||event.metaKey||event.altKey)return;
+  if(event.key===':'&&!event.isComposing&&state.mode==='normal'){event.preventDefault();if(!event.repeat)openCommand();return;}
   const k=keys(), key=event.key;setMode('normal');
   if(Date.now()-sequenceTime>900)keySequence='';sequenceTime=Date.now();
   if(keySequence==='g'&&/^[1-7]$/.test(key)){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
@@ -953,7 +1005,7 @@ document.addEventListener('keydown',event=>{
   if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else{document.querySelector<HTMLElement>('#detail')!?.setAttribute('tabindex','-1');document.querySelector<HTMLElement>('#detail')!?.focus();}return;}
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=filteredRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
 });
-document.addEventListener('focusin',event=>{if(editable((event.target as HTMLElement)))setMode('insert');});
+document.addEventListener('focusin',event=>{if((event.target as HTMLElement).id!=='command-input'&&editable((event.target as HTMLElement)))setMode('insert');});
 document.addEventListener('pointerdown',()=>state.lastActivity=Date.now(),{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});
 window.addEventListener('beforeunload',event=>{if(state.dirty||state.savePromise){event.preventDefault();event.returnValue='';}});

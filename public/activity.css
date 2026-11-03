@@ -3,7 +3,7 @@
 @media screen{.shell{position:relative;height:calc(100vh - var(--activity-height));height:calc(100dvh - var(--activity-height))}.shell .sidebar{height:100%;min-height:0}}
 #activity-status{position:fixed;inset:auto 0 0;height:var(--activity-height);display:flex;align-items:center;gap:12px;padding:5px 14px;border-top:1px solid var(--line);background:var(--surface);color:var(--text);z-index:15;font-size:12px;overflow:hidden;isolation:isolate}
 #activity-status #notice{position:static;display:block;transform:none;border-radius:0;padding:0;box-shadow:none;background:transparent;color:inherit;max-width:none;min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-#activity-status[data-level=error]{color:var(--danger)}
+#activity-status[data-level=error] #notice{color:var(--danger)}
 #activity-status::before{content:'';position:absolute;inset:0 auto 0 0;width:45%;pointer-events:none;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--accent) 20%,transparent),transparent);opacity:0;transform:translateX(-100%);z-index:0}
 #activity-status #notice,#activity-status #view-activity{position:relative;inset:auto;z-index:1}
 #activity-status[data-busy=true]::before{opacity:1;animation:office-activity-sweep 7s linear infinite}
@@ -23,3 +23,6 @@
 #activity-count,#activity-feedback{font-size:12px;color:var(--muted);margin:12px 0}
 @media(max-width:600px){#activity-status{padding-inline:8px;gap:7px}#view-activity{font-size:11px;padding-inline:7px}#activity-dialog{padding:18px}.activity-tools label{min-width:100px}}
 @media print{#activity-status,#activity-dialog{display:none!important}}
+
+#activity-status #notice[hidden]{display:none}
+#command-input{flex:1;min-width:0;height:30px;padding:3px 7px;font:inherit;font-family:monospace;background:var(--surface);color:var(--text);border:1px solid var(--accent);position:relative;z-index:1}

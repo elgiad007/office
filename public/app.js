@@ -1,4 +1,6 @@
 // Generated from frontend/app.ts by pnpm build. Do not edit.
+import { openHelp } from './help.js';
+import { CommandError, resolveCommand } from './commands.js';
 import { asError } from './utils.js';
 import { isPresent } from './utils.js';
 import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
@@ -43,6 +45,99 @@ const field = (label, name, value = '', type = 'text', extra = '') => `<label>${
 const busyButton = (button, busy) => { if (button)
     button.disabled = busy; };
 function notice(text, error = false) { activity.notice(text, error); }
+let commandInput = null, commandFocus = null, commandBusy = false;
+function closeCommand(restore = false) {
+    const input = commandInput;
+    commandInput = null;
+    input?.remove();
+    document.querySelector('#notice').hidden = false;
+    setMode('normal');
+    if (restore)
+        (commandFocus?.isConnected ? commandFocus : document.querySelector('#main'))?.focus({ preventScroll: true });
+    commandFocus = null;
+}
+async function signOut() { await waitForAttachments(); await commit(); await api('logout', {}); await boot(); }
+const commandHandlers = {
+    mail: () => changeApp('mail'),
+    calendar: () => changeApp('calendar'),
+    tasks: () => changeApp('tasks'),
+    contacts: () => changeApp('contacts'),
+    docs: () => changeApp('documents'),
+    sheets: () => changeApp('sheets'),
+    wiki: () => changeApp('wiki'),
+    settings: () => changeApp('settings'),
+    head: async () => { if (state.app !== 'mail' || !state.current)
+        throw new CommandError('Select a mail message before using :head.'); await viewMessageHeaders(); },
+    q: signOut,
+    log: () => activity.open(),
+    errors: () => activity.open('error'),
+    warnings: () => activity.open('warning'),
+    new: async (type) => {
+        const target = type;
+        if (!target && !apps[state.app])
+            throw new CommandError('Specify an item type for :new in Settings.');
+        if (target && target !== state.app)
+            await changeApp(target);
+        await createRecord();
+    },
+};
+function openCommand() {
+    if (commandBusy || commandInput)
+        return;
+    commandFocus = document.activeElement;
+    keySequence = '';
+    setMode('command');
+    const input = document.createElement('input');
+    commandInput = input;
+    input.id = 'command-input';
+    input.setAttribute('aria-label', 'Command');
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.value = ':';
+    document.querySelector('#notice').hidden = true;
+    document.querySelector('#activity-status').prepend(input);
+    input.focus();
+    input.addEventListener('blur', () => { if (commandInput === input) {
+        closeCommand();
+        if (editable(document.activeElement))
+            setMode('insert');
+    } });
+    input.addEventListener('keydown', event => {
+        state.lastActivity = Date.now();
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeCommand(true);
+            return;
+        }
+        if (event.key !== 'Enter' || event.isComposing)
+            return;
+        event.preventDefault();
+        if (event.repeat || commandBusy)
+            return;
+        let command;
+        try {
+            command = resolveCommand(input.value);
+        }
+        catch (cause) {
+            activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
+            closeCommand(true);
+            return;
+        }
+        activity.clearCommandError();
+        commandBusy = true;
+        closeCommand(true);
+        void (async () => { try {
+            await commandHandlers[command.name](command.argument);
+        }
+        catch (cause) {
+            activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
+        }
+        finally {
+            commandBusy = false;
+        } })();
+    });
+}
 function rememberMail(record) {
     if (record?.kind !== 'mail')
         return;
@@ -1261,10 +1356,7 @@ async function syncAccounts(manual = true) {
     else if (!state.dirty && !editable(document.activeElement))
         await load(undefined, { preserveSelection: state.app === 'mail' });
 }
-function help() {
-    const k = keys();
-    modal('Keyboard shortcuts', `<p class="muted">Normal mode navigates. Insert mode types. Standard Tab navigation always works. Rich-text editing uses browser editing keys; full Vim operators are planned.</p>${[[k.down + ' / ' + k.up, 'Next / previous item'], [k.left + ' / ' + k.right, 'Focus list / selected item'], ['gg / G', 'First / last item'], ['g 1 … g 7', 'Switch applications'], [k.search, 'Search this application'], ['n / N', 'Next / previous search result'], [k.new, 'Create an item / compose'], [k.edit, 'Enter edit mode'], ['Escape', 'Leave editing and save'], [k.select, 'Toggle selection'], [k.save + ' / Ctrl or Cmd+S', 'Save changes'], [k.delete, 'Delete selected mail, or current item; connected mail moves to Trash'], [k.undoDelete, 'Undo the last mail deletion (15 minutes)'], [k.archive, 'Archive selected messages'], [k.move, 'Quick Move to folder'], [k.reply, 'Reply to message'], ['Ctrl+Enter', 'Send current draft'], ['Sheets: h j k l / arrows', 'Move between cells'], ['Sheets: i / Enter', 'Edit selected cell'], ['Sheets: Tab / Shift+Tab', 'Next / previous cell']].map(([key, meaning]) => `<div class="help-row"><span>${meaning}</span><kbd>${e(key)}</kbd></div>`).join('')}<p class="muted">Remap single-key actions in Settings. Local deletion requires confirmation. Connected mail moves to Trash; messages already in Trash and synced read-only items are protected. Send confirmation can be disabled under Settings → Mail.</p>`);
-}
+function help() { openHelp(dialog, keys(), e, () => setMode('normal')); }
 async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
     const disclosure = event.target.closest('[data-mail-disclosure]')?.dataset.mailDisclosure;
@@ -1369,11 +1461,8 @@ async function handleClick(event) {
             else
                 confirmation('Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async () => { await commit(); const record = state.current; await api('delete', { id: record.id, revision: record.revision }); await load(); notice('Item deleted.'); });
         }
-        if (action === 'logout') {
-            await commit();
-            await api('logout', {});
-            await boot();
-        }
+        if (action === 'logout')
+            await signOut();
         if (action === 'message-headers')
             await viewMessageHeaders();
         if (action === 'eml') {
@@ -1703,6 +1792,15 @@ const itemMenus = installItemMenus({ state, e, commit, selectRecord, enterEdit, 
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented)
         return;
+    if (commandInput) {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeCommand(true);
+        }
+        return;
+    }
+    if (!document.querySelector('.shell'))
+        return;
     state.lastActivity = Date.now();
     if (document.querySelector('dialog[open]'))
         return;
@@ -1756,6 +1854,12 @@ document.addEventListener('keydown', event => {
     }
     if (event.ctrlKey || event.metaKey || event.altKey)
         return;
+    if (event.key === ':' && !event.isComposing && state.mode === 'normal') {
+        event.preventDefault();
+        if (!event.repeat)
+            openCommand();
+        return;
+    }
     const k = keys(), key = event.key;
     setMode('normal');
     if (Date.now() - sequenceTime > 900)
@@ -1892,7 +1996,7 @@ document.addEventListener('keydown', event => {
             void attempt(() => selectRecord(rows[next].id, true));
     }
 });
-document.addEventListener('focusin', event => { if (editable(event.target))
+document.addEventListener('focusin', event => { if (event.target.id !== 'command-input' && editable(event.target))
     setMode('insert'); });
 document.addEventListener('pointerdown', () => state.lastActivity = Date.now(), { passive: true });
 document.addEventListener('wheel', () => state.lastActivity = Date.now(), { passive: true });

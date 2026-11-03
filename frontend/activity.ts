@@ -6,11 +6,11 @@ export function createActivity({csrf}: {csrf: () => string}) {
   const bar=document.querySelector<HTMLElement>('#activity-status')!,status=document.querySelector<HTMLElement>('#notice')!,button=document.querySelector<HTMLButtonElement>('#view-activity')!,dialog=document.querySelector<HTMLDialogElement>('#activity-dialog')!;
   let enabled=false,entries: ActivityEntry[]=[],cursor=0,polling=false,generation=0,lastMessage='Ready.',lastError=false,sequence=0;
   const tasks=new Map<number, {message: string; active: boolean; syncProgress?: boolean}>();
-  let idle=true,idleTimer: ReturnType<typeof setTimeout>;
-  const markBusy=()=>{clearTimeout(idleTimer);idle=false;};
+  let idle=true,localErrorHeld=false,commandErrorHeld=false,idleTimer: ReturnType<typeof setTimeout>;
+  const markBusy=()=>{clearTimeout(idleTimer);idle=false;localErrorHeld=false;commandErrorHeld=false;};
   const settle=()=>{
     clearTimeout(idleTimer);
-    if(!tasks.size)idleTimer=setTimeout(()=>{idle=true;renderStatus();},1200);
+    if(!tasks.size)idleTimer=setTimeout(()=>{idle=true;localErrorHeld=false;commandErrorHeld=false;renderStatus();},lastError?8000:1200);
   };
   const request=async(data?: {action: string; message?: string; error?: boolean}): Promise<{entries?: ActivityEntry[]}>=>{
     const response=await fetch('api.php?r=activity'+(data?'':'&after='+cursor),{method:data?'POST':'GET',headers:data?{'Content-Type':'application/json','X-CSRF-Token':csrf()}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store'});
@@ -44,6 +44,7 @@ export function createActivity({csrf}: {csrf: () => string}) {
   function receive(newEntries: ActivityEntry[]) {
     const byId=new Map(entries.map(entry=>[entry.id,entry]));for(const entry of newEntries)byId.set(entry.id,entry);
     entries=[...byId.values()].sort((a,b)=>a.id-b.id).slice(-500);cursor=entries.at(-1)?.id||cursor;
+    if(localErrorHeld){renderStatus();renderEntries();return;}
     const latest=entries.filter(entry=>entry.phase!=='diagnostic').at(-1);if(!latest){renderStatus();renderEntries();return;}
     lastMessage=(latest.account?latest.account+': ':'')+latest.message;lastError=latest.level==='error';
     if(['progress','sync-progress'].includes(latest.phase)&&tasks.size){
@@ -64,12 +65,14 @@ export function createActivity({csrf}: {csrf: () => string}) {
     }catch{if(dialog.open)dialog.querySelector<HTMLElement>('#activity-feedback')!.textContent='Activity log could not be loaded. Retrying shortly.';}
     finally{polling=false;}
   }
-  button.onclick=()=>{
+  function open(level: '' | 'error' | 'warning' = '') {
     if(!enabled)return;
+    if(dialog.open){dialog.querySelector<HTMLSelectElement>('#activity-level')!.value=level;renderEntries();void poll();return;}
     dialog.innerHTML=`<div class="dialog-head"><h2 id="activity-title">Recent activity</h2><button type="button" id="activity-close" aria-label="Close activity">✕</button></div>
       <p>Connection progress and recent Office activity. Passwords, tokens, mail contents and raw commands are excluded.</p>
       <div class="activity-tools"><label>Level<select id="activity-level" aria-label="Level"><option value="">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="success">Success</option><option value="info">Information</option></select></label><label>Account<select id="activity-account" aria-label="Account"><option value="">All accounts</option></select></label><button type="button" id="activity-copy">Copy visible log</button><button type="button" id="activity-clear">Clear log</button></div>
       <p id="activity-count"></p><p id="activity-feedback" role="status"></p><ol id="activity-entries" tabindex="0" aria-label="Recent activity entries"></ol>`;
+    dialog.querySelector<HTMLSelectElement>('#activity-level')!.value=level;
     dialog.showModal();dialog.querySelector<HTMLButtonElement>('#activity-close')!.onclick=()=>dialog.close();
     dialog.querySelectorAll<HTMLSelectElement>('select').forEach(select=>select.onchange=renderEntries);
     dialog.querySelector<HTMLButtonElement>('#activity-copy')!.onclick=async()=>{
@@ -79,22 +82,25 @@ export function createActivity({csrf}: {csrf: () => string}) {
     };
     dialog.querySelector<HTMLButtonElement>('#activity-clear')!.onclick=async()=>{
       generation++;const clear=dialog.querySelector<HTMLButtonElement>('#activity-clear')!;clear.disabled=true;
-      try{await request({action:'clear'});entries=[];cursor=0;lastMessage='Activity log cleared.';lastError=false;renderEntries();renderStatus();}
+      try{await request({action:'clear'});entries=[];cursor=0;lastMessage='Activity log cleared.';lastError=false;localErrorHeld=false;commandErrorHeld=false;renderEntries();renderStatus();}
       catch{dialog.querySelector<HTMLElement>('#activity-feedback')!.textContent='Activity log could not be cleared.';}
       finally{clear.disabled=false;}
     };
     renderEntries();void poll();
-  };
+  }
+  button.onclick=()=>open();
   dialog.addEventListener('close',()=>button.focus());
   setInterval(()=>void poll(),2000);
   renderStatus();
   return {
+    open,
     receive(entry: ActivityEntry): void{if(enabled)receive([entry]);},
-    configure(value: boolean){enabled=value;button.disabled=!value;if(!value){generation++;entries=[];cursor=0;tasks.clear();clearTimeout(idleTimer);idle=true;lastMessage='Ready.';lastError=false;if(dialog.open)dialog.close();renderStatus();}else void poll();},
-    notice(message: string,error=false){lastMessage=message;lastError=error;markBusy();settle();renderStatus();if(enabled)void request({action:'notice',message:String(message).slice(0,1000),error}).then(()=>poll()).catch(()=>{});},
+    configure(value: boolean){enabled=value;button.disabled=!value;if(!value){generation++;entries=[];cursor=0;tasks.clear();clearTimeout(idleTimer);idle=true;localErrorHeld=false;commandErrorHeld=false;lastMessage='Ready.';lastError=false;if(dialog.open)dialog.close();renderStatus();}else void poll();},
+    clearCommandError(){if(!commandErrorHeld)return;clearTimeout(idleTimer);localErrorHeld=false;commandErrorHeld=false;lastError=false;lastMessage='Ready.';idle=!tasks.size;renderStatus();},
+    notice(message: string,error=false,{log=true}: {log?: boolean}={}){lastMessage=message;lastError=error;markBusy();localErrorHeld=error;commandErrorHeld=error&&!log;settle();renderStatus();if(enabled&&log)void request({action:'notice',message:String(message).slice(0,1000),error}).then(()=>poll()).catch(()=>{});},
     diagnostic(message: string){if(enabled)void request({action:'diagnostic',message:message.slice(0,1000)}).catch(()=>{});},
-    queued(message: string | null){if(!message)return null;markBusy();const id=++sequence;tasks.set(id,{message,active:false});renderStatus();return id;},
-    running(id: number | null){if(id!==null&&tasks.has(id)){tasks.get(id)!.active=true;renderStatus();}},
+    queued(message: string | null){if(!message)return null;markBusy();lastError=false;const id=++sequence;tasks.set(id,{message,active:false});renderStatus();return id;},
+    running(id: number | null){if(id!==null&&tasks.has(id)){markBusy();lastError=false;tasks.get(id)!.active=true;renderStatus();}},
     done(id: number | null){if(id===null)return;const task=tasks.get(id);if(task){if(!enabled&&!lastError)lastMessage='Finished: '+task.message.replace(/…$/,'');tasks.delete(id);settle();renderStatus();void poll();}},
   };
 }
