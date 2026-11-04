@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export async function testSyncProgress(page,url){
-  let calls=0,releaseFirst,releaseSecond;
+  let calls=0,releaseFirst,releaseSecond;const batchCounts=[];
   const first=new Promise(resolve=>releaseFirst=resolve),second=new Promise(resolve=>releaseSecond=resolve);
   const routes=t=>t.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
@@ -11,7 +11,7 @@ export async function testSyncProgress(page,url){
     else if(action==='records')json={records:[]};
     else if(action==='activity')json={entries:[]};
     else if(action==='sync'){
-      calls++;if(calls===1)await first;if(calls===2)await second;json={count:100,more:true};
+      calls++;batchCounts.push(route.request().postDataJSON().batches);if(calls===1)await first;if(calls===2)await second;json={count:100,more:true};
     }else throw Error('Unexpected sync progress route '+action);
     await route.fulfill({json});
   });
@@ -32,7 +32,8 @@ export async function testSyncProgress(page,url){
     assert.deepEqual(await bounds(),initialBounds,'Refreshing Mail and changing sync progress must keep pane positions steady');
     assert.equal(await page.locator('#sync-button').isDisabled(),true);
     releaseSecond();await page.locator('#sync-status').filter({hasText:'Older mail remains · continues on next check'}).waitFor();
-    assert.equal(calls,5,'one check retains the five-batch limit');assert.equal(await page.locator('#sync-button').isEnabled(),true);
+    assert.equal(calls,2,'IMAP continues older history without reconnecting for every header window');
+    assert.deepEqual(batchCounts,[1,4],'one check retains the five-batch allowance');assert.equal(await page.locator('#sync-button').isEnabled(),true);
     assert.deepEqual(await bounds(),initialBounds,'Completing sync must keep pane positions steady');
     await page.locator('#mail-actions-menu summary').click();
     assert.equal(await page.locator('#mail-actions-menu [data-action="import"]').isVisible(),true);

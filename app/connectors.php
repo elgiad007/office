@@ -102,7 +102,8 @@ function write_all(mixed $s,string $data): void {
 function imap_quote(string $value): string { if (preg_match('/[\r\n\x00]/',$value)) fail('Invalid account credential.'); return '"'.addcslashes($value,'\\"').'"'; }
 function imap_command(mixed $s,string $command,int $literalLimit=1400000): array {
     static $sequence=0;$stage=imap_stage($command);$started=microtime(true);
-    activity_step('IMAP: '.$stage.'.');
+    // Batch completion retains timing; repetitive sync FETCH starts add no useful progress.
+    if($stage!=='reading message data' || !in_array($GLOBALS['office_activity']['operation']??'',['Synchronize account','Refresh folder'],true))activity_step('IMAP: '.$stage.'.');
     if(preg_match('/^(?:UID\s+)?(?:MOVE|COPY|STORE|CREATE|DELETE|RENAME|EXPUNGE|APPEND)\b/i',$command))$GLOBALS['office_imap_mutated']=true;
     $remaining=($GLOBALS['office_imap_deadline']??(microtime(true)+50))-microtime(true);
     if($remaining<=0)throw new ImapTransportError('IMAP operation exceeded its time limit while '.$stage.'.');
@@ -191,6 +192,26 @@ function imap_message_content(mixed $s,string $id): ?string {
     $response=imap_command($s,'UID FETCH '.$id.' (UID BODY.PEEK[])');
     return imap_fetch_content($response,$id);
 }
+/** Index FETCH tuples once, retaining literal ownership when UID follows BODY. */
+function imap_fetch_responses(array $response): array {
+    $messages=[];$tuple=['lines'=>[],'literals'=>[]];$literalIndex=0;
+    $finish=static function(array $tuple)use(&$messages):void {
+        if(preg_match('/\bUID\s+([1-9][0-9]*)(?=\s|\))/i',implode('',$tuple['lines']),$m)){
+            if(isset($messages[$m[1]])){
+                $tuple=['lines'=>array_merge($messages[$m[1]]['lines'],$tuple['lines']),'literals'=>array_merge($messages[$m[1]]['literals'],$tuple['literals'])];
+            }
+            $messages[$m[1]]=$tuple;
+        }
+    };
+    foreach($response['lines'] as $line){
+        if(preg_match('/^\* \d+ FETCH\s*\(/i',$line) || preg_match('/^A\d+ /',$line)){
+            $finish($tuple);$tuple=['lines'=>[],'literals'=>[]];
+        }
+        $tuple['lines'][]=$line;
+        if(preg_match('/\{\d+\}\r\n$/',$line))$tuple['literals'][]=$response['literals'][$literalIndex++]??null;
+    }
+    $finish($tuple);return $messages;
+}
 function imap_fetch_content(array $response,string $id,string $section=''): ?string {
     // UID can follow the body literal. Keep unsolicited FETCH literals separate.
     $header=''; $body=null; $literalIndex=0; $seen=false;
@@ -209,6 +230,11 @@ function imap_fetch_content(array $response,string $id,string $section=''): ?str
             if (preg_match('/\bBODY\['.preg_quote($section,'/').'\](?:<\d+>)?\s+\{\d+\}\r\n$/i',$line)) $body=$literal;
         }
     }
+    // Indexed tuples end at their closing parenthesis, without a tagged OK.
+    if($matches($header)){
+        $seen=true;
+        if($body!==null && ($body!=='' || $section!==''))return $body;
+    }
     if ($seen) fail('The IMAP server returned the message without readable content.');
     return null;
 }
@@ -220,14 +246,8 @@ function imap_archive(mixed $s,string $id,string $configured,?string $sourceFold
 }
 /** Gmail's account-wide ID is distinct from a folder UID. Never compare thread IDs. */
 function imap_gmail_message_id(array $response,string $uid): string {
-    $tuple='';
-    foreach ($response['lines'] as $line) {
-        if (preg_match('/^\* \d+ FETCH\s*\(/i',$line) || preg_match('/^A\d+ /',$line)) {
-            if (preg_match('/\bUID '.preg_quote($uid,'/').'(?=\s|\))/i',$tuple) && preg_match('/\bX-GM-MSGID ([1-9][0-9]*)\b/i',$tuple,$m)) return $m[1];
-            $tuple='';
-        }
-        $tuple.=$line;
-    }
+    $tuple=imap_fetch_responses($response)[$uid]??null;
+    if($tuple && preg_match('/\bX-GM-MSGID ([1-9][0-9]*)\b/i',implode('',$tuple['lines']),$m))return $m[1];
     fail('Gmail did not confirm the message identifier. Sync before retrying.');
 }
 function imap_is_gmail(array $a): bool {
@@ -373,8 +393,11 @@ function mail_sync_publish_guard(string $accountId,callable $publish): mixed {
         throw $error;
     }
 }
-function sync_imap(array $a,bool $repair=false): int {
-    return imap_with_connection($a,fn($s)=>imap_sync_stream($a,$s,$repair));
+function sync_imap(array $a,bool $repair=false,int $batches=1): int {
+    // A continuation can consume the remaining header windows on one connection,
+    // avoiding repeated TLS/login, folder discovery and membership scans.
+    $windows=($repair || mail_offline_download())?1:$batches;
+    return imap_with_connection($a,fn($s)=>imap_sync_stream($a,$s,$repair,null,MAIL_SYNC_BATCH*$windows));
 }
 function smtp_expect(mixed $s,array $allowed): void {
     $line=''; $count=0;

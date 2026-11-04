@@ -210,9 +210,10 @@ try {
     }
     if ($route==='sync' && $method==='POST') {
         $repair=$input['repair']??false; if (!is_bool($repair)) fail('Invalid repair option.');
+        $batches=$input['batches']??1;if(!is_int($batches) || $batches<1 || $batches>4)fail('Choose between one and four sync batches.');
         $a=account((string)($input['id']??'')); session_write_close();
         try {
-            $operation=function() use (&$a,$repair) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair),'caldav'=>sync_caldav($a) }; };
+            $operation=function() use (&$a,$repair,$batches) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair,$batches),'caldav'=>sync_caldav($a) }; };
             $count=$a['type']==='caldav'?with_account_mail_lock($a['id'],$operation):with_account_mail_sync($a['id'],$operation);
             db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]);
             $pending=setting('mail-pending:'.$a['id'],[]);

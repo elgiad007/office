@@ -35,6 +35,7 @@ import {testKeyboardScroll} from './keyboard-scroll.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 import {testQuickMove} from './quick-move.browser.mjs';
 import {testSyncProgress} from './sync-progress.browser.mjs';
+import {testSyncScheduling,testOfflineSyncWindows} from './mail-sync-performance.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES || new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
@@ -117,6 +118,8 @@ try{
  await testMailOperationQueue(page,url);
  await testActivity(page,url);
  await testSyncProgress(page,url);
+ await testSyncScheduling(page,url);
+ await testOfflineSyncWindows(page,url);
  await testLargeMail(page,url);
  await testAccountFolders(page,url);
  await testQuickMove(page,url);

@@ -55,7 +55,7 @@ try {
     check(get_record($old)['id']===$old,'repair retains stable record identity');
     $cachedIds=array_map(fn($r)=>$r['meta']['providerId'],mail_cache_rows($a['id']));
     $flags=''; foreach ($cachedIds as $index=>$uid) $flags.='* '.($index+1).' FETCH (UID '.$uid.' FLAGS ())'."\r\n";
-    $normal=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),['UID FETCH '.implode(',',$cachedIds).' (UID FLAGS)',$flags."{tag} OK done\r\n"]];
+    $normal=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',[]),examine_step('Saved'),search_step('ALL',$archiveIds),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),['UID FETCH '.imap_uid_set($cachedIds).' (UID FLAGS)',$flags."{tag} OK done\r\n"]];
     $normal[]=examine_step('Deleted');
     fixture($normal,function($s) use($a) { legacy_sync_stream($a,$s); });
     check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK')),'warm sync downloads no cached message bodies');
@@ -66,10 +66,16 @@ try {
     $deltaSelect=static fn($path,$seq)=>['EXAMINE '.imap_quote($path).' (CONDSTORE)',"* OK [UIDVALIDITY 100] valid\r\n* OK [HIGHESTMODSEQ $seq] state\r\n{tag} OK done\r\n"];
     set_setting('imap-checkpoints:'.$a['id'],['Saved'=>['validity'=>'100','modseq'=>'8']]);
     $delta=[...$deltaPreflight,$deltaSelect('INBOX','10'),search_step('ALL',[]),$deltaSelect('Saved','10'),search_step('ALL',$archiveIds),$deltaSelect('Deleted','10'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),
-        ['UID FETCH '.implode(',',$cachedIds).' (UID FLAGS) (CHANGEDSINCE 8)',"* 1 FETCH (UID 1 FLAGS (\\Seen) MODSEQ (9))\r\n{tag} OK done\r\n"],examine_step('Deleted')];
+        ['UID FETCH '.imap_uid_set($cachedIds).' (UID FLAGS) (CHANGEDSINCE 8)',"* 1 FETCH (UID 1 FLAGS (\\Seen) MODSEQ (9))\r\n{tag} OK done\r\n"],examine_step('Deleted')];
     fixture($delta,function($s)use($a){check(legacy_sync_stream($a,$s)===0,'incremental flags do not download cached bodies');});
     check(get_record($old)['meta']['read']===true,'changed flag applied from CONDSTORE response');
     check(setting('imap-checkpoints:'.$a['id'])['Saved']['modseq']==='10','successful scan advances its initial watermark');
+    $unchangedDelta=[...$deltaPreflight,$deltaSelect('INBOX','10'),search_step('ALL',[]),$deltaSelect('Saved','10'),search_step('ALL',$archiveIds),$deltaSelect('Deleted','10'),search_step('ALL',[]),examine_step('INBOX'),examine_step('Saved'),examine_step('Deleted')];
+    fixture($unchangedDelta,function($s)use($a){
+        imap_sync_stream($a,$s);
+        check(!array_filter(ArchiveFixture::$commands,fn($command)=>str_starts_with($command,'UID FETCH ')),'unchanged CONDSTORE watermarks skip every cached flag FETCH');
+    });
+    check(get_record($old)['meta']['read']===true,'skipped flag checks retain cached read state');
     $checkpoint=setting('imap-checkpoints:'.$a['id']);
     fixture([...$deltaPreflight,$deltaSelect('INBOX','11'),search_step('ALL',[]),['EXAMINE "Saved" (CONDSTORE)',"{tag} NO denied\r\n"]],function($s)use($a){refused(fn()=>legacy_sync_stream($a,$s),'EXAMINE refused');});
     check(setting('imap-checkpoints:'.$a['id'])===$checkpoint,'failed scan cannot advance incremental checkpoints');
@@ -202,18 +208,24 @@ try {
     // Default headers-first sync must catch a burst larger than its batch and
     // resume older history even when more arrivals appear between passes.
     set_setting('preferences',[]);$busy=make_account('busy-headers');
-    $runHeaders=function(array $all,array $fresh,array $existing)use($busy){
+    $runHeaders=function(array $all,array $fresh,array $existing,int $limit=100)use($busy){
         $steps=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',$all),examine_step('Saved'),search_step('ALL',[]),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX')];
-        foreach(array_chunk($existing,100) as $chunk){$flags='';foreach($chunk as $uid)$flags.='* 1 FETCH (UID '.$uid.' FLAGS ())'."\r\n";$steps[]=['UID FETCH '.implode(',',$chunk).' (UID FLAGS)',$flags."{tag} OK done\r\n"];}
-        if($fresh){$sizes='';foreach($fresh as $uid)$sizes.='* 1 FETCH (UID '.$uid.' RFC822.SIZE 200)'."\r\n";$steps[]=['UID FETCH '.implode(',',$fresh).' (UID RFC822.SIZE)',$sizes."{tag} OK done\r\n"];}
-        foreach($fresh as $uid){$headers="Subject: Busy $uid\r\nFrom: sender@example.com\r\nMessage-ID: <busy-$uid@example.com>\r\n\r\n";$steps[]=['UID FETCH '.$uid.' (UID FLAGS BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)','* 1 FETCH (UID '.$uid.' FLAGS () BODY['.IMAP_HEADER_SECTION.'] {'.strlen($headers)."}\r\n".$headers.")\r\n{tag} OK done\r\n"];}
+        foreach(array_chunk($fresh,25) as $chunk){
+            $response='';
+            // Reverse server order and put UID after each literal to exercise ownership.
+            foreach(array_reverse($chunk) as $uid){$headers="Subject: Busy $uid\r\nFrom: sender@example.com\r\nMessage-ID: <busy-$uid@example.com>\r\n\r\n";$response.='* 1 FETCH (FLAGS () RFC822.SIZE 200 BODY['.IMAP_HEADER_SECTION.'] {'.strlen($headers)."}\r\n".$headers.' UID '.$uid.")\r\n";}
+            $steps[]=['UID FETCH '.implode(',',$chunk).' (UID FLAGS RFC822.SIZE BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',$response."{tag} OK done\r\n"];
+        }
+        foreach(array_chunk($existing,1000) as $chunk){$flags='';foreach($chunk as $uid)$flags.='* 1 FETCH (UID '.$uid.' FLAGS ())'."\r\n";$steps[]=['UID FETCH '.imap_uid_set($chunk).' (UID FLAGS)',$flags."{tag} OK done\r\n"];}
         $steps[]=examine_step('Saved');$steps[]=examine_step('Deleted');
-        fixture($steps,fn($s)=>imap_sync_stream($busy,$s));
+        fixture($steps,fn($s)=>imap_sync_stream($busy,$s,false,null,$limit));
         check(!array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK[]')),'header batch never downloads full bodies');
+        check(count(array_filter(ArchiveFixture::$commands,fn($cmd)=>str_contains($cmd,'BODY.PEEK[')))===(int)ceil(count($fresh)/25),'new headers take one FETCH per 25 messages including sizes');
     };
     $uids=fn($from,$to)=>array_map('strval',range($from,$to));
     activity_begin('Synchronize account','Fixture');
     $runHeaders($uids(1,250),$uids(151,250),[]);
+    check(count(array_filter(ArchiveFixture::$commands,fn($command)=>str_starts_with($command,'UID FETCH ')))===4,'100 new messages require four FETCH commands instead of 101');
     activity_finish(true);
     $progress=array_values(array_filter(activity_rows(),fn($entry)=>$entry['phase']==='sync-progress'));
     check((bool)array_filter($progress,fn($entry)=>str_contains($entry['message'],'Downloading older mail · INBOX · batch message 1 of 100 · 250 messages still to cache.')),'real IMAP batches publish folder, batch position and remaining history');
@@ -236,19 +248,55 @@ try {
     sync_google_mail($g3,function($path)use($gmailHeaders,&$bodyReads){$msg=$gmailHeaders($path);if(str_contains($path,'format=raw')){$bodyReads++;$msg['raw']=base64_encode("Subject: Gmail header\r\n\r\nOffline body");}return $msg;});
     check($bodyReads===125 && !array_filter(mail_cache_rows($g3['id']),fn($r)=>!empty($r['meta']['headerOnly'])),'enabling offline downloads fills bodies for previously indexed Gmail headers');
     set_setting('preferences',[]);
-    $repairBatch=function(bool $repair)use($busy,$uids){
+    $repairBatch=function(bool $repair,int $limit=100)use($busy,$uids){
         $rows=mail_cache_rows($busy['id']);
         $queued=$repair?array_map(fn($r)=>$r['meta']['providerId'],$rows):(setting('imap-repair:'.$busy['id'])['INBOX']['ids']??[]);
         $fetch=array_slice($queued,0,100);
         $steps=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',$uids(1,270)),examine_step('INBOX')];
-        if(!$repair)foreach(array_chunk($rows,100) as $chunk){$flags='';$ids=[];foreach($chunk as $r){$uid=$r['meta']['providerId'];$ids[]=$uid;$flags.='* 1 FETCH (UID '.$uid.' FLAGS ())'."\r\n";}$steps[]=['UID FETCH '.implode(',',$ids).' (UID FLAGS)',$flags."{tag} OK done\r\n"];}
         foreach($fetch as $uid)$steps[]=download_step($uid,"Subject: Busy $uid\r\n\r\nRepaired body $uid");
-        fixture($steps,fn($s)=>imap_sync_stream($busy,$s,$repair,'INBOX'));
+        if(!$repair)foreach(array_chunk($rows,1000) as $chunk){$flags='';$ids=[];foreach($chunk as $r){$uid=$r['meta']['providerId'];$ids[]=$uid;$flags.='* 1 FETCH (UID '.$uid.' FLAGS ())'."\r\n";}$steps[]=['UID FETCH '.imap_uid_set($ids).' (UID FLAGS)',$flags."{tag} OK done\r\n"];}
+        fixture($steps,fn($s)=>imap_sync_stream($busy,$s,$repair,'INBOX',$limit));
     };
     $repairBatch(true);
     check(count(setting('imap-repair:'.$busy['id'])['INBOX']['ids'])===170,'large repair saves its remaining body identifiers');
-    $repairBatch(false);$repairBatch(false);
+    $repairBatch(false,400);
+    check(count(setting('imap-repair:'.$busy['id'])['INBOX']['ids'])===70,'larger header windows retain the 100-body repair bound');
+    $repairBatch(false);
     check(setting('imap-repair:'.$busy['id'])['INBOX']['ids']===[] && !array_filter(mail_cache_rows($busy['id']),fn($r)=>!empty($r['meta']['headerOnly'])),'later normal syncs complete all 270 repair bodies without restarting');
+    $runHeaders($uids(1,670),$uids(271,670),$cachedUids(),400);
+    check(count(mail_cache_rows($busy['id']))===670 && !setting('mail-pending:'.$busy['id'])['standard'],'one continuation indexes four header windows without repeating folder scans');
+    check(count(array_filter(ArchiveFixture::$commands,fn($command)=>str_starts_with($command,'CAPABILITY')))===1 && count(array_filter(ArchiveFixture::$commands,fn($command)=>str_starts_with($command,'LIST ')))===1,'four continuation windows share capability and folder discovery');
+    check(imap_uid_set(['9','2','3','7','8','3','4294967295'])==='2:3,7:9,4294967295','UID ranges preserve gaps, deduplicate and support maximum IMAP UIDs');
+    $sparseUids=array_map(static fn($i)=>(string)(3000000000+$i*2),range(1,1000));$flagBatches=imap_flag_batches($sparseUids);
+    check(count($flagBatches)===2 && array_merge(...$flagBatches)===$sparseUids && max(array_map(static fn($ids)=>strlen(imap_uid_set($ids)),$flagBatches))<=6000,'large sparse UIDs split into bounded commands without losing messages');
+    // A malformed batch cannot publish any of its messages.
+    set_setting('preferences',[]);$invalidBatch=make_account('invalid-header-batch');
+    $headerCommand='UID FETCH 1,2 (UID FLAGS RFC822.SIZE BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)';
+    $headerTuple=static function(string $uid,bool $size=true,bool $flags=true):string {
+        $headers="Subject: Header $uid\r\n\r\n";
+        return '* 1 FETCH ('.($flags?'FLAGS () ':'').($size?'RFC822.SIZE 100 ':'').'BODY['.IMAP_HEADER_SECTION.'] {'.strlen($headers)."}\r\n".$headers.' UID '.$uid.")\r\n";
+    };
+    $headerStart=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',['1','2']),examine_step('Saved'),search_step('ALL',[]),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX')];
+    foreach([
+        [$headerTuple('1'),'message size'],
+        [$headerTuple('1').$headerTuple('2',false),'message size'],
+        [$headerTuple('1').$headerTuple('2',true,false),'message flags'],
+    ] as [$response,$reason]){
+        fixture([...$headerStart,[$headerCommand,$response."{tag} OK done\r\n"]],function($s)use($invalidBatch,$reason){refused(fn()=>imap_sync_stream($invalidBatch,$s),$reason);});
+        check(mail_cache_rows($invalidBatch['id'])===[],'incomplete header batch leaves the cache untouched');
+        check(setting('imap-checkpoints:'.$invalidBatch['id'],[])===[],'incomplete batch does not advance checkpoints');
+    }
+    // An Inbox batch can be exposed without classifying absent mail in other
+    // folders. A later folder failure leaves those originals and flags intact.
+    $staged=make_account('staged-inbox');
+    $archiveSource=mail_source('Saved','100','9');
+    $archiveRow=save_record(mail_download($staged,$archiveSource,"Subject: Archive original\r\n\r\nKeep",['folder'=>'Archive','serverFolder'=>'Saved','uidValidity'=>'100','providerId'=>'9','read'=>true]),true);
+    activity_begin('Synchronize account','Fixture');
+    fixture([...$headerStart,[$headerCommand,$headerTuple('1').$headerTuple('2')."{tag} OK done\r\n"],['EXAMINE "Saved"',"{tag} NO denied\r\n"]],function($s)use($staged){refused(fn()=>with_account_mail_sync($staged['id'],fn()=>imap_sync_stream($staged,$s)),'EXAMINE refused');});
+    activity_finish(false,'Fixture folder failure');
+    check(count(mail_cache_rows($staged['id']))===3,'validated new Inbox headers survive a later folder failure');
+    check(get_record($archiveRow['id'])['meta']['folder']==='Archive' && get_record($archiveRow['id'])['meta']['read']===true,'early Inbox publication never reconciles absent Archive originals');
+    check((bool)array_filter(activity_rows(),fn($entry)=>$entry['phase']==='mail-cache-ready'),'early Inbox publication emits a cache-ready event');
     echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
     foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');

@@ -5,6 +5,8 @@ const MAIL_FOLDERS = ['Inbox','Archive','Trash'];
 const IMAP_BODY_LIMIT = 1400000;
 const IMAP_HEADER_SECTION = 'HEADER.FIELDS (SUBJECT FROM TO DATE MESSAGE-ID)';
 const MAIL_SYNC_BATCH = 100;
+const IMAP_HEADER_BATCH = 25;
+const IMAP_FLAG_BATCH = 1000;
 function mail_offline_download(): bool { return (setting('preferences',[])['mailOffline']??false)===true; }
 function mail_pending(array $a,string $scope,bool $pending): void {
     $scopes=setting('mail-pending:'.$a['id'],[]); $scopes[$scope]=$pending;
@@ -23,13 +25,34 @@ function imap_download_sizes(mixed $s,array $ids): array {
     $sizes=[];
     foreach(array_chunk($ids,100) as $chunk){
         $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID RFC822.SIZE)');
-        $tuples=preg_split('/(?=^\* \d+ FETCH)/mi',implode('',$response['lines']));
+        $tuples=imap_fetch_responses($response);
         foreach($chunk as $uid){
-            foreach($tuples as $tuple)if(preg_match('/\bUID\s+'.preg_quote((string)$uid,'/').'(?=\s|\))/i',$tuple)&&preg_match('/\bRFC822\.SIZE\s+(\d+)\b/i',$tuple,$m)){$sizes[$uid]=(int)$m[1];break;}
+            if(preg_match('/\bRFC822\.SIZE\s+(\d+)\b/i',implode('',$tuples[$uid]['lines']??[]),$m))$sizes[$uid]=(int)$m[1];
             if(!isset($sizes[$uid]))fail('The server did not return a message size. The previous mail view was kept; retry sync.');
         }
     }
     return $sizes;
+}
+/** Compact only exact UIDs: gaps must never expand the requested set. */
+function imap_uid_set(array $ids): string {
+    $ids=array_values(array_unique(array_map('intval',$ids)));sort($ids,SORT_NUMERIC);
+    $ranges=[];$start=null;$end=null;
+    foreach($ids as $id){
+        if($end!==null && $id===$end+1){$end=$id;continue;}
+        if($start!==null)$ranges[]=$start===$end?(string)$start:$start.':'.$end;
+        $start=$end=$id;
+    }
+    if($start!==null)$ranges[]=$start===$end?(string)$start:$start.':'.$end;
+    return implode(',',$ranges);
+}
+function imap_flag_batches(array $ids): array {
+    $batches=[];
+    foreach(array_chunk($ids,IMAP_FLAG_BATCH) as $chunk){
+        // Sparse ten-digit UIDs may not compress. Keep command lines below the
+        // usual 8 KB server limit as well as bounding response and parsing work.
+        foreach(array_chunk($chunk,strlen(imap_uid_set($chunk))>6000?500:IMAP_FLAG_BATCH) as $bounded)$batches[]=$bounded;
+    }
+    return $batches;
 }
 function imap_header_download(array $a,string $source,string $headers,array $meta,int $size): array {
     $parsed=parse_eml($headers);
@@ -38,9 +61,14 @@ function imap_header_download(array $a,string $source,string $headers,array $met
         'headerOnly'=>true,'messageSize'=>$size,'headersBase64'=>base64_encode($headers),'remote'=>true,
         'account'=>$a['id'],'accountLabel'=>$a['label'],'source'=>$source])];
 }
-function mail_cache_rows(string $account): array {
+function mail_cache_rows(string $account,bool $hydrate=true): array {
     $q=db()->prepare("SELECT * FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
-    $q->execute([$account]); return array_map('record_row',$q->fetchAll());
+    $q->execute([$account]);
+    // Sync needs stored state, not reader hashes, MIME parsing or attachment queries.
+    return array_map($hydrate?'record_row':static function(array $row):array {
+        $row['meta']=json_decode($row['meta'],true,64,JSON_THROW_ON_ERROR);
+        return $row;
+    },$q->fetchAll());
 }
 function mail_source(string $folder,string $validity,string $uid): string {
     return 'imap-folder:'.rawurlencode($folder).':'.$validity.':'.$uid;
@@ -69,7 +97,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
     try {
         $q=$db->prepare('SELECT id FROM accounts WHERE id=?'); $q->execute([$a['id']]);
         if (!$q->fetch()) fail('Account was removed during synchronization.',409);
-        $rows=mail_cache_rows($a['id']);
+        $rows=mail_cache_rows($a['id'],false);
         if ($scope!==null) $rows=array_values(array_filter($rows,$scope));
         $bySource=[]; $missing=[]; $hashes=[];
         foreach ($rows as $r) {
@@ -99,7 +127,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
             }
             validate_record($r);
             // Re-downloading unchanged mail must not invalidate an open reader.
-            if (!$old || $old['kind']!==$r['kind'] || $old['title']!==$r['title'] || $old['body']!==$r['body'] || $old['meta']!==$r['meta']) save_record($r,true);
+            if (!$old || $old['kind']!==$r['kind'] || $old['title']!==$r['title'] || $old['body']!==$r['body'] || $old['meta']!==$r['meta']) save_record($r,true,false);
             unset($missing[$r['id']]);
         }
         foreach ($rows as $r) {
@@ -107,14 +135,14 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
             if (isset($downloads[$source]) || !isset($membership[$source])) continue;
             $meta=array_merge($r['meta'],$membership[$source],['source'=>$source]);
             unset($meta['recoveryFrom']);
-            if ($meta!==$r['meta']) { $r['meta']=$meta; save_record($r,true); }
+            if ($meta!==$r['meta']) { $r['meta']=$meta; save_record($r,true,false); }
         }
         $keep=(setting('preferences',[])['keepRecoveryCopies']??true)!==false;
         foreach ($missing as $r) {
             if ($keep) {
                 if (($r['meta']['folder']??'')!=='Recovery copies') {
                     $r['meta']['recoveryFrom']=$r['meta']['folder']??'Inbox';
-                    $r['meta']['folder']='Recovery copies'; save_record($r,true);
+                    $r['meta']['folder']='Recovery copies'; save_record($r,true,false);
                 }
             } else $db->prepare('DELETE FROM records WHERE id=?')->execute([$r['id']]);
         }
@@ -195,7 +223,8 @@ function imap_response_has_uid(array $response,string $uid): bool {
     return (bool)preg_match('/\bUID\s+'.preg_quote($uid,'/').'(?=\s|\))/i',implode('',$response['lines']));
 }
 function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath=null,int $limit=MAIL_SYNC_BATCH): int {
-    $deadline=microtime(true)+45;
+    $started=microtime(true);$deadline=$started+45;
+    $offline=mail_offline_download();
     $cap=imap_command($s,'CAPABILITY');
     $gmail=(bool)preg_match('/\bX-GM-EXT-1\b/i',implode('',$cap['lines']));
     $special=(bool)preg_match('/\bSPECIAL-USE\b/i',implode('',$cap['lines']));
@@ -218,7 +247,9 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
     $scope=$onlyPath!==null
         ? static fn($r)=>($r['meta']['serverFolder']??null)===$onlyPath
         : static fn($r)=>in_array($r['meta']['folder']??'',MAIL_FOLDERS,true) || (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true) && in_array($r['meta']['recoveryFrom']??'Inbox',MAIL_FOLDERS,true));
-    $membership=[]; $scans=[]; $downloads=[]; $cached=array_values(array_filter(mail_cache_rows($a['id']),$scope));
+    $cacheStarted=microtime(true);
+    $membership=[]; $scans=[]; $downloads=[]; $cached=array_values(array_filter(mail_cache_rows($a['id'],false),$scope));
+    activity_step('IMAP: cache prepared.','success',(int)round((microtime(true)-$cacheStarted)*1000));
     $cachedSources=[];
     foreach ($cached as $row) $cachedSources[mail_row_source($row)]=true;
     foreach ($paths as $label=>$path) {
@@ -250,7 +281,7 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
             $source=mail_row_source($r);
             if (isset($membership[$source]) && $membership[$source]['folder']===$label) {
                 $uid=$membership[$source]['providerId'];
-                if ($repair || (mail_offline_download() && !empty($r['meta']['headerOnly']) && ($r['meta']['messageSize']??0)<=IMAP_BODY_LIMIT)) $ids[]=$uid;
+                if ($repair || ($offline && !empty($r['meta']['headerOnly']) && ($r['meta']['messageSize']??0)<=IMAP_BODY_LIMIT)) $ids[]=$uid;
                 else {
                     $flagIds[]=$uid;
                     if($changedSince!==null){
@@ -260,17 +291,6 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
                 }
             }
         }
-        foreach (array_chunk($flagIds,100) as $chunk) {
-            mail_deadline($deadline);
-            $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS'.($gmail?' X-GM-MSGID':'').')'.($changedSince!==null?' (CHANGEDSINCE '.$changedSince.')':''));
-            foreach ($chunk as $uid) {
-                if($changedSince!==null && !imap_response_has_uid($response,$uid))continue;
-                $source=mail_source($scan['path'],$scan['validity'],$uid);
-                $membership[$source]['read']=imap_fetch_flags($response,$uid);
-                if ($gmail) $membership[$source]['gmailMessageId']=imap_gmail_message_id($response,$uid);
-            }
-        }
-        $scans[$label]['flagsComplete']=true;
         $repairIds=($repairs[$scan['path']]['validity']??null)===$scan['validity']?($repairs[$scan['path']]['ids']??[]):[];
         if($repair)$repairIds=$ids;
         $repairIds=array_values(array_intersect($repairIds,$scan['ids']));
@@ -287,20 +307,41 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         }
         $ids=array_values(array_unique($ids));
         $pending=count($ids)>$limit || count($unknown)>$limit;
-        $ids=array_map('strval',array_values(array_unique(array_merge(array_slice($ids,0,$limit),array_keys($reconcileIds)))));$sizes=imap_download_sizes($s,$ids);
+        $ids=array_map('strval',array_values(array_unique(array_merge(array_slice($ids,0,$limit),array_keys($reconcileIds)))));
+        $headerIds=array_values(array_filter($ids,static fn($uid)=>!$offline && !$repair && !in_array($uid,$repairIds,true) && !isset($reconcileIds[$uid])));
+        // Larger continuation windows apply to cheap headers. Keep resumable body
+        // repairs at their existing bound, plus any required move reconciliation.
+        $bodyIds=array_values(array_diff($ids,$headerIds));
+        $deferred=array_slice(array_values(array_filter($bodyIds,static fn($uid)=>!isset($reconcileIds[$uid]))),MAIL_SYNC_BATCH);
+        if($deferred){$ids=array_values(array_diff($ids,$deferred));$bodyIds=array_values(array_diff($bodyIds,$deferred));$pending=true;}
+        $headerChunks=[];
+        foreach(array_chunk($headerIds,IMAP_HEADER_BATCH) as $chunk)foreach($chunk as $uid)$headerChunks[$uid]=$chunk;
+        $headerResponses=[];
+        // Header requests carry sizes too; body downloads still preflight their size.
+        $sizes=imap_download_sizes($s,$bodyIds);
         $batchPosition=0;$remaining=count($unknown);$older=count($unknown)>$limit;$oldestUnknown=$unknown?(int)min($unknown):0;
         if(!$older && $unknown){foreach($cached as $row)if(($row['meta']['serverFolder']??null)===$scan['path'] && (int)($row['meta']['providerId']??0)>$oldestUnknown){$older=true;break;}}
         foreach ($ids as $uid) {
             if (microtime(true)>$deadline-10) { $pending=true; break; }
             $batchPosition++;
-            activity_sync_progress(($older?'Downloading older mail':'Downloading mail').' · '.$folderName.' · batch message '.$batchPosition.' of '.count($ids).' · '.$remaining.' messages still to cache.');
+            if(($batchPosition-1)%IMAP_HEADER_BATCH===0 || $batchPosition===count($ids))activity_sync_progress(($older?'Downloading older mail':'Downloading mail').' · '.$folderName.' · batch message '.$batchPosition.' of '.count($ids).' · '.$remaining.' messages still to cache.');
             if(in_array($uid,$unknown,true))$remaining--;
             $source=mail_source($scan['path'],$scan['validity'],$uid);
-            // Preserve full-content reconciliation for known moved messages.
-            $reconcile=isset($reconcileIds[$uid]);
-            $repairBody=$repair || in_array($uid,$repairIds,true);
-            if($sizes[$uid]>IMAP_BODY_LIMIT || (!mail_offline_download() && !$repairBody && !$reconcile)){
-                $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)');
+            if(isset($headerChunks[$uid]) || $sizes[$uid]>IMAP_BODY_LIMIT){
+                if(isset($headerChunks[$uid])){
+                    if(!isset($headerResponses[$uid])){
+                        $chunk=$headerChunks[$uid];
+                        $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS RFC822.SIZE'.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',32768);
+                        $headerResponses=imap_fetch_responses($response);
+                        // Validate the whole batch before accepting any of its headers.
+                        foreach($chunk as $requested){
+                            if(!isset($headerResponses[$requested]) || !preg_match('/\bRFC822\.SIZE\s+(\d+)\b/i',implode('',$headerResponses[$requested]['lines']),$sizeMatch))fail('The server did not return a message size. The previous mail view was kept; retry sync.');
+                            $sizes[$requested]=(int)$sizeMatch[1];
+                            if(imap_fetch_content($headerResponses[$requested],(string)$requested,IMAP_HEADER_SECTION)===null)fail('Message headers changed during synchronization. The previous mail view was kept; retry sync.');
+                        }
+                    }
+                    $response=$headerResponses[$uid];
+                }else $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',32768);
                 $headers=imap_fetch_content($response,(string)$uid,IMAP_HEADER_SECTION);
                 if($headers===null)fail('Message headers changed during synchronization. The previous mail view was kept; retry sync.');
                 $meta=$membership[$source];$meta['read']=imap_fetch_flags($response,(string)$uid);
@@ -319,11 +360,39 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
             $downloads[$source]=mail_download($a,$source,$raw,$meta);
             $repairIds=array_values(array_diff($repairIds,[$uid]));
         }
+        // Expose validated new Inbox headers while other folders are still being
+        // processed. Restrict publication to these sources: never reconcile absent
+        // mail or merge moved originals until the complete account snapshot is ready.
+        if($label==='Inbox'){
+            $arrivals=array_filter($downloads,static fn($r,$source)=>!isset($cachedSources[$source]) && !empty($r['meta']['headerOnly']) && ($r['meta']['folder']??'')==='Inbox',ARRAY_FILTER_USE_BOTH);
+            if($arrivals){
+                publish_mail_snapshot($a,$membership,$arrivals,static fn($r)=>isset($arrivals[mail_row_source($r)]));
+                if(isset($GLOBALS['office_activity']))activity_event('Inbox ready · '.count($arrivals).' new messages cached.','info','mail-cache-ready',(int)round((microtime(true)-($GLOBALS['office_activity']['started']??$started))*1000));
+            }
+        }
+        // Download arrivals before spending round trips on already cached mail.
+        $scans[$label]['flagsComplete']=true;
+        foreach (imap_flag_batches($flagIds) as $chunk) {
+            if(microtime(true)>$deadline-5){$pending=true;$scans[$label]['flagsComplete']=false;break;}
+            mail_deadline($deadline);
+            // An equal watermark proves cached flags unchanged at the scan boundary.
+            if($changedSince!==null && $changedSince===$scan['modseq'])continue;
+            $response=imap_command($s,'UID FETCH '.imap_uid_set($chunk).' (UID FLAGS'.($gmail?' X-GM-MSGID':'').')'.($changedSince!==null?' (CHANGEDSINCE '.$changedSince.')':''));
+            $tuples=imap_fetch_responses($response);
+            foreach ($chunk as $uid) {
+                if($changedSince!==null && !isset($tuples[$uid]))continue;
+                $source=mail_source($scan['path'],$scan['validity'],$uid);
+                $membership[$source]['read']=imap_fetch_flags($tuples[$uid]??['lines'=>[]],$uid);
+                if ($gmail) $membership[$source]['gmailMessageId']=imap_gmail_message_id($tuples[$uid],$uid);
+            }
+        }
         $repairs[$scan['path']]=['validity'=>$scan['validity'],'ids'=>$repairIds];
         $scans[$label]['pending']=$pending || (bool)$repairIds;
     }
     mail_deadline($deadline);
+    $publishStarted=microtime(true);
     $count=publish_mail_snapshot($a,$membership,$downloads,$scope);
+    activity_step('IMAP: cache published.','success',(int)round((microtime(true)-$publishStarted)*1000));
     set_setting('imap-repair:'.$a['id'],$repairs);
     foreach($scans as $scan) mail_pending($a,$scan['path'],$scan['pending']??false);
     if($onlyPath===null)mail_pending($a,'standard',(bool)array_filter($scans,fn($scan)=>$scan['pending']??false));

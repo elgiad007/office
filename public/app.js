@@ -228,16 +228,26 @@ async function requestApi(route, data) {
         payload = { ...payload, summary: true };
     const response = await fetch('api.php?r=' + route, { method: payload === undefined ? 'GET' : 'POST', headers: payload === undefined ? {} : { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf, 'X-Office-Progress': '1' }, body: payload === undefined ? undefined : JSON.stringify(payload), cache: 'no-store' });
     let result, status = response.status;
+    let cacheRefresh;
     if (response.headers.get('Content-Type')?.includes('application/x-ndjson')) {
         const reader = response.body.getReader(), decoder = new TextDecoder();
         let buffer = '', finished = false;
-        const consume = (line) => { if (!line.trim())
-            return; const event = JSON.parse(line); if (event.type === 'activity')
-            activity.receive(event.entry); if (event.type === 'result') {
-            result = event.body;
-            status = event.status;
-            finished = true;
-        } };
+        const consume = (line) => {
+            if (!line.trim())
+                return;
+            const event = JSON.parse(line);
+            if (event.type === 'activity') {
+                activity.receive(event.entry);
+                if (route === 'sync' && event.entry.phase === 'mail-cache-ready' && state.app === 'mail' && !state.dirty && !document.hidden) {
+                    cacheRefresh ??= load(undefined, { preserveSelection: true, selectFirst: false }).catch(cause => notice(asError(cause).message, true));
+                }
+            }
+            if (event.type === 'result') {
+                result = event.body;
+                status = event.status;
+                finished = true;
+            }
+        };
         while (true) {
             const { value, done } = await reader.read();
             buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -262,6 +272,7 @@ async function requestApi(route, data) {
         catch {
             throw Error('The server did not return JSON. Check PHP configuration and upload limits.');
         }
+    await cacheRefresh;
     if (status >= 400) {
         if (status === 409 && result.code === 'mail_revision_conflict' && result.record)
             refreshMailRecord(result.record);
@@ -653,7 +664,7 @@ function captureMailReader() {
 async function load(preferId, { selectFirst = true, preserveSelection = false } = {}, initialRecords) {
     await waitForAttachments();
     // A background refresh must never replace an in-memory draft.
-    if (isUnsavedDraft())
+    if (isUnsavedDraft() || (preserveSelection && state.dirty))
         return;
     if (state.app !== 'mail')
         displayedMailId = null;
@@ -692,7 +703,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
         if (state.app !== app)
             return;
     } while (app === 'mail' && version !== mailDeleteVersion + mailReadVersion);
-    if (isUnsavedDraft())
+    if (isUnsavedDraft() || (preserveSelection && state.dirty))
         return;
     if (preserveSelection && selectionContext !== JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]))
         return;
@@ -1532,29 +1543,30 @@ async function syncAccounts(manual = true) {
     busyButton(document.querySelector('#sync-button'), true);
     let errors = 0;
     const accounts = [...state.accounts];
+    const queue = accounts.map(account => ({ account, batch: 0 }));
     let next = 0;
     const active = new Map(), pendingHistory = new Set();
     const showActive = () => { const status = document.querySelector('#sync-status'); if (status)
         status.textContent = 'Syncing ' + [...active.values()].join('; ') + '…'; };
     const worker = async () => {
-        while (next < accounts.length) {
+        while (next < queue.length) {
             if (document.hidden || (!manual && Date.now() - state.lastActivity > 120000))
                 return;
-            const a = accounts[next++];
+            const { account: a, batch } = queue[next++];
             try {
-                for (let batch = 0; batch < 5; batch++) {
-                    active.set(a.id, `${a.label} · batch ${batch + 1}${pendingHistory.has(a.id) ? ' · downloading older mail' : ''}`);
-                    showActive();
-                    const result = await api('sync', { id: a.id });
-                    if (result.more)
-                        pendingHistory.add(a.id);
-                    else
-                        pendingHistory.delete(a.id);
-                    if (state.app === 'mail' && !state.dirty)
-                        await load(undefined, { preserveSelection: true });
-                    if (!result.more || document.hidden)
-                        break;
-                }
+                const batchCount = a.type === 'imap' && state.prefs.mailOffline !== true && batch > 0 ? 5 - batch : 1;
+                active.set(a.id, `${a.label} · batch ${batch + 1}${pendingHistory.has(a.id) ? ' · downloading older mail' : ''}`);
+                showActive();
+                const result = await api('sync', { id: a.id, batches: batchCount });
+                if (result.more)
+                    pendingHistory.add(a.id);
+                else
+                    pendingHistory.delete(a.id);
+                if (state.app === 'mail' && !state.dirty)
+                    await load(undefined, { preserveSelection: true });
+                // Give every account a first pass before continuing older history.
+                if (result.more && batch + batchCount < 5 && !document.hidden)
+                    queue.push({ account: a, batch: batch + batchCount });
             }
             catch (cause) {
                 const error = asError(cause);

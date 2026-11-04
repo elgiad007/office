@@ -19,7 +19,10 @@ function activity_event(string $message,string $level='info',string $phase='prog
             gmdate('Y-m-d\TH:i:s\Z'),$level,substr($context['account']??'',0,200),$context['operation']??'Office',
             substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000),$duration,$context['run']??'', $phase]);
         $id=(int)$db->lastInsertId();
-        $db->exec('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT 500)');$db->commit();
+        // Prune once per group and at operation boundaries, rather than on every
+        // transport event. Readers still expose exactly the newest 500 entries.
+        if($id%50===0 || in_array($phase,['complete','error'],true))$db->exec('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT 500)');
+        $db->commit();
         if(!empty($GLOBALS['office_activity_stream'])) {
             echo json_encode(['type'=>'activity','entry'=>['id'=>$id,'time'=>gmdate('Y-m-d\TH:i:s\Z'),'level'=>$level,'account'=>$context['account']??'','operation'=>$context['operation']??'Office','message'=>substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000),'duration_ms'=>$duration,'run'=>$context['run']??'','phase'=>$phase]],JSON_INVALID_UTF8_SUBSTITUTE)."\n";
             if(ob_get_level())@ob_flush();flush();

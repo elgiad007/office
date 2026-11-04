@@ -160,7 +160,7 @@ function validate_record(array $input): array {
     foreach (['start','end','due','email','phone','company','group','location','to','sendAccount','folder','from','raw','recurrence','date'] as $key) if (isset($meta[$key]) && !is_string($meta[$key])) fail('Invalid '.$key.' metadata.');
     return ['kind'=>$kind,'title'=>$title,'body'=>$body,'meta'=>$meta];
 }
-function save_record(array $input, bool $internal = false): array {
+function save_record(array $input, bool $internal = false,bool $hydrate=true): array {
     $r=validate_record($input); $id=(string)($input['id']??bin2hex(random_bytes(16)));
     if (!preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$id)) fail('Invalid item ID.');
     $db=db(); $outer=$db->inTransaction(); if (!$outer) $db->beginTransaction();
@@ -180,5 +180,6 @@ function save_record(array $input, bool $internal = false): array {
         if (in_array($r['kind'],['wiki','documents'],true)) $db->prepare('INSERT INTO revisions VALUES(?,?,?)')->execute([$id,$revision,json_encode($r,JSON_THROW_ON_ERROR)]);
         if (!$outer) $db->commit();
     } catch (Throwable $e) { if (!$outer && $db->inTransaction()) $db->rollBack(); throw $e; }
-    return get_record($id);
+    // Snapshot publishers discard the result; avoid reader MIME/attachment work.
+    return $hydrate?get_record($id):$r+['id'=>$id,'revision'=>$revision];
 }
