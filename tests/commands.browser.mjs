@@ -10,6 +10,7 @@ export async function testCommands(page,url) {
     if(action==='status')json={authenticated,activity:true,csrf:'fixture',preferences:{}};
     else if(action==='google-settings')json={configured:false,client_id:'',redirect:''};
     else if(action==='accounts')json={accounts:[]};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='activity'){if(route.request().method()==='POST')notices.push(route.request().postDataJSON());json={entries:['error','warning','info'].map((level,i)=>({id:i+1,time:'2026-11-03T00:00:00Z',level,phase:'diagnostic',operation:'fixture',message:level+' fixture',duration_ms:null}))};}
     else if(action==='records')json={records:records.filter(r=>r.kind===new URL(route.request().url()).searchParams.get('kind'))};
     else if(action==='save'){const data=route.request().postDataJSON();saves++;if(!data.id&&releaseCreate)await new Promise(resolve=>{releaseCreate.resolve=resolve;createStarted();});const record={...data,id:data.id||'created-'+saves,revision:saves,meta:data.meta||{}};if(!data.id){creates.push(data.kind);records.push(record);}else records.splice(records.findIndex(r=>r.id===data.id),1,record);json={record};}

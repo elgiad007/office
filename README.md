@@ -117,6 +117,24 @@ In spreadsheets, focus a cell, use arrows to move, i/Enter to edit its formula, 
 
 The Mail list count is labelled **cached messages**: it counts messages stored in Office for the current folder or search. It can grow as older messages download, without indicating new arrivals. During sync, the top status shows each active account and batch number. The bottom bar shows the current folder, message progress within the batch, and messages still to cache. Low-level connection details remain in View activity. When a check reaches its batch limit, **Older mail remains · continues on next check** explains that more history is pending.
 
+## Connections between items
+
+All seven item types can be connected to each other. Connections appear on both items and stay intact when titles change. They are Office data, including for read-only synced mail and events; linking does not edit provider content.
+
+Select an item and use command mode:
+
+- `:link event budget review` searches events by title or cached description; `:link budget` searches across types. An exact record ID also works.
+- As you type, use Up/Down to choose a match, Tab to fill its exact ID, and Enter to create the connection. Escape dismisses suggestions while retaining command mode and the typed text. Escape with suggestions closed exits command mode. Ambiguous searches require selecting an exact item.
+- `:new linked mail`, `:new linked event`, or any other creation type opens a linked draft. Its first save creates the item and connection together. Discarding leaves no connection. An unsaved source must first be saved through the normal Save/Discard/Cancel flow; discarding the source cancels linked creation.
+- `:unlink [type] <name or ID>` searches only existing connections and removes the chosen connection. It does not delete either item.
+- `:links` opens the current item's connection list and graph. `:links all`, or **Connections** in the sidebar, opens the workspace view. Search filters by either endpoint's title. Graph nodes can be focused with a click or Enter/Space; open an item from the list. Lists load 100 edges per page, with **Load more connections**; the graph shows up to 80 items from the loaded connections.
+
+The Connections section on an item also provides open, link, and unlink controls. Opening a connection switches apps and reveals the target outside the current search, mail folder, or hidden calendar. Mail searches cover locally cached descriptions, not bodies that have never downloaded. Existing Markdown `[[wiki links]]` and their title-based backlinks continue to work separately.
+
+Full backups include connections; older backups without them remain supported. Removing an item from Office removes its connections; mail deletion undo restores them while both endpoints are available. Verified mail moves, duplicate reconciliation, cross-account transfers and recovery-to-local conversion preserve connections. An external move whose identity cannot be verified cannot safely retarget them.
+
+Connection storage references generic record IDs with no per-type columns. Frontend type labels, creation commands, and distinguishing fields live in `frontend/item-types.ts`; future applications register their type there, add their normal application/navigation behavior and backend validation, and reuse the same connection APIs and schema.
+
 ## Moving and backing up
 
 Use Settings → Download full backup for a consistent snapshot. Backups include message/document contents and are sensitive; store them privately. Restore into a fresh empty installation so existing records cannot be overwritten accidentally. Browser file imports, including JSON backup restore, are initially limited to 8 MB; for larger workspaces, stop access and copy the complete folder. Chunked/streaming large-backup restore is future work. Reconnect provider accounts after restoring.
@@ -144,6 +162,7 @@ Additional checks:
 
 ```sh
 php tests/backend.php
+php tests/connections.php
 php tests/attachments.php
 php tests/mail-sync.php
 php tests/mail-lock.php

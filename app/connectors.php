@@ -277,7 +277,7 @@ function save_imap_gmail_move(array $r,array $relatedIds): array {
     $db=db(); $db->beginTransaction();
     try {
         $saved=save_record($r,true);
-        foreach ($relatedIds as $id) if ($id!==$r['id']) $db->prepare('DELETE FROM records WHERE id=?')->execute([$id]);
+        foreach ($relatedIds as $id) if ($id!==$r['id']) { connection_retarget($id,$r['id']); $db->prepare('DELETE FROM records WHERE id=?')->execute([$id]); }
         $db->commit(); return $saved;
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
 }

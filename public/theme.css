@@ -1,4 +1,24 @@
 :root[data-accent="blue"] { --accent: #365d8a; --wash: #e7eef7; }
+/* Shared record connections and command completion */
+#activity-status:has(#command-input) { overflow:visible; }
+.connection-suggestions { position:absolute; bottom:100%; left:0; width:min(760px,90vw); max-height:45vh; overflow:auto; z-index:100; background:var(--surface); color:var(--text); border:1px solid var(--line); box-shadow:0 8px 30px #0003; border-radius:8px; }
+.connection-suggestions [role="option"] { padding:10px 14px; cursor:pointer; border-bottom:1px solid var(--line); }
+.connection-suggestions [aria-selected="true"] { background:var(--wash); outline:2px solid var(--accent); outline-offset:-2px; }
+.connection-suggestions strong,.connection-suggestions small,.connection-suggestions span { display:block; overflow-wrap:anywhere; }
+.connection-suggestions small { opacity:.7; }
+.item-connections { margin-top:22px; padding:16px; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.connection-heading { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.connection-heading h3 { margin-right:auto; }
+.item-connections h4 { margin:14px 0 4px; }
+#dialog:has(.connections-view) { width:min(1100px,94vw); max-height:92dvh; }
+.connections-view { overflow:auto; }
+.connections-view [hidden] { display:none; }
+.connections-view svg { display:block; width:100%; height:min(440px,50vh); }
+.connections-view line { stroke:var(--line); stroke-width:2; }
+.connections-view circle { fill:var(--accent); }
+.connections-view text { fill:var(--text); stroke:none; font-size:11px; }
+.connections-view [data-node] { cursor:pointer; }
+.connections-view [data-node]:focus circle { stroke:var(--text); stroke-width:4; }
 /* Calendar workspace */
 .calendar-workspace { position: relative; flex: 1; min-height: 0; }
 .calendar-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 0; }

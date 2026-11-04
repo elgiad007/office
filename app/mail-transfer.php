@@ -88,6 +88,8 @@ function transfer_remote_mail(array $r,array $destination,string $folder,?callab
     $record['id']=remote_id($destination['id'],$meta['source']);$record=save_record($record,true);
     // Keep the original recoverable under the source account's Trash policy.
     if(($progress['stage']??'')!=='done')($trash??static fn($source)=>remote_mail_action($source,'trash'))($r);
+    $db=db();$db->beginTransaction();
+    try{connection_retarget($r['id'],$record['id']);$db->commit();}catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
     $progress['stage']='done';set_setting($key,$progress);
     return $record;
 }

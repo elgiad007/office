@@ -13,7 +13,7 @@ test('help follows current bindings including help and Sheets movement',()=>{
 test('command help inventory and type options come from parser registry',()=>{
  const rows=helpEntries(keys).filter(r=>r.shortcut.startsWith(':')&&r.shortcut!==':');
  assert.deepEqual(rows.map(r=>r.shortcut),Object.keys(commandRegistry).map(n=>':'+n));
- for(const row of rows)assert.equal(resolveCommand(row.shortcut).name,row.shortcut.slice(1));
+ for(const row of rows)assert.equal(resolveCommand(row.shortcut+([':link',':unlink'].includes(row.shortcut)?' example-id':'')).name,row.shortcut.slice(1));
  for(const [name,entry] of Object.entries(commandRegistry))if(entry.aliases)for(const alias of entry.aliases){
   const canonical=rows.find(row=>row.shortcut===':'+name);
   assert.ok(canonical.options.includes(':'+alias));

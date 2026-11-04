@@ -161,6 +161,7 @@ function recovery_mail_action(array $r,string $action): ?array {
     try {
         $local=save_record($r,true);
         attachment_copy($oldId,$local['id']);
+        connection_retarget($oldId,$local['id']);
         $db->prepare('DELETE FROM records WHERE id=?')->execute([$oldId]);
         $db->commit(); return get_record($local['id']);
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }

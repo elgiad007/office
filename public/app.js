@@ -2,6 +2,7 @@
 import { openHelp } from './help.js';
 import { createKeyboardScroller } from './keyboard-scroll.js';
 import { CommandError, resolveCommand } from './commands.js';
+import { createConnections } from './connections.js';
 import { asError } from './utils.js';
 import { isPresent } from './utils.js';
 import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
@@ -31,6 +32,8 @@ const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], pr
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
+const connections = createConnections({ api, current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value) });
+let pendingLinkedSource;
 let unsavedDraft = null;
 class DraftCancelled extends Error {
 }
@@ -74,7 +77,10 @@ const busyButton = (button, busy) => { if (button)
     button.disabled = busy; };
 function notice(text, error = false) { activity.notice(text, error); }
 let commandInput = null, commandFocus = null, commandBusy = false;
+let commandSuggestions;
 function closeCommand(restore = false) {
+    commandSuggestions?.close();
+    commandSuggestions = undefined;
     const input = commandInput;
     commandInput = null;
     input?.remove();
@@ -109,7 +115,7 @@ const commandHandlers = {
         await createRecord();
     },
 };
-function openCommand() {
+function openCommand(value = ':') {
     if (commandBusy || commandInput)
         return;
     commandFocus = document.activeElement;
@@ -121,10 +127,13 @@ function openCommand() {
     input.setAttribute('aria-label', 'Command');
     input.autocomplete = 'off';
     input.spellcheck = false;
-    input.value = ':';
+    input.value = value;
     document.querySelector('#notice').hidden = true;
     document.querySelector('#activity-status').prepend(input);
     input.focus();
+    commandSuggestions = connections.autocomplete(input);
+    if (value !== ':')
+        input.dispatchEvent(new Event('input'));
     input.addEventListener('blur', () => { if (commandInput === input) {
         closeCommand();
         if (editable(document.activeElement))
@@ -133,6 +142,8 @@ function openCommand() {
     input.addEventListener('keydown', event => {
         state.lastActivity = Date.now();
         event.stopPropagation();
+        if (commandSuggestions?.key(event))
+            return;
         if (event.key === 'Escape') {
             event.preventDefault();
             closeCommand(true);
@@ -155,16 +166,35 @@ function openCommand() {
         activity.clearCommandError();
         commandBusy = true;
         closeCommand(true);
-        void (async () => { try {
-            await commandHandlers[command.name](command.argument);
-        }
-        catch (cause) {
-            if (!(cause instanceof DraftCancelled))
-                activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
-        }
-        finally {
-            commandBusy = false;
-        } })();
+        void (async () => {
+            try {
+                if (command.name === 'link' || command.name === 'unlink')
+                    await connections.mutate(command.name, command.argument, command.kind);
+                else if (command.name === 'links')
+                    await connections.view(command.argument === 'all');
+                else if (command.name === 'new' && command.linked) {
+                    if (!state.current)
+                        throw new CommandError('Select an item before creating a linked item.');
+                    const source = state.current;
+                    await leaveEditor();
+                    if (!state.rows.some(row => row.id === source.id))
+                        throw new CommandError('Linked creation cancelled because the source draft was discarded.');
+                    const sourceId = source.id;
+                    await commandHandlers.new(command.argument);
+                    if (isUnsavedDraft())
+                        pendingLinkedSource = { draft: state.current.id, source: sourceId };
+                }
+                else
+                    await commandHandlers[command.name](command.argument);
+            }
+            catch (cause) {
+                if (!(cause instanceof DraftCancelled))
+                    activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
+            }
+            finally {
+                commandBusy = false;
+            }
+        })();
     });
 }
 function rememberMail(record) {
@@ -415,7 +445,7 @@ async function boot() {
     }
 }
 function shell() {
-    root.innerHTML = `<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
     root.onclick = handleClick;
 }
 function setMailFolderPanel(open) {
@@ -968,6 +998,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     }
     else
         panel.innerHTML = markup;
+    void connections.section();
     panel.querySelectorAll('[data-mail-disclosure]').forEach(d => d.open = !!restore?.open.includes(d.dataset.mailDisclosure));
     const failure = state.app === 'mail' ? failedMailActions.get(r.id) : undefined;
     if (failure)
@@ -1138,6 +1169,7 @@ function discardUnsavedDraft() {
     const draft = unsavedDraft;
     clearTimeout(saveTimer);
     unsavedDraft = null;
+    pendingLinkedSource = undefined;
     state.current = null;
     state.dirty = false;
     if (draft?.kind === 'mail') {
@@ -1180,7 +1212,7 @@ async function commit(explicit = false) {
     const firstSave = isUnsavedDraft(), payload = structuredClone(state.current);
     state.dirty = false;
     const id = payload.id;
-    const input = firstSave ? { kind: payload.kind, title: payload.title, body: payload.body, meta: payload.meta } : payload;
+    const input = firstSave ? { kind: payload.kind, title: payload.title, body: payload.body, meta: payload.meta, ...(pendingLinkedSource?.draft === id ? { linkedTo: pendingLinkedSource.source } : {}) } : payload;
     state.savePromise = (async () => {
         try {
             const result = await api('save', input);
@@ -1193,6 +1225,7 @@ async function commit(explicit = false) {
                     }
                     Object.assign(state.current, { id: result.record.id, revision: result.record.revision, created: result.record.created, updated: result.record.updated });
                     unsavedDraft = null;
+                    pendingLinkedSource = undefined;
                     state.rows.push(state.current);
                 }
                 else {
@@ -1225,6 +1258,30 @@ async function commit(explicit = false) {
         await commit();
     if (firstSave)
         renderDetail(undefined, true);
+    if (firstSave)
+        void connections.section();
+}
+async function openConnectedRecord(id) {
+    await waitForAttachments();
+    await leaveEditor();
+    const record = (await api(`record&id=${encodeURIComponent(id)}`)).record;
+    if (!apps[record.kind])
+        throw new CommandError('This item type is not available in this version.');
+    state.app = record.kind;
+    state.current = null;
+    state.search = '';
+    state.sheet = 0;
+    state.cell = 'A1';
+    setMode('normal');
+    location.hash = record.kind;
+    if (record.kind === 'mail') {
+        state.mailScope = null;
+        state.mailFolder = record.meta.folder === 'Not in Inbox' ? 'Recovery copies' : record.meta.folder === 'Custom folder' ? 'all' : record.meta.folder || 'Archive';
+    }
+    await load(record.id);
+    if (record.kind === 'calendar')
+        calendar.ensureVisible(record.id, true);
+    focusList();
 }
 async function changeApp(name) { await waitForAttachments(); await leaveEditor(); if (name === 'mail' && state.app !== 'mail') {
     state.mailFolder = 'Inbox';
@@ -1661,6 +1718,10 @@ async function handleClick(event) {
             return;
         }
         const action = button.dataset.action;
+        if (action === 'connections') {
+            await connections.view(true);
+            return;
+        }
         if (action === 'toggle-mail-folders')
             setMailFolderPanel(!document.querySelector('.shell').classList.contains('folders-open'));
         if (action === 'close-mail-folders') {

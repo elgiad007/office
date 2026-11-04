@@ -86,7 +86,11 @@ export function createCalendar(env) {
         if (focusAttribute)
             host.querySelector(`[${focusAttribute.name}="${CSS.escape(focusAttribute.value)}"]`)?.focus({ preventScroll: true });
     }
-    function ensureVisible(id) { const row = env.rows().find(r => r.id === id); if (!row)
+    function ensureVisible(id, reveal = false) { if (reveal) {
+        const item = env.allRows().find(r => r.id === id);
+        if (item)
+            hidden.delete(item.meta.account || 'local');
+    } const row = env.rows().find(r => r.id === id); if (!row)
         return; if (!isVisible(row))
         return; if (!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)) {
         const bounds = eventBounds(row);

@@ -53,7 +53,7 @@ export function createCalendar(env:Environment) {
     host.querySelectorAll<HTMLButtonElement>('[data-day],[data-slot]').forEach(b=>b.onclick=()=>{const start=b.dataset.slot||b.dataset.day!;env.error(()=>env.create(start,dateOnly(start)?dayKey(addDays(calendarDate(start),1)):new Date(+calendarDate(start)+3600000).toISOString()));});
     if(focusAttribute)host.querySelector<HTMLElement>(`[${focusAttribute.name}="${CSS.escape(focusAttribute.value)}"]`)?.focus({preventScroll:true});
   }
-  function ensureVisible(id:string) {const row=env.rows().find(r=>r.id===id);if(!row)return;if(!isVisible(row))return;if(!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)){const bounds=eventBounds(row);if(bounds){anchor=calendarDate(dayKey(bounds.start));view='day';}else view='agenda';render();}}
+  function ensureVisible(id:string,reveal=false) {if(reveal){const item=env.allRows().find(r=>r.id===id);if(item)hidden.delete(item.meta.account||'local');}const row=env.rows().find(r=>r.id===id);if(!row)return;if(!isVisible(row))return;if(!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)){const bounds=eventBounds(row);if(bounds){anchor=calendarDate(dayKey(bounds.start));view='day';}else view='agenda';render();}}
   function isVisible(record:OfficeRecord){return !hidden.has(record.meta.account||'local');}
   return {render,ensureVisible,isVisible};
 }

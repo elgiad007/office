@@ -1,5 +1,6 @@
 /** Browser-facing contracts. PHP remains the authority for validation and storage. */
-export type ItemKind = 'mail' | 'calendar' | 'tasks' | 'contacts' | 'documents' | 'wiki' | 'sheets';
+export type {ItemKind} from './item-types.js';
+import type {ItemKind} from './item-types.js';
 export type AppName = ItemKind | 'settings';
 export type Cells = Record<string, string>;
 export interface Workbook { sheets: {name: string; cells: Cells}[] }
@@ -101,6 +102,7 @@ export interface MutationResult { record: OfficeRecord; removedIds?: string[] }
 export interface MailActionResult { record: OfficeRecord | null; removedIds?: string[]; undoToken?: string }
 export interface ApiError extends Error { status?: number; code?: string; record?: OfficeRecord }
 export interface ApiResponses {
+  'connection': {ok: boolean};
   status: Status;
   accounts: { accounts: Account[] };
   setup: { csrf: string }; login: { csrf: string }; logout: { ok: boolean };
@@ -120,8 +122,13 @@ export interface ApiResponses {
   import: { count: number }; 'import-items': { count: number }; restore: { count: number };
   backup: unknown;
 }
-export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${string}` | `history&${string}`;
+export interface ConnectionItem {id:string;kind:string;title:string;excerpt:string;meta:Record<string,string>}
+export interface ConnectionEdge {a:string;b:string;created:string}
+export interface ConnectionList {links:ConnectionEdge[];items:ConnectionItem[];more:boolean}
+export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${string}` | `history&${string}` | `connection-search&${string}` | `connections&${string}`;
 export type ApiResponse<R extends ApiRoute> = R extends keyof ApiResponses ? ApiResponses[R]
+  : R extends `connection-search&${string}` ? {items:ConnectionItem[]}
+  : R extends `connections&${string}` ? ConnectionList
   : R extends `records&${string}` ? {records: OfficeRecord[]}
   : R extends `record&${string}` ? {record: OfficeRecord}
   : {revisions: {revision: number; snapshot: OfficeRecord}[]};

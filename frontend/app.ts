@@ -1,6 +1,7 @@
 import {openHelp} from './help.js';
 import {createKeyboardScroller, type ScrollDirection} from './keyboard-scroll.js';
 import {CommandError,resolveCommand} from './commands.js';
+import {createConnections} from './connections.js';
 import {asError} from './utils.js';
 import {isPresent} from './utils.js';
 import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
@@ -37,6 +38,8 @@ const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],pre
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf});
 const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,open:selectRecord,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
+const connections=createConnections({api,current:()=>state.current?.id,open:openConnectedRecord,modal,dialog,notice,command:value=>openCommand(value)});
+let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
 class DraftCancelled extends Error {}
 const isUnsavedDraft=()=>!!unsavedDraft && state.current===unsavedDraft;
@@ -73,7 +76,9 @@ const field = (label: string,name: string,value='',type='text',extra='') => `<la
 const busyButton = (button: HTMLButtonElement | null,busy: boolean) => { if (button) button.disabled=busy; };
 function notice(text: string,error=false) { activity.notice(text,error); }
 let commandInput: HTMLInputElement | null=null,commandFocus: HTMLElement | null=null,commandBusy=false;
+let commandSuggestions: ReturnType<typeof connections.autocomplete>|undefined;
 function closeCommand(restore=false) {
+  commandSuggestions?.close();commandSuggestions=undefined;
   const input=commandInput;commandInput=null;input?.remove();
   document.querySelector<HTMLElement>('#notice')!.hidden=false;setMode('normal');
   if(restore)(commandFocus?.isConnected?commandFocus:document.querySelector<HTMLElement>('#main'))?.focus({preventScroll:true});
@@ -101,16 +106,19 @@ const commandHandlers={
     await createRecord();
   },
 };
-function openCommand() {
+function openCommand(value=':') {
   if(commandBusy||commandInput)return;
   commandFocus=document.activeElement as HTMLElement;keySequence='';setMode('command');
   const input=document.createElement('input');commandInput=input;
-  input.id='command-input';input.setAttribute('aria-label','Command');input.autocomplete='off';input.spellcheck=false;input.value=':';
+  input.id='command-input';input.setAttribute('aria-label','Command');input.autocomplete='off';input.spellcheck=false;input.value=value;
   document.querySelector<HTMLElement>('#notice')!.hidden=true;
   document.querySelector<HTMLElement>('#activity-status')!.prepend(input);input.focus();
+  commandSuggestions=connections.autocomplete(input);
+  if(value!==':')input.dispatchEvent(new Event('input'));
   input.addEventListener('blur',()=>{if(commandInput===input){closeCommand();if(editable(document.activeElement))setMode('insert');}});
   input.addEventListener('keydown',event=>{
     state.lastActivity=Date.now();event.stopPropagation();
+    if(commandSuggestions?.key(event))return;
     if(event.key==='Escape'){event.preventDefault();closeCommand(true);return;}
     if(event.key!=='Enter'||event.isComposing)return;
     event.preventDefault();if(event.repeat||commandBusy)return;
@@ -118,7 +126,19 @@ function openCommand() {
     try{command=resolveCommand(input.value);}catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});closeCommand(true);return;}
     activity.clearCommandError();
     commandBusy=true;closeCommand(true);
-    void (async()=>{try{await commandHandlers[command.name](command.argument);}catch(cause){if(!(cause instanceof DraftCancelled))activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});}finally{commandBusy=false;}})();
+    void (async()=>{try{
+      if(command.name==='link'||command.name==='unlink')await connections.mutate(command.name,command.argument!,command.kind);
+      else if(command.name==='links')await connections.view(command.argument==='all');
+      else if(command.name==='new'&&command.linked){
+        if(!state.current)throw new CommandError('Select an item before creating a linked item.');
+        const source=state.current;
+        await leaveEditor();
+        if(!state.rows.some(row=>row.id===source.id))throw new CommandError('Linked creation cancelled because the source draft was discarded.');
+        const sourceId=source.id;
+        await commandHandlers.new(command.argument);
+        if(isUnsavedDraft())pendingLinkedSource={draft:state.current!.id,source:sourceId};
+      }else await commandHandlers[command.name](command.argument);
+    }catch(cause){if(!(cause instanceof DraftCancelled))activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});}finally{commandBusy=false;}})();
   });
 }
 function rememberMail(record?: OfficeRecord | null) {
@@ -272,7 +292,7 @@ async function boot() {
   } catch(cause) { const error=asError(cause); root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector<HTMLElement>('#retry')!.onclick=boot; }
 }
 function shell() {
-  root.innerHTML=`<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  root.innerHTML=`<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><span>Office</span><span>/</span><strong id="crumb"></strong></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div></div><div class="top-actions"><span class="sync-label" id="sync-status">Automatic sync</span><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
   root.onclick=handleClick;
 }
 function setMailFolderPanel(open: boolean) {
@@ -627,6 +647,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
     panel.querySelector('.mail-reader-header')!.replaceWith(template.content.querySelector('.mail-reader-header')!);
     panel.querySelector('.mail-action-failure')?.remove();
   }else panel.innerHTML=markup;
+  void connections.section();
   panel.querySelectorAll<HTMLDetailsElement>('[data-mail-disclosure]').forEach(d=>d.open=!!restore?.open.includes(d.dataset.mailDisclosure!));
   const failure=state.app==='mail'?failedMailActions.get(r.id):undefined;
   if(failure)panel.insertAdjacentHTML('afterbegin',`<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
@@ -716,7 +737,7 @@ async function requireSaved() {
 }
 function discardUnsavedDraft() {
   const draft=unsavedDraft;
-  clearTimeout(saveTimer);unsavedDraft=null;state.current=null;state.dirty=false;
+  clearTimeout(saveTimer);unsavedDraft=null;pendingLinkedSource=undefined;state.current=null;state.dirty=false;
   if(draft?.kind==='mail'){returnFromMailDraft(draft.id);return;}
   renderList();renderDetail();
 }
@@ -738,15 +759,29 @@ async function commit(explicit=false): Promise<void> {
   clearTimeout(saveTimer); if(state.savePromise) await state.savePromise; if(!state.dirty || !state.current) return;
   collect();if(isUnsavedDraft()&&!explicit)return;
   const firstSave=isUnsavedDraft(),payload=structuredClone(state.current); state.dirty=false; const id=payload.id;
-  const input=firstSave?{kind:payload.kind,title:payload.title,body:payload.body,meta:payload.meta}:payload;
+  const input=firstSave?{kind:payload.kind,title:payload.title,body:payload.body,meta:payload.meta,...(pendingLinkedSource?.draft===id?{linkedTo:pendingLinkedSource.source}:{})}:payload;
   state.savePromise=(async()=>{try { const result=await api('save',input); if(state.current?.id===id) {
-    if(firstSave){const origin=mailDraftOrigins.get(id);if(origin){mailDraftOrigins.set(result.record.id,origin);mailDraftOrigins.delete(id);}Object.assign(state.current!,{id:result.record.id,revision:result.record.revision,created:result.record.created,updated:result.record.updated});unsavedDraft=null;state.rows.push(state.current!);}
+    if(firstSave){const origin=mailDraftOrigins.get(id);if(origin){mailDraftOrigins.set(result.record.id,origin);mailDraftOrigins.delete(id);}Object.assign(state.current!,{id:result.record.id,revision:result.record.revision,created:result.record.created,updated:result.record.updated});unsavedDraft=null;pendingLinkedSource=undefined;state.rows.push(state.current!);}
     else {state.current!.revision=result.record.revision;state.current!.updated=result.record.updated;const pos=state.rows.findIndex(r=>r.id===id);if(pos>=0)state.rows[pos]=state.current;}
   }
     const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved'; renderList();
   } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
   await state.savePromise; if(state.dirty) await commit();
   if(firstSave)renderDetail(undefined,true);
+  if(firstSave)void connections.section();
+}
+async function openConnectedRecord(id:string){
+  await waitForAttachments();await leaveEditor();
+  const record=(await api(`record&id=${encodeURIComponent(id)}`)).record;
+  if(!apps[record.kind])throw new CommandError('This item type is not available in this version.');
+  state.app=record.kind;state.current=null;state.search='';state.sheet=0;state.cell='A1';setMode('normal');location.hash=record.kind;
+  if(record.kind==='mail'){
+    state.mailScope=null;
+    state.mailFolder=record.meta.folder==='Not in Inbox'?'Recovery copies':record.meta.folder==='Custom folder'?'all':record.meta.folder||'Archive';
+  }
+  await load(record.id);
+  if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
+  focusList();
 }
 async function changeApp(name: AppName) { await waitForAttachments(); await leaveEditor(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
 function updateMailListItem(id: string) {
@@ -922,6 +957,7 @@ async function handleClick(event: MouseEvent) {
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet!);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action!;
+    if(action==='connections'){await connections.view(true);return;}
     if(action==='toggle-mail-folders')setMailFolderPanel(!document.querySelector<HTMLElement>('.shell')!.classList.contains('folders-open'));
     if(action==='close-mail-folders'){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();}
     if(action==='new')await createRecord();

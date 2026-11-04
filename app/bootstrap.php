@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 const KINDS = ['tasks', 'contacts', 'calendar', 'documents', 'wiki', 'sheets', 'mail'];
 require_once __DIR__.'/attachments.php';
+require_once __DIR__.'/connections.php';
 
 function data_dir(): string {
     $dir = getenv('OFFICE_DATA_DIR') ?: dirname(__DIR__) . '/data';
@@ -23,6 +24,7 @@ function db(): PDO {
         CREATE TABLE IF NOT EXISTS attempts (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, started INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS mail_files (record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, part TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(record_id,part));');
     @chmod(data_dir() . '/office.sqlite', 0600);
+    $db->exec('CREATE TABLE IF NOT EXISTS connections (a TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, b TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, created TEXT NOT NULL, PRIMARY KEY(a,b), CHECK(a<b)); CREATE INDEX IF NOT EXISTS connections_b ON connections(b);');
     return $db;
 }
 function setting(string $key, mixed $fallback = null): mixed {

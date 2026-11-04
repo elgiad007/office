@@ -49,6 +49,15 @@ try {
         session_regenerate_id(true); $_SESSION['owner']=true; $_SESSION['csrf']=bin2hex(random_bytes(32)); json_response(['ok'=>true,'csrf'=>$_SESSION['csrf']]);
     }
     owner();
+    if($route==='connection-search' && $method==='GET') { session_write_close();json_response(['items'=>connection_search((string)($_GET['q']??''),(string)($_GET['kind']??''),(string)($_GET['exclude']??''))]); }
+    if($route==='connections' && $method==='GET') { session_write_close();json_response(connection_list((string)($_GET['id']??''),(string)($_GET['q']??''),(int)($_GET['offset']??0))); }
+    if($route==='connection' && $method==='POST') {
+        $a=(string)($input['id']??'');$b=(string)($input['target']??'');
+        if(($input['action']??'add')==='add')connection_add($a,$b);
+        elseif($input['action']==='remove'){get_record($a);get_record($b);db()->prepare('DELETE FROM connections WHERE (a=? AND b=?) OR (a=? AND b=?)')->execute([$a,$b,$b,$a]);}
+        else fail('Unknown connection action.');
+        json_response(['ok'=>true]);
+    }
     if($route==='activity' && $method==='GET') { session_write_close();json_response(['entries'=>activity_rows((int)($_GET['after']??0))]); }
     if($route==='activity' && $method==='POST') {
         if(($input['action']??'')==='clear'){activity_db()->exec('DELETE FROM activity');json_response(['ok'=>true]);}
@@ -94,6 +103,14 @@ try {
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.
         if (!empty($input['meta']['remote'])) fail('Provider records cannot be edited locally.');
+        $linkedTo=$input['linkedTo']??null;
+        if($linkedTo!==null){
+            if(!is_string($linkedTo)||isset($input['id']))fail('Linked creation requires a new item and a saved source.');
+            $db=db();$db->beginTransaction();
+            try{get_record($linkedTo);$record=save_record($input);connection_add($linkedTo,$record['id']);$db->commit();}
+            catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
+            json_response(['record'=>$record]);
+        }
         json_response(['record'=>save_record($input)]);
     }
     if ($route==='import-items' && $method==='POST') {
@@ -117,8 +134,8 @@ try {
     }
     if ($route==='backup' && $method==='GET') {
         $db=db(); $db->beginTransaction();
-        $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]);$files=$db->query('SELECT * FROM mail_files')->fetchAll(); $db->commit();
-        json_response(['format'=>'portable-office','version'=>1,'created'=>gmdate('c'),'records'=>$records,'revisions'=>$revisions,'preferences'=>$prefs,'mailFiles'=>$files]);
+        $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]);$files=$db->query('SELECT * FROM mail_files')->fetchAll(); $links=$db->query('SELECT a,b,created FROM connections')->fetchAll(); $db->commit();
+        json_response(['format'=>'portable-office','version'=>1,'created'=>gmdate('c'),'records'=>$records,'revisions'=>$revisions,'preferences'=>$prefs,'mailFiles'=>$files,'connections'=>$links]);
     }
     if ($route==='restore' && $method==='POST') {
         $backup=$input['backup']??[];
@@ -135,6 +152,8 @@ try {
         $histories=$backup['revisions']??[]; if (!is_array($histories) || count($histories)>20000) fail('Invalid revision history.');
         foreach ($histories as $h) { if (!is_array($h) || !isset($seen[$h['record_id']??'']) || (int)($h['revision']??0)<1 || !is_array(json_decode($h['snapshot']??'',true))) fail('Invalid revision history.'); validate_record(json_decode($h['snapshot'],true)); }
         $prefs=$backup['preferences']??[]; if (!is_array($prefs) || strlen(json_encode($prefs))>10000) fail('Invalid preferences.');
+        $links=$backup['connections']??[];if(!is_array($links)||count($links)>100000)fail('Invalid connections.');
+        foreach($links as $link)if(!is_array($link)||!is_string($link['a']??null)||!is_string($link['b']??null)||$link['a']===$link['b']||!isset($seen[$link['a']],$seen[$link['b']]))fail('Invalid connection endpoints.');
         $files=$backup['mailFiles']??[];if(!is_array($files)||count($files)>50000)fail('Invalid attachment backup.');
         $fileKeys=[];
         foreach($files as $file){
@@ -150,6 +169,7 @@ try {
             foreach ($validated as $v) $q->execute([$v['id'],$v['kind'],$v['title'],$v['body'],json_encode($v['meta'],JSON_THROW_ON_ERROR),$v['revision'],$v['updated']]);
             $q=$db->prepare('INSERT INTO revisions VALUES(?,?,?)'); foreach ($histories as $h) $q->execute([$h['record_id'],(int)$h['revision'],$h['snapshot']]);
             foreach($files as $file)attachment_store($file['record_id'],$file,base64_decode($file['data'],true));
+            connection_restore($links);
             set_setting('preferences',$prefs); $db->exec('COMMIT');
         } catch(Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
         json_response(['count'=>count($validated)]);

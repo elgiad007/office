@@ -18,7 +18,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add(k.undoDelete,'Undo last mail deletion','Mail, normal mode','Includes batches; available for 15 minutes in this page.');
   add(k.archive,'Archive messages','Mail, normal mode');add(k.move,'Quick Move to folder','Mail, normal mode','Selected messages, or current message.');add(k.reply,'Reply to message','Mail, normal mode');
   add('Ctrl+Enter','Send current local draft','Mail, normal or insert mode','Save a new draft first. Confirmation enabled by default; change in Settings → Mail.');
-  add(':','Open command line','Normal mode, including Settings','Enter executes once; Escape cancels and restores focus.');
+  add(':','Open command line','Normal mode, including Settings','Enter executes once. Escape dismisses suggestions while keeping command mode and text; with suggestions closed, Escape exits and restores focus.');
   for(const [name,entry] of Object.entries(commandRegistry))add(':'+name,entry.action,entry.context,entry.options+('aliases' in entry?' Aliases: '+entry.aliases.map(alias=>':'+alias).join(', ')+'.':''));
   add('Arrow keys','Move between cells','Sheets, focused cell','30 rows × 12 columns; item shortcuts still navigate records.');
   add(k.edit+' / Enter','Edit selected cell','Sheets, normal mode');add('Tab / Shift+Tab','Next / previous cell','Sheets, focused cell');

@@ -45,7 +45,7 @@ function delete_local_mail(array $r): array {
         if(!$raw)fail('Item changed elsewhere.',409);
         $q=$db->prepare('SELECT * FROM revisions WHERE record_id=?');$q->execute([$r['id']]);$history=$q->fetchAll();
         $q=$db->prepare('SELECT * FROM mail_files WHERE record_id=?');$q->execute([$r['id']]);$files=$q->fetchAll();
-        $token=mail_undo_receipt(['local'=>$raw,'history'=>$history,'files'=>$files]);
+        $token=mail_undo_receipt(['local'=>$raw,'history'=>$history,'files'=>$files,'connections'=>connection_rows($r['id'])]);
         $db->prepare('DELETE FROM records WHERE id=?')->execute([$r['id']]);$db->commit();return ['ok'=>true,'undoToken'=>$token];
     }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
 }
@@ -67,6 +67,14 @@ function undo_mail_delete(string $token,?callable $googleRequest=null,?callable 
                 $db->prepare('INSERT INTO records(id,kind,title,body,meta,revision,updated) VALUES(?,?,?,?,?,?,?)')->execute(array_values($r));
                 $q=$db->prepare('INSERT INTO revisions(record_id,revision,snapshot) VALUES(?,?,?)');foreach($p['history'] as $h)$q->execute(array_values($h));
                 $q=$db->prepare('INSERT INTO mail_files(record_id,part,name,type,size,data) VALUES(?,?,?,?,?,?)');foreach($p['files'] as $f)$q->execute(array_values($f));
+                connection_restore($p['connections']??[]);
+                // A selected batch may delete both ends of an edge. Its snapshot
+                // can live in the first receipt, so revisit it when either end returns.
+                $receipts=$db->prepare("SELECT payload FROM mail_undo WHERE expires>=? AND state IN ('ready','done')");$receipts->execute([time()]);
+                foreach($receipts->fetchAll(PDO::FETCH_COLUMN) as $snapshot){
+                    $links=json_decode($snapshot,true,512,JSON_THROW_ON_ERROR)['connections']??[];
+                    connection_restore(array_values(array_filter($links,static fn($link)=>$link['a']===$r['id']||$link['b']===$r['id'])));
+                }
                 $db->prepare("UPDATE mail_undo SET state='done' WHERE token=?")->execute([$token]);$db->commit();return ['record'=>get_record($r['id'])];
             }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
         }
