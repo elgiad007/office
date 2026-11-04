@@ -148,6 +148,18 @@
 .mail-unread .mail-read-status { background: var(--accent); }
 .topbar-primary, .mail-toolbar { display: flex; align-items: center; min-width: 0; }
 .topbar-primary { gap: 18px; }
+.breadcrumb h1 { margin: 0; color: var(--text); font-size: 16px; font-weight: 600; letter-spacing: 0; }
+.app-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.app-toolbar[hidden] { display: none; }
+.app-toolbar > button { white-space: nowrap; }
+.app-toolbar input { width: 210px; min-width: 0; max-width: 100%; }
+.settings-intro { margin: 20px 0; color: var(--muted); font-size: 12px; }
+@media screen {
+  .topbar, .compact .topbar { height: auto; min-height: 77px; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
+  .compact .topbar { min-height: 52px; padding-top: 5px; padding-bottom: 5px; }
+  .topbar-primary { flex: 1 1 auto; flex-wrap: wrap; row-gap: 6px; }
+  .top-actions { margin-left: auto; }
+}
 .mail-toolbar { gap: 6px; flex-shrink: 0; }
 .mail-toolbar[hidden] { display: none; }
 .mail-actions-menu { position: relative; }
@@ -282,7 +294,7 @@
   .compact .nav button { padding: 6px 8px; gap: 8px; }
   .compact .sidebar-bottom { gap: 5px; padding-top: 16px; }
   .compact .privacy-note { padding: 7px 8px; }
-  .compact .topbar { height: 52px; padding: 0 16px; gap: 8px; }
+  .compact .topbar { height: auto; min-height: 52px; padding: 5px 16px; gap: 8px; }
   .compact .top-actions { gap: 6px; }
   .compact .view-head { padding: 15px 16px 12px; gap: 10px; }
   .compact .view-head h1 { margin-bottom: 4px; }

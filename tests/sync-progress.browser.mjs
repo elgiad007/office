@@ -24,7 +24,7 @@ export async function testSyncProgress(page,url){
     }));
     const initialBounds=await bounds();
     assert.equal(await page.locator('#main > .view-head').count(),0,'Mail uses the topbar instead of a title panel');
-    assert.equal(await page.locator('#main > h1').textContent(),'Mail');
+    assert.equal(await page.locator('.topbar h1').textContent(),'Mail');
     assert.equal(await page.locator('#mail-toolbar [data-action="new"]').textContent(),'+ Compose');
     assert.equal(await page.locator('#list-count').textContent(),'0 cached messages');
     assert.match(await page.locator('#list-count').getAttribute('title'),/older mail/);
@@ -41,7 +41,8 @@ export async function testSyncProgress(page,url){
     await page.locator('#mail-actions-menu summary').click();
     await page.locator('[data-app="wiki"]').click();
     assert.equal(await page.locator('#mail-toolbar').isVisible(),false,'Mail actions are hidden in other apps');
-    assert.equal(await page.locator('#main > .view-head h1').textContent(),'Wiki');
+    assert.equal(await page.locator('.topbar h1').textContent(),'Wiki');
+    assert.equal(await page.locator('#main > .view-head').count(),0,'Wiki also uses the shared topbar');
     // Isolate the activity controller from the app to test streamed progress ownership.
     await page.route(url+'progress-fixture',route=>route.fulfill({contentType:'text/html',body:'<footer id="activity-status"><div id="notice"></div><button id="view-activity"></button></footer><dialog id="activity-dialog"></dialog>'}));
     await page.goto(url+'progress-fixture');
