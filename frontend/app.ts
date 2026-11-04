@@ -20,6 +20,7 @@ import {attachmentSection, bindAttachments, waitForAttachments} from './mail-att
 import {installItemMenus} from './item-menus.js';
 import {compareMail} from './mail-sort.js';
 import {mailView,mailViewPreferences} from './mail-view.js';
+import {taskView,taskViewPreferences,taskPriority,taskDue} from './task-view.js';
 import {renderMailListCopy, bindMailListSettings} from './mail-list.js';
 import {createActivity} from './activity.js';
 import {createCalendar,dateOnly} from './calendar.js';
@@ -325,8 +326,8 @@ function searchableText(record: OfficeRecord) {
   return (record.title+' '+record.body+' '+JSON.stringify(meta)).toLocaleLowerCase();
 }
 function matchingRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='calendar'||calendar.isVisible(r))&&(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder||''):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder||''):(r.meta.folder||'Archive')===state.mailFolder))&&(!q||searchableText(r).includes(q))); }
-function filteredRows() {const rows=matchingRows();return state.app==='mail'?mailView(rows,state.prefs.mailView).rows:rows;}
-function navigableRows() {return state.app==='mail'?mailView(matchingRows(),state.prefs.mailView).visible:filteredRows();}
+function filteredRows() {const rows=matchingRows();return state.app==='mail'?mailView(rows,state.prefs.mailView).rows:state.app==='tasks'?taskView(rows,state.prefs.taskView).rows:rows;}
+function navigableRows() {return state.app==='mail'?mailView(matchingRows(),state.prefs.mailView).visible:state.app==='tasks'?taskView(matchingRows(),state.prefs.taskView).visible:filteredRows();}
 async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<DeleteMail>[1],undoable=false) {
   const pane=activePane();
   const ids=new Set(rows.map(r=>r.id)),visible=navigableRows().map(r=>r.id),currentId=state.current?.id!;
@@ -426,10 +427,11 @@ function mailDeletionReload() {
   const context=()=>JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]);
   const originalContext=context(),pane=activePane();
   return async (removedIds: string[])=>{
-    const advance=ids.includes(currentId)&&removedIds.includes(currentId)&&state.current?.id===currentId&&context()===originalContext;
+    let advance=ids.includes(currentId)&&removedIds.includes(currentId)&&state.current?.id===currentId&&context()===originalContext;
     if(state.current?.id!==currentId)return;
     await load(undefined,{selectFirst:false});
     if(context()!==originalContext||(state.current&&state.current.id!==currentId))return;
+    if(state.app==='tasks'&&ids.includes(currentId)&&!filteredRows().some(r=>r.id===currentId))advance=true;
     if(!advance){restorePane(pane);return;}
     const visible=new Set(navigableRows().map(r=>r.id)),removed=new Set(removedIds),index=ids.indexOf(currentId);
     const nextId=[...ids.slice(index+1),...ids.slice(0,index).reverse()].find(id=>!removed.has(id)&&visible.has(id));
@@ -512,6 +514,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
     const rows=navigableRows();
     state.current=rows.find(r=>r.id===(preferId||lastSelectedItems.get(app)))||rows[0]||null;
   }
+  if(state.app==='tasks'&&(!state.current||!filteredRows().some(r=>r.id===state.current?.id)))state.current=selectFirst?navigableRows()[0]||null:null;
   if(preserveSelection){
     const rows=filteredRows(),visible=new Set(rows.map(r=>r.id));
     for(const id of state.selected)if(!visible.has(id))state.selected.delete(id);
@@ -539,6 +542,7 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   const header=state.app==='mail'?'<h1 class="file-input">Mail</h1>':`<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ New ${a.singular}</button></div></section>`;
   document.querySelector<HTMLElement>('#main')!.innerHTML=`${header}<div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
   document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;mailListLimit=100;renderList();};
+  if(state.app==='tasks')bindTaskViewControls();
   if(state.app==='mail'){
     bindMailViewControls();
     const folderNavigation=document.querySelector<HTMLElement>('#mail-folder-navigation')!;
@@ -581,40 +585,77 @@ function bindMailViewControls() {
 }
 let mailViewControlAbort: AbortController | undefined;
 function mailViewControlSignal() {mailViewControlAbort?.abort();mailViewControlAbort=new AbortController();return mailViewControlAbort.signal;}
+function setTaskView(value: unknown) {
+  void attempt(async()=>{
+    await leaveEditor();
+    state.prefs={...state.prefs,taskView:taskViewPreferences(value)};
+    const rows=navigableRows(),ids=new Set(rows.map(r=>r.id));
+    for(const id of state.selected)if(!ids.has(id))state.selected.delete(id);
+    selectionAnchor=null;
+    if(state.current&&!ids.has(state.current.id)){state.current=rows[0]||null;renderDetail();}
+    renderList();
+    mailViewSave=mailViewSave.catch(()=>{}).then(()=>api('preferences',{preferences:state.prefs}));
+    await mailViewSave;
+  });
+}
+function bindTaskViewControls() {
+  const p=taskViewPreferences(state.prefs.taskView);
+  const options=(values: Record<string,string>,selected: string)=>Object.entries(values).map(([key,label])=>`<option value="${e(key)}" ${key===selected?'selected':''}>${e(label)}</option>`).join('');
+  const priorities: Record<string,string>={all:'All priorities',High:'High',Normal:'Normal',Low:'Low'};
+  for(const row of state.rows)priorities[taskPriority(row)]=taskPriority(row);
+  if(!(p.priority in priorities))priorities[p.priority]=p.priority;
+  document.querySelector('.list-summary')!.insertAdjacentHTML('beforeend',`<details id="task-list-view"><summary>List view</summary><div class="mail-view-menu task-view-menu">${[
+    ['status','Show tasks',{unfinished:'Unfinished',completed:'Completed',all:'All tasks'},p.status],
+    ['priority','Filter task priority',priorities,p.priority],
+    ['due','Filter task due date',{all:'Any due date',overdue:'Overdue',today:'Due today',upcoming:'Upcoming',undated:'No due date'},p.due],
+    ['group','Group tasks by',{none:'None',due:'Due date',status:'Status',priority:'Priority'},p.group],
+    ['sort','Sort tasks by',{'due-asc':'Due date · earliest first','due-desc':'Due date · latest first','priority-desc':'Priority · high first','priority-asc':'Priority · low first','title-asc':'Title · A–Z','title-desc':'Title · Z–A','updated-desc':'Updated · newest first','updated-asc':'Updated · oldest first'},p.sort],
+  ].map(([key,label,values,selected])=>`<label>${label}<select data-task-pref="${key}" aria-label="${label}">${options(values as Record<string,string>,selected as string)}</select></label>`).join('')}<div><button type="button" data-task-expand>Expand all</button><button type="button" data-task-collapse>Collapse all</button></div></div></details>`);
+  const menu=document.querySelector<HTMLDetailsElement>('#task-list-view')!;
+  menu.querySelectorAll<HTMLSelectElement>('[data-task-pref]').forEach(select=>select.onchange=()=>setTaskView({...taskViewPreferences(state.prefs.taskView),[select.dataset.taskPref!]:select.value}));
+  menu.querySelector<HTMLButtonElement>('[data-task-expand]')!.onclick=()=>{const p=taskViewPreferences(state.prefs.taskView);setTaskView({...p,collapsed:p.collapsed.filter(k=>!k.startsWith(p.group+':'))});};
+  menu.querySelector<HTMLButtonElement>('[data-task-collapse]')!.onclick=()=>{const p=taskViewPreferences(state.prefs.taskView);if(p.group!=='none')setTaskView({...p,collapsed:[...p.collapsed.filter(k=>!k.startsWith(p.group+':')),p.group+':*']});};
+  menu.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();menu.open=false;menu.querySelector('summary')!.focus();}});
+  document.addEventListener('pointerdown',event=>{if(menu.isConnected&&!menu.contains(event.target as Node))menu.open=false;},{signal:mailViewControlSignal()});
+}
+function taskBadges(row: OfficeRecord) {
+  const priority=taskPriority(row),due=taskDue(row),level=priority.toLowerCase();
+  return `<span class="task-badges"><span class="badge task-status">${row.meta.done?'✓ Completed':'○ Unfinished'}</span><span class="badge task-priority ${['high','normal','low'].includes(level)?'task-priority-'+level:''}">${level==='high'?'↑':level==='low'?'↓':'•'} ${e(priority)}</span>${!row.meta.done&&['overdue','today'].includes(due)?`<span class="badge task-due-${due}">${due==='overdue'?'! Overdue':'◷ Due today'}</span>`:''}</span>`;
+}
 function renderList() {
   if(state.app==='mail'&&(state.mailScope||state.mailFolder!=='Drafts'))lastMailView={folder:state.mailFolder,scope:structuredClone(state.mailScope),search:state.search,selectedId:state.current?.meta.folder==='Drafts'?undefined:state.current?.id};
   if(state.app==='calendar'){calendar.render();return;}
-  const model=state.app==='mail'?mailView(matchingRows(),state.prefs.mailView):undefined;
+  const model=state.app==='mail'?mailView(matchingRows(),state.prefs.mailView):state.app==='tasks'?taskView(matchingRows(),state.prefs.taskView):undefined;
   const rows=model?.rows||filteredRows(),count=document.querySelector<HTMLElement>('#list-count')!;
   count.textContent=state.app==='mail'?`${rows.length} cached ${rows.length===1?'message':'messages'}`:`${rows.length} ${rows.length===1?apps[state.app].singular:'items'}`;
   count.title=state.app==='mail'?'Messages stored in Office for this view. This count can grow as older mail downloads.':'';
   document.querySelector<HTMLElement>('#selection-count')!.textContent=state.selected.size?`${state.selected.size} selected`:'';
   const expanded=model?.visible||rows;
   if(state.app==='mail')mailListLimit=Math.max(mailListLimit,expanded.findIndex(r=>r.id===state.current?.id)+1);
-  const visible=state.app==='mail'?expanded.slice(0,mailListLimit):rows;
+  const visible=state.app==='mail'?expanded.slice(0,mailListLimit):expanded;
   const item=(r: OfficeRecord)=>{
     const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+e(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?e(r.meta.email||r.meta.company||''):state.app==='wiki'?e(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):'Edited '+dateLabel(r.updated);
     const selected=state.current?.id===r.id;
     const readState=state.app==='mail'?(r.meta.read?'read':'unread'):'';
     const readStatus=readState?`<span class="mail-read-status"><span class="file-input">${readState==='unread'?'Unread':'Read'}</span></span>`:'';
     const badges=state.app==='mail'?'':`<span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span>`;
-    return `<button class="item ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small></span>`}${badges}</button>`;
+    return `<button class="item ${state.app==='tasks'&&r.meta.done?'task-completed':''} ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app==='tasks'?taskBadges(r):''}</span>`}${badges}</button>`;
   };
   const list=document.querySelector<HTMLElement>('#items')!,focusedGroup=(document.activeElement as HTMLElement)?.closest<HTMLElement>('[data-mail-group-key]')?.dataset.mailGroupKey;
   const included=new Set(visible.map(row=>row.id));
-  list.innerHTML=rows.length?(model&&mailViewPreferences(state.prefs.mailView).group!=='none'?model.groups.map(group=>{
+  list.innerHTML=rows.length?(model&&(state.app==='tasks'?taskViewPreferences(state.prefs.taskView):mailViewPreferences(state.prefs.mailView)).group!=='none'?model.groups.map(group=>{
     const rendered=group.rows.filter(row=>included.has(row.id));
     if(!group.collapsed&&!rendered.length)return '';
     return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed?'▸':'▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}</span></button>${rendered.map(item).join('')}`;
-  }).join(''):visible.map(item).join('')):`<div class="list-empty">${state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
+  }).join(''):visible.map(item).join('')):`<div class="list-empty">${state.app==='tasks'?'No tasks match this view. Adjust List view filters or add a task.':state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
   list.querySelectorAll<HTMLButtonElement>('[data-mail-group-key]').forEach(button=>button.onclick=()=>{
-    const p=mailViewPreferences(state.prefs.mailView),key=button.dataset.mailGroupKey!;
+    const p=state.app==='tasks'?taskViewPreferences(state.prefs.taskView):mailViewPreferences(state.prefs.mailView),key=button.dataset.mailGroupKey!;
     const collapsed=button.getAttribute('aria-expanded')==='false',all=p.collapsed.includes(p.group+':*'),exception=p.group+':!'+key;
     const retained=p.collapsed.filter(value=>value!==key&&value!==exception);
-    setMailView({...p,collapsed:collapsed?(all?[...retained,exception]:retained):(all?retained:[...retained,key])});
+    (state.app==='tasks'?setTaskView:setMailView)({...p,collapsed:collapsed?(all?[...retained,exception]:retained):(all?retained:[...retained,key])});
   });
   if(focusedGroup)list.querySelector<HTMLElement>(`[data-mail-group-key="${CSS.escape(focusedGroup)}"]`)?.focus({preventScroll:true});
-  if(visible.length<expanded.length){const button=document.createElement('button');button.textContent='Show next 100 messages';button.onclick=()=>{mailListLimit+=100;renderList();};list.append(button);}
+  if(state.app==='mail'&&visible.length<expanded.length){const button=document.createElement('button');button.textContent='Show next 100 messages';button.onclick=()=>{mailListLimit+=100;renderList();};list.append(button);}
 }
 const bodyDownloads=new Set<string>(),bodyFailures=new Set<string>();
 async function hydrateMailBody(record: OfficeRecord,manual=false) {
@@ -715,7 +756,7 @@ function detailContent(r: OfficeRecord) {
   }
   if (state.app==='wiki' && state.wikiPreview) return `<span class="eyebrow">${e(r.title.split(':').slice(0,-1).join(' / ')||'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x=>x.id!==r.id && x.body.includes('[['+r.title+']]')).map(x=>`<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('')||'<p class="muted">No pages link here yet.</p>'}</div>`;
   let content=`<form id="record-form" class="detail-form"><label><span class="file-input">${state.app==='wiki'?'Page ID (namespace:page)':'Title'}</span><input class="title-input" name="title" value="${e(r.title)}" required ${disabled} aria-label="Title"></label>`;
-  if (state.app==='tasks') content+=`<div class="fields">${field('Due date','due',m.due,'date')}${field('Priority','priority',m.priority||'Normal')}<label class="check-label"><input type="checkbox" name="done" ${m.done?'checked':''}> Completed</label></div>`;
+  if (state.app==='tasks') content+=`<div class="task-detail-badges">${taskBadges(r)}</div><div class="fields">${field('Due date','due',m.due,'date')}<label>Priority<select name="priority" aria-label="Priority" ${disabled}>${[...new Set(['High','Normal','Low',taskPriority(r)])].map(value=>`<option value="${e(value)}" ${value===taskPriority(r)?'selected':''}>${e(value)}</option>`).join('')}</select></label><label class="check-label"><input type="checkbox" name="done" ${m.done?'checked':''} ${disabled}> Completed</label></div>`;
   if (state.app==='contacts') content+=`<div class="fields">${field('Email','email',m.email,'email')}${field('Phone','phone',m.phone,'tel')}${field('Company','company',m.company)}${field('Group','group',m.group)}</div>`;
   if (state.app==='calendar') content+=`<label class="check-label"><input type="checkbox" name="allDay" ${dateOnly(m.start)?'checked':''} ${disabled}> All day</label><div class="fields">${field('Start (local time)','start',dateOnly(m.start)?m.start:localInput(m.start),dateOnly(m.start)?'date':'datetime-local',disabled)}${field(dateOnly(m.start)?'End (exclusive date)':'End (local time)','end',dateOnly(m.start)?m.end:localInput(m.end),dateOnly(m.start)?'date':'datetime-local',disabled)}${field('Location','location',m.location,'text',disabled)}</div>${m.rawIcs||m.raw?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>`:''}`;
   if (state.app==='mail') content+=`<div class="fields">${field('To (one recipient)','to',m.to,'email','required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount&&!mailAccounts().some(a=>a.id===m.sendAccount)?`<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>`:''}${mailAccounts().map(a=>`<option value="${a.id}" ${m.sendAccount===a.id?'selected':''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
@@ -757,9 +798,9 @@ async function completeTask() {
   if(state.app!=='tasks'||!state.current||state.current.meta.remote)return;
   const checkbox=document.querySelector<HTMLInputElement>('#record-form input[name="done"]');
   if(!checkbox||checkbox.checked)return;
-  const id=state.current.id,pane=activePane();
+  const pane=activePane();
   checkbox.checked=true;markDirty();await commit();
-  if(state.app==='tasks'&&state.current?.id===id)restorePane(pane);
+  if(state.app==='tasks')restorePane(pane);
 }
 async function requireSaved() {
   if(isUnsavedDraft())throw Error('Save this draft first.');
@@ -788,6 +829,8 @@ async function leaveEditor() {
 async function commit(explicit=false): Promise<void> {
   clearTimeout(saveTimer); if(state.savePromise) await state.savePromise; if(!state.dirty || !state.current) return;
   collect();if(isUnsavedDraft()&&!explicit)return;
+  const taskOrder=state.app==='tasks'?[...document.querySelectorAll<HTMLElement>('#items [data-id]')].map(el=>el.dataset.id!):[];
+  const taskPane=activePane();
   const firstSave=isUnsavedDraft(),payload=structuredClone(state.current); state.dirty=false; const id=payload.id;
   const input=firstSave?{kind:payload.kind,title:payload.title,body:payload.body,meta:payload.meta,...(pendingLinkedSource?.draft===id?{linkedTo:pendingLinkedSource.source}:{})}:payload;
   state.savePromise=(async()=>{try { const result=await api('save',input); if(state.current?.id===id) {
@@ -797,6 +840,17 @@ async function commit(explicit=false): Promise<void> {
     const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved'; renderList();
   } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
   await state.savePromise; if(state.dirty) await commit();
+  if(state.app==='tasks'&&state.current&&(firstSave||state.current.id===id)&&!state.dirty){
+    if(!filteredRows().some(r=>r.id===state.current?.id)){
+      const visible=navigableRows(),ids=new Set(visible.map(r=>r.id)),index=taskOrder.indexOf(id);
+      const next=taskOrder.slice(index+1).find(id=>ids.has(id))||taskOrder.slice(0,Math.max(0,index)).reverse().find(id=>ids.has(id));
+      state.selected.delete(state.current!.id);selectionAnchor=null;
+      state.current=visible.find(r=>r.id===next)||visible[0]||null;
+      renderList();renderDetail();restorePane(taskPane);
+    }else{
+      const badges=document.querySelector('.task-detail-badges');if(badges)badges.innerHTML=taskBadges(state.current!);
+    }
+  }
   if(firstSave)renderDetail(undefined,true);
   if(firstSave)void connections.section();
 }

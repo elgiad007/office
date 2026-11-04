@@ -66,6 +66,7 @@ export interface Preferences {
   showElapsedTime?: boolean;
   mailList?: MailListLayout;
   mailView?: MailViewPreferences;
+  taskView?: TaskViewPreferences;
   theme?: string; density?: string; accent?: string;
   keys?: Record<string, string>;
   mailDisplay?: string; defaultMailAccount?: string;
@@ -73,6 +74,12 @@ export interface Preferences {
   mailOffline?: boolean;
 }
 export interface MailViewPreferences {group: 'date' | 'sender' | 'none'; sort: 'date-desc' | 'date-asc' | 'sender-asc' | 'sender-desc' | 'subject-asc' | 'subject-desc'; collapsed: string[]}
+export interface TaskViewPreferences {
+  group: 'none' | 'due' | 'status' | 'priority';
+  sort: 'due-asc' | 'due-desc' | 'priority-desc' | 'priority-asc' | 'title-asc' | 'title-desc' | 'updated-desc' | 'updated-asc';
+  status: 'unfinished' | 'completed' | 'all'; priority: string;
+  due: 'all' | 'overdue' | 'today' | 'upcoming' | 'undated'; collapsed: string[];
+}
 export type MailListField = 'none' | 'sender' | 'date' | 'subject' | 'attachment' | 'preview';
 export interface MailListSlot {field: MailListField; size: 'small' | 'normal' | 'large'}
 export interface MailListLayout {sender: 'both' | 'name' | 'email'; rows: {left: MailListSlot; right: MailListSlot}[]}

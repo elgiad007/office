@@ -21,6 +21,11 @@ export async function testTaskCompletion(page,url) {
     assert.equal(record.body,'Keep these notes');
   };
   await page.getByRole('button',{name:'Tasks',exact:true}).click();
+  await page.locator('#task-list-view > summary').click();
+  const preferenceSaved=page.waitForResponse(response=>response.url().includes('r=preferences'));
+  await page.getByLabel('Show tasks',{exact:true}).selectOption('all');
+  await preferenceSaved;
+  await page.locator('#task-list-view > summary').click();
   await item(titles[0]).click();
   await completed.check();await persisted(titles[0],true);
   await item(titles[1]).click();await item(titles[0]).click();

@@ -98,6 +98,19 @@
 .mail-view-menu select { width: 100%; min-width: 0; font-size: 12px; }
 .mail-view-menu > div { display: flex; flex-wrap: wrap; gap: 5px; }
 .mail-view-menu button { font-size: 12px; padding: 6px 8px; }
+.list-summary:has(#task-list-view) { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; position: relative; }
+#task-list-view { margin-left: auto; font-size: 12px; }
+#task-list-view > summary { cursor: pointer; padding: 3px 5px; border-radius: 4px; }
+.task-view-menu { max-height: min(70vh, 560px); overflow-y: auto; }
+.task-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.task-badges .badge { max-width: 100%; white-space: normal; font-size: 11px; }
+.task-completed .item-copy > strong { text-decoration: line-through; color: var(--muted); }
+.task-priority-high, .task-due-overdue { color: #a32525; background: #ffe7e7; }
+.task-priority-low { color: #245d90; background: #e6f2ff; }
+.task-due-today { color: #795000; background: #fff0c2; }
+[data-theme="dark"] .task-priority-high, [data-theme="dark"] .task-due-overdue { color: #ffb4b4; background: #532525; }
+[data-theme="dark"] .task-priority-low { color: #a8d4ff; background: #213e59; }
+[data-theme="dark"] .task-due-today { color: #ffe09a; background: #514016; }
 .item .badge { max-width: 125px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .item.mail-read strong, .item.mail-read small { font-weight: 400; }
 .item.mail-unread strong, .item.mail-unread small { font-weight: 700; }

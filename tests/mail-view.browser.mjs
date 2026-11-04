@@ -14,6 +14,7 @@ export async function testMailView(page,url) {
     else if(action==='sync')json={count:0};
     else if(action==='preferences'){preferences=route.request().postDataJSON().preferences;writes++;json={ok:true};}
     else if(action==='activity')json={entries:[]};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='mail-action'){
       const input=route.request().postDataJSON(),record=records.find(r=>r.id===input.id);
       assert.equal(input.action,'trash');record.meta.folder='Trash';record.revision++;json={record};
@@ -55,6 +56,7 @@ export async function testMailView(page,url) {
     assert.equal(await page.locator('#selected-item').count(),0);
     await header('Today').focus();await save(()=>page.keyboard.press('Enter'));assert.deepEqual(await order(),['a','b']);
     await open();await save(()=>page.getByRole('button',{name:'Expand all',exact:true}).click());assert.equal((await order()).length,4);
+    await page.locator('#mail-list-view > summary').click();
     await item('a').click();await save(()=>header('Today').click());
     await item('c').click();await page.keyboard.press('D');await selected('u');
     assert.deepEqual(await order(),['u'],'Delete advances within the expanded order');
