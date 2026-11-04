@@ -2127,7 +2127,8 @@ document.addEventListener('keydown', event => {
         return;
     }
     keySequence = '';
-    const action = Object.keys(k).find(action => k[action] === key);
+    const listArrow = activePane() === 'list' ? (key === 'ArrowUp' || key === 'ArrowLeft' ? 'up' : key === 'ArrowDown' || key === 'ArrowRight' ? 'down' : undefined) : undefined;
+    const action = listArrow || Object.keys(k).find(action => k[action] === key);
     if (event.repeat && action && !['down', 'up', 'left', 'right'].includes(action)) {
         event.preventDefault();
         return;

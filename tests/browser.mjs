@@ -12,6 +12,7 @@ import {testMailArchive} from './mail-archive.browser.mjs';
 import {testDensity} from './density.browser.mjs';
 import {testScrolling} from './scrolling.browser.mjs';
 import {testFocusNavigation} from './focus-navigation.browser.mjs';
+import {testListArrows} from './list-arrows.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
 import {testMailUndo} from './mail-undo.browser.mjs';
 import {testMailDeleteSelection} from './mail-delete-selection.browser.mjs';
@@ -80,6 +81,7 @@ try{
  await testDensity(page);
  await testScrolling(page,url);
  await testCalendar(page,url);
+ await testListArrows(page,url);
  await testFocusNavigation(page,url);
  await testAccountSetup(page,url);
  const status=await(await page.request.get(url+'api.php?r=status')).json();

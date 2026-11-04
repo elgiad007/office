@@ -1113,7 +1113,8 @@ document.addEventListener('keydown',event=>{
   if(keySequence==='g'&&/^[1-7]$/.test(key)){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
   if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(mailBody){scrollMailBody(target,'start');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
-  const action=Object.keys(k).find(action=>k[action]===key);
+  const listArrow=activePane()==='list'?(key==='ArrowUp'||key==='ArrowLeft'?'up':key==='ArrowDown'||key==='ArrowRight'?'down':undefined):undefined;
+  const action=listArrow||Object.keys(k).find(action=>k[action]===key);
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}
