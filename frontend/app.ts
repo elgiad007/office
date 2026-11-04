@@ -398,7 +398,6 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   return snapshot;
 }
 async function load(preferId?: string,{selectFirst=true,preserveSelection=false}={}) {
-  const contentFocused=preserveSelection&&activePane()==='content'&&!editable(document.activeElement as HTMLElement);
   await waitForAttachments();
   if(state.app!=='mail')displayedMailId=null;
   itemMenus.close();
@@ -417,6 +416,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
   const app=state.app;let records,version;
   do{version=mailDeleteVersion+mailReadVersion;records=(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
+  const contentFocused=preserveSelection&&activePane()==='content'&&!editable(document.activeElement as HTMLElement);
   const listViewport=preserveSelection?captureMailListViewport():undefined;
   const readerSnapshot=preserveSelection?captureMailReader():undefined;
   const focusedId=preserveSelection?(document.activeElement as HTMLElement)?.closest<HTMLElement>('#items [data-id]')?.dataset.id:undefined;
@@ -439,10 +439,11 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
       if(bottommostSurvivor)mailListLimit=Math.max(mailListLimit,rows.findIndex(row=>row.id===bottommostSurvivor.id)+1+listViewport.visible.length);
     }
   }
-  renderWorkspace(readerSnapshot);
+  const reuseWorkspace=preserveSelection&&state.app==='mail'&&!!readerSnapshot&&!!document.querySelector('#detail.mail-reader');
+  if(reuseWorkspace){document.querySelectorAll('#mail-folder-navigation .account-folders,.search-wrap .folder-current').forEach(node=>node.remove());renderMailFolders(mailFolderEnv());renderList();renderDetail(readerSnapshot);}else renderWorkspace(readerSnapshot);
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
   restoreMailListViewport(listViewport);
-  if(contentFocused)restorePane('content');
+  if(contentFocused&&!document.activeElement?.closest('#detail'))restorePane('content');
 }
 function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   const a=apps[state.app];
@@ -493,12 +494,13 @@ async function hydrateMailBody(record: OfficeRecord,manual=false) {
   const status=document.querySelector<HTMLElement>('[data-body-status]');if(status)status.textContent=' Downloading…';
   try {
     await pendingMailReads.get(record.id);
-    const result=await api('mail-content',{id:record.id,account:record.meta.account});
+    const result=await api('mail-content',{id:record.id,account:record.meta.account,summary:true});
     refreshMailRecord(result.record);bodyFailures.delete(record.id);
     if(state.app==='mail'){updateMailListItem(record.id);if(state.current?.id===record.id)renderDetail();}
   }catch(cause){bodyFailures.add(record.id);if(state.app==='mail'&&state.current?.id===record.id){if(status)status.textContent=' '+asError(cause).message;if(button)button.disabled=false;}}
   finally{bodyDownloads.delete(record.id);}
 }
+let displayedMailBody: string | undefined;
 function renderDetail(readerSnapshot=captureMailReader()) {
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
   const contentFocused=!!r&&document.activeElement===contentEntry();
@@ -516,7 +518,16 @@ function renderDetail(readerSnapshot=captureMailReader()) {
   if (fillSender) r.meta.sendAccount=fillSender;
   const remote=!!r.meta.remote;
   const mailBadges=state.app==='mail'?`${r.meta.folder?`<span class="badge">${e(mailLocation(r))}</span>`:''}${remote?'<span class="badge">Cached</span>':''}`:'';
-  panel.innerHTML=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':'Saved'}</span>${['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?'<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>':''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+  const bodyKey=viewingMail?JSON.stringify([r.id,r.body,r.bodyHash,mailBody(r,state.prefs)]):undefined;
+  const retainBody=viewingMail&&!newlyOpened&&bodyKey===displayedMailBody&&!!panel.querySelector('.mail-reader-header');
+  displayedMailBody=bodyKey;
+  const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':'Saved'}</span>${['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?'<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>':''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+  if(retainBody){
+    // Keep the body connected: moving an iframe reloads its browsing context.
+    const template=document.createElement('template');template.innerHTML=markup;
+    panel.querySelector('.mail-reader-header')!.replaceWith(template.content.querySelector('.mail-reader-header')!);
+    panel.querySelector('.mail-action-failure')?.remove();
+  }else panel.innerHTML=markup;
   panel.querySelectorAll<HTMLDetailsElement>('[data-mail-disclosure]').forEach(d=>d.open=!!restore?.open.includes(d.dataset.mailDisclosure!));
   const failure=state.app==='mail'?failedMailActions.get(r.id):undefined;
   if(failure)panel.insertAdjacentHTML('afterbegin',`<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
@@ -899,6 +910,37 @@ async function repairMail(accountId: string,button: HTMLButtonElement) {
   catch(cause) { const error=asError(cause);notice(error.message,true);}
   finally {state.syncing=false;busyButton(button,false);busyButton(document.querySelector<HTMLButtonElement>('#sync-button')!,false);state.accounts=(await api('accounts')).accounts;if(state.app==='settings')renderSettings();else await load();}
 }
+function applyMailReadResult(original: OfficeRecord,previousRevision: number,updated: OfficeRecord) {
+  const identity=(row: OfficeRecord)=>JSON.stringify([row.id,row.kind,...(['remote','account','source','serverFolder','uidValidity','providerId','folder'] as const).map(key=>row.meta[key])]);
+  if(identity(original)!==identity(updated))return;
+  const update=(row: OfficeRecord | null)=>{
+    if(row&&identity(row)===identity(original)&&row.revision<=updated.revision&&(row.revision===previousRevision||sameMailTarget(row,updated))){
+      row.meta.read=updated.meta.read;row.revision=updated.revision;row.updated=updated.updated;
+    }
+  };
+  update(original);
+  if(state.app==='mail'){
+    state.rows.forEach(update);update(state.current);updateMailListItem(original.id);
+    if(state.current?.id===original.id){const button=document.querySelector<HTMLButtonElement>('#detail [data-action="read"]');if(button)button.textContent=`Mark ${state.current.meta.read?'unread':'read'}`;}
+  }
+}
+async function setMailRead(record: OfficeRecord,read: boolean) {
+  await pendingMailReads.get(record.id);
+  const current=state.app==='mail'?state.rows.find(row=>row.id===record.id):undefined;
+  const target=current||record,previousRevision=target.revision;
+  const snapshot=structuredClone(target);
+  mailReadVersion++;
+  const pending=(async()=>{
+    try {
+      const result=await api(target.meta.remote?'mail-action':'save',target.meta.remote?{id:target.id,revision:previousRevision,action:read?'read':'unread'}:{...snapshot,meta:{...snapshot.meta,read}});
+      if(!result.record)throw Error('The server did not return the updated message.');
+      applyMailReadResult(snapshot,previousRevision,result.record);
+      return {...result,record:result.record,previousRevision};
+    }finally{pendingMailReads.delete(record.id);mailReadVersion++;}
+  })();
+  pendingMailReads.set(record.id,pending);
+  await pending;
+}
 function markOpenedMailRead(record: OfficeRecord) {
   if(record.meta.read || ['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(record.meta.folder||'') || pendingMailReads.has(record.id))return;
   const previousRevision=record.revision;
@@ -909,13 +951,7 @@ function markOpenedMailRead(record: OfficeRecord) {
       const result=await api(record.meta.remote?'mail-action':'save',record.meta.remote?{id:record.id,revision:previousRevision,action:'read'}:{...record,meta:{...record.meta,read:true}});
       const updatedRecord=result.record;
       if(!updatedRecord)throw Error('The server did not return the updated message.');
-      const update=(row: OfficeRecord | null)=>{if(row?.id===record.id && (row.revision===previousRevision || (row.revision<=updatedRecord.revision&&sameMailTarget(row,updatedRecord)))){row.meta.read=updatedRecord.meta.read;row.revision=updatedRecord.revision;row.updated=updatedRecord.updated;}};
-      update(record);
-      if(state.app==='mail'){
-        state.rows.forEach(update);update(state.current);
-        updateMailListItem(record.id);
-        if(state.current?.id===record.id){const button=document.querySelector<HTMLButtonElement>('#detail [data-action="read"]')!;if(button)button.textContent=`Mark ${state.current!.meta.read?'unread':'read'}`;}
-      }
+      applyMailReadResult(record,previousRevision,updatedRecord);
       return {...result,record:updatedRecord,previousRevision};
     } catch(cause) { const error=asError(cause); notice('Could not mark message as read: '+error.message,true); }
     finally { pendingMailReads.delete(record.id);mailReadVersion++; }
@@ -924,9 +960,8 @@ function markOpenedMailRead(record: OfficeRecord) {
 }
 async function readMail() {
   if(state.app!=='mail'||!state.current)return;await commit();const r=state.current;
-  if(pendingMailReads.has(r.id))await pendingMailReads.get(r.id);
-  if(r.meta.remote)await api('mail-action',{id:r.id,revision:r.revision,action:r.meta.read?'unread':'read'});
-  else{r.meta.read=!r.meta.read;await api('save',r);}await load(r.id);
+  await pendingMailReads.get(r.id);
+  await setMailRead(r,!r.meta.read);
 }
 function editorSelection() {
   const editor=document.querySelector<HTMLElement>('#rich-editor')!, selection=getSelection()!;
@@ -965,7 +1000,7 @@ function accountDialog() {
     renderSettings();
   }});
 }
-const itemMenus=installItemMenus({state,e,commit,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+const itemMenus=installItemMenus({state,e,commit,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,setMailRead,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 function contentEntry() {
   const panel=document.querySelector<HTMLElement>('#detail');
   return panel?.querySelector<HTMLElement>('.mail-html, .mail-body, .sheet-wrap')||panel;

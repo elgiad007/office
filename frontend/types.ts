@@ -52,6 +52,7 @@ export interface OfficeRecord extends ItemInput {
   summary?: boolean;
   hasOriginal?: boolean;
   contentHash?: string;
+  bodyHash?: string;
 }
 export interface MailFolder {
   id: string; name: string; delimiter?: string | null; protected?: boolean; role?: string;
@@ -149,6 +150,7 @@ export interface MenuEnvironment {
   deleteMailImmediately: DeleteMail; notice: (text: string, error?: boolean) => void;
   confirmation: Confirmation; attempt: Attempt;
   exportRecords: (all?: boolean, selectedRecords?: OfficeRecord[]) => Promise<void>;
+  setMailRead: (record: OfficeRecord,read: boolean) => Promise<void>;
   waitForMailRead: (id: string) => Promise<unknown> | undefined;
   capturePane: () => () => void; mouseSelection: () => void; fileMail: () => Promise<void>;
 }

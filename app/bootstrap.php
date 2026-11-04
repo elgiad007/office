@@ -129,6 +129,7 @@ function record_row(array $row): array {
  * for instant text reading, replies and full-body search. */
 function mail_list_record(array $row): array {
     $row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
+    $row['bodyHash']=hash('sha256',$row['meta']['bodyRawBase64']??$row['meta']['rawBase64']??$row['meta']['raw']??'');
     $row['hasOriginal']=isset($row['meta']['rawBase64']) || isset($row['meta']['raw']);
     $row['summary']=true;
     unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts']);

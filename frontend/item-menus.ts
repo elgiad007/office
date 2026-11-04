@@ -58,6 +58,11 @@ export function installItemMenus(env: MenuEnvironment) {
         await env.deleteMailImmediately(rows,row=>id==='delete'?env.api('delete',{id:row.id,revision:row.revision,undoable:true}):env.api('mail-action',{id:row.id,revision:row.revision,action:id,undoable:id==='trash'}),['delete','trash'].includes(id));
         env.notice(`${rows.length} ${rows.length===1?'item':'items'} updated.`);return;
       }
+      if(app==='mail'&&(id==='read'||id==='unread')){
+        try{for(const row of rows){await env.setMailRead(row,id==='read');count++;}}
+        catch(cause){throw Error(`${count} of ${rows.length} items updated. ${asError(cause).message}`);}
+        env.notice(`${count} ${count===1?'item':'items'} updated.`);return;
+      }
       const reload=env.mailDeletionReload(),removed=[],reconciled=new Set<string>();
       try{
         for(const row of rows){

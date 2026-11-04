@@ -83,7 +83,9 @@ try {
         $r=get_record((string)($input['id']??''));
         if($r['kind']!=='mail' || empty($r['meta']['remote']))fail('Choose synchronized mail.');
         session_write_close();
-        json_response(['record'=>with_account_mail_mutation($r['meta']['account'],fn()=>download_mail_content($r))]);
+        $record=with_account_mail_mutation($r['meta']['account'],fn()=>download_mail_content($r));
+        if(($input['summary']??false)===true)$record=mail_list_record($record);
+        json_response(['record'=>$record]);
     }
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.

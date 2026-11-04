@@ -62,3 +62,41 @@ export async function testMailReaderSync(page,url) {
     await Promise.allSettled(activeRoutes);await page.goto('about:blank');await page.unroute(routes);await page.goto(url+'#mail',{waitUntil:'domcontentloaded'});
   }
 }
+
+export async function testHtmlReaderSync(page,url) {
+  await page.goto('about:blank');
+  let release,arrive;const gate=new Promise(resolve=>release=resolve),seen=new Promise(resolve=>arrive=resolve);
+  let syncCalls=0,recordCalls=0,frameRequests=0;
+  const account={id:'html-sync',type:'imap',label:'HTML sync fixture'};
+  const apiRoute=t=>t.pathname.endsWith('/api.php'),frameRoute=t=>t.pathname.endsWith('/mail-view.php');
+  await page.route(frameRoute,async route=>{frameRequests++;await route.fulfill({contentType:'text/html',body:'<html><body style="height:6000px">HTML scroll fixture</body></html>'});});
+  await page.route(apiRoute,async route=>{
+    const action=new URL(route.request().url()).searchParams.get('r');let json;
+    if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{}};
+    else if(action==='accounts')json={accounts:[account]};
+    else if(action==='activity')json={entries:[]};
+    else if(action==='records'){
+      recordCalls++;json={records:[{id:'html-sync-message',kind:'mail',title:'HTML refresh '+recordCalls,body:'Text alternative',bodyHash:recordCalls>4?'body-two':'body-one',revision:recordCalls,meta:{remote:true,account:account.id,folder:'Inbox',from:'sender@example.com',read:true,hasHtml:true}}]};
+    }else if(action==='sync'){if(++syncCalls===1){arrive();await gate;}json={count:1,more:syncCalls===1};}
+    else throw Error('Unexpected HTML sync route '+action);
+    await route.fulfill({json});
+  });
+  try {
+    await page.goto(url+'?html-reader-sync-test#mail');await seen;
+    const frame=page.locator('#detail iframe');await frame.waitFor();
+    await frame.evaluate(node=>{window.savedReaderFrame=node;window.savedReaderWindow=node.contentWindow;node.focus();});
+    await page.frames().find(frame=>frame.url().includes('mail-view.php')).evaluate(()=>scrollTo(0,900));
+    release();await page.getByRole('heading',{name:'HTML refresh 4',exact:true}).waitFor();
+    assert.equal(recordCalls,4);assert.equal(frameRequests,1,'Sync batches do not request HTML again');
+    assert.equal(await frame.evaluate(node=>node===window.savedReaderFrame&&node.contentWindow===window.savedReaderWindow),true,'Same iframe and browsing context survive sync');
+    assert.equal(await frame.evaluate(node=>document.activeElement===node),true,'Iframe retains focus');
+    assert.equal(await page.frames().find(frame=>frame.url().includes('mail-view.php')).evaluate(()=>scrollY),900,'HTML scroll position survives');
+    await page.locator('#sync-button').click();await page.getByRole('heading',{name:'HTML refresh 6',exact:true}).waitFor();
+    assert.equal(await frame.evaluate(node=>node!==window.savedReaderFrame),true,'Changed body fingerprint replaces the frame');
+    await frame.evaluate(node=>{window.savedReaderFrame=node;});
+    await openMailMore(page);await page.locator('[data-mail-colors]').click();
+    await page.waitForFunction(()=>document.querySelector('#detail iframe')!==window.savedReaderFrame);
+    assert.equal(await page.locator('#detail iframe').getAttribute('src').then(src=>src.includes('colors=original')),true,'Display changes replace the HTML frame');
+    console.log('PASS HTML reader sync: iframe, window, focus, scroll and one request across batch/final refresh; display changes reload.');
+  } finally {release();await page.goto('about:blank');await page.unroute(apiRoute);await page.unroute(frameRoute);}
+}

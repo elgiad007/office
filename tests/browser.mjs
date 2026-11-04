@@ -5,7 +5,7 @@ import {readFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {openMailMore} from './mail-reader-ui.mjs';
 import {testMailCompact} from './mail-compact.browser.mjs';
-import {testMailReaderSync} from './mail-reader-sync.browser.mjs';
+import {testHtmlReaderSync, testMailReaderSync} from './mail-reader-sync.browser.mjs';
 import {testAccountSetup} from './account-setup.browser.mjs';
 import {testMailArchive} from './mail-archive.browser.mjs';
 import {testDensity} from './density.browser.mjs';
@@ -116,6 +116,7 @@ try{
  await testMailHtml(page,url);
  await testMailCompact(page,url);
  await testCommands(page,url);await testMessageHeaders(page,url);await testMailReaderSync(page,url);
+  await testHtmlReaderSync(page,url);
  await testItemMenus(page,url);
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.screenshot({path:'test-results/mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
  assert.deepEqual(errors,[]);console.log('PASS browser: setup, all local apps, Vim navigation, autosave, persistence, wiki safety/backlinks, formulas, theme, mobile layout, CSRF, imports and stale writes.');
