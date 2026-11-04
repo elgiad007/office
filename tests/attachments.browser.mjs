@@ -19,6 +19,7 @@ export async function testAttachments(page,url){
   await page.getByLabel('Title',{exact:true}).fill('Attachment workflow test');
   await page.getByLabel('To (one recipient)',{exact:true}).fill('recipient@example.com');
   await page.getByLabel('Message',{exact:true}).fill('Text stays intact while attaching.');
+  await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();
   await page.locator('[data-attach-input]').setInputFiles([{name:'résumé.bin',mimeType:'application/octet-stream',buffer:file},{name:'logo.png',mimeType:'image/png',buffer:pixel}]);
   await page.locator('[data-file-status]').filter({hasText:'Attachments saved.'}).waitFor();
   assert.equal(await page.locator('.mail-attachment').count(),2);

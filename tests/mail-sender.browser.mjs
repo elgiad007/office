@@ -23,7 +23,7 @@ export async function testMailSender(page,url) {
     await route.fulfill({json});
   });
   const sender=page.getByLabel('Send using',{exact:true});
-  const compose=async()=>{await page.getByRole('button',{name:'+ Compose',exact:true}).click();await sender.waitFor();};
+  const compose=async()=>{await page.getByRole('button',{name:'+ Compose',exact:true}).click();await sender.waitFor();await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();};
   const reload=async()=>{await page.goto(url+'#mail');await page.reload();await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();};
   const settings=async()=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByLabel('Default mail account',{exact:true}).waitFor();};
   try {
@@ -31,6 +31,7 @@ export async function testMailSender(page,url) {
     await page.locator('.item').filter({hasText:message.title}).click();
     await page.getByRole('button',{name:'Reply',exact:true}).click();await sender.waitFor();
     assert.equal(await sender.inputValue(),'mail-a','Reply uses the receiving account ahead of the default');
+    await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();
     assert.equal(records.at(-1).meta.sendAccount,'mail-a','Initial sender is saved with the draft');
     await sender.selectOption('mail-b');
     await compose();
@@ -58,7 +59,7 @@ export async function testMailSender(page,url) {
     assert.equal(await sender.inputValue(),'mail-b','A removed explicit sender is not silently replaced');
     assert.match(await sender.locator('option:checked').textContent(),/Unavailable account/);
     await sender.selectOption('mail-a');await page.keyboard.press('Escape');
-    await page.getByText('Saved',{exact:true}).waitFor();
+    await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
 
     accounts.push({id:'mail-c',label:'Account C',type:'imap'});preferences={defaultMailAccount:'removed'};
     records.push({id:'old-draft',kind:'mail',title:'Old draft without sender',body:'',revision:1,meta:{folder:'Drafts'}});
@@ -69,7 +70,7 @@ export async function testMailSender(page,url) {
     await page.locator('.item').filter({hasText:'Old draft without sender'}).click();
     assert.equal(await sender.inputValue(),'mail-c','Existing blank drafts receive the default');
     await page.locator('#main').focus();await page.keyboard.press('s');
-    await page.getByText('Saved',{exact:true}).waitFor();
+    await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
     assert.equal(records.find(r=>r.id==='old-draft').meta.sendAccount,'mail-c');
 
     accounts=[{id:'calendar',label:'Calendar only',type:'caldav'}];

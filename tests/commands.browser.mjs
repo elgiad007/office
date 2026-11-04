@@ -17,8 +17,10 @@ export async function testCommands(page,url) {
     else throw Error('Unexpected command route '+action);
     await route.fulfill({json});
   });
+  const saveDraft=async()=>{await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();};
   const run=async text=>{await page.keyboard.press('Escape');await page.locator('#main').focus();await page.keyboard.press(':');await page.locator('#command-input').fill(text);await page.keyboard.press('Enter');};
   const navigate=async(text,target)=>{
+    await page.locator('#mode').filter({hasText:'NORMAL'}).waitFor();
     const previous=await page.locator('#main > :first-child').elementHandle();
     await page.locator('#main').focus();await page.keyboard.press(':');await page.locator('#command-input').fill(text);await page.keyboard.press('Enter');
     await page.waitForFunction(element=>!element.isConnected,previous);
@@ -57,7 +59,7 @@ export async function testCommands(page,url) {
     }
     await page.getByRole('button',{name:/View activity/}).click();assert.equal(await page.locator('#activity-level').inputValue(),'');await page.keyboard.press('Escape');
     for(const [type,kind] of Object.entries({mail:'mail',event:'calendar',task:'tasks',contact:'contacts',doc:'documents',page:'wiki',sheet:'sheets'})){
-      await run(': new '+type);await page.waitForFunction(()=>Boolean(document.activeElement?.closest('#detail'))); assert.equal(creates.at(-1),kind);
+      await run(': new '+type);await page.waitForFunction(()=>Boolean(document.activeElement?.closest('#detail'))); await saveDraft();assert.equal(creates.at(-1),kind);
     }
     assert.equal(creates.length,7);
     const navigation={mail:['mail','m'],calendar:['calendar','cal'],tasks:['tasks','t'],contacts:['contacts','con'],documents:['docs','doc','d'],sheets:['sheets','sh'],wiki:['wiki','w'],settings:['settings','set']};
@@ -75,8 +77,9 @@ export async function testCommands(page,url) {
       assert.ok(await page.locator('.help-table tbody tr').count());
       assert.match(await page.locator('.help-table tbody').textContent(),new RegExp(':'+alias));
     }
-    await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'Close help',exact:true}).click();
     await navigate(':t','tasks');
+    await page.locator('#items [data-id]').first().click();
     await page.locator('#main').focus();
     await page.getByRole('textbox',{name:'Title',exact:true}).evaluate(input=>{input.value='Saved by navigation';input.dispatchEvent(new Event('input',{bubbles:true}));});
     const savesBeforeNavigation=saves;
@@ -87,7 +90,7 @@ export async function testCommands(page,url) {
       await page.locator('[data-app="'+kind+'"]').first().click();
       const before=creates.length;await run(':new');
       await page.waitForFunction(()=>document.activeElement?.closest('#detail')!==null);
-      assert.equal(creates.length,before+1);assert.equal(creates.at(-1),kind);
+      await saveDraft();assert.equal(creates.length,before+1);assert.equal(creates.at(-1),kind);
     }
     await page.locator('[data-app="mail"]').first().click();await page.locator('[data-id="headers"]').click();
     await run(':head');await page.locator('.message-headers').waitFor();assert.match(await page.locator('.message-headers').textContent(),/Subject: Header fixture/);await page.keyboard.press('Escape');
@@ -102,10 +105,11 @@ export async function testCommands(page,url) {
     await run(':q');await loggedFailure;await page.waitForFunction(()=>document.querySelector('#notice').textContent==='Logout fixture failed');
     assert.equal(notices.at(-1)?.message,'Logout fixture failed');failLogout=false;
     releaseCreate={};const started=new Promise(resolve=>{createStarted=resolve;});await run(':new task');
+    await page.getByRole('textbox',{name:'Title',exact:true}).fill('Pending command save');await page.keyboard.press('Control+s');
     await Promise.race([started,new Promise((_,reject)=>setTimeout(()=>reject(Error('Create did not start')),5000))]);
-    await page.waitForFunction(()=>document.querySelector('#detail')?.textContent.includes('Creating item'));
-    await page.keyboard.down('Enter');await page.keyboard.down('Enter');await page.keyboard.up('Enter');
-    releaseCreate.resolve();releaseCreate=null;
+    assert.equal(await page.locator('#save-status').textContent(),'Unsaved draft');
+    await page.keyboard.press('Control+s');await page.keyboard.press('Control+s');
+    releaseCreate.resolve();releaseCreate=null;await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();
     await page.getByRole('textbox',{name:'Title',exact:true}).fill('Pending command save');assert.equal(creates.length,15);
     await page.keyboard.press('Escape');await page.locator('#search').fill('');await page.locator('#search').pressSequentially(':new');assert.equal(await page.locator('#command-input').count(),0);
     await run(':q');await page.locator('#auth-form').waitFor();assert.equal(logout,1);assert.equal(authenticated,false);assert.equal(records.at(-1).title,'Pending command save');

@@ -31,6 +31,7 @@ export async function testMailSend(page,url) {
   const compose=async()=>{
     await page.getByRole('button',{name:'+ Compose',exact:true}).click();await body.waitFor();
     await page.getByLabel('To (one recipient)',{exact:true}).fill('recipient@example.com');
+    await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();
     await body.fill('Send body '+sequence);
   };
   const settings=async enabled=>{
@@ -57,7 +58,7 @@ export async function testMailSend(page,url) {
     await page.waitForFunction(()=>document.querySelector('#detail [data-action="send"]').disabled);
     while(!releaseSend)await new Promise(resolve=>setTimeout(resolve,10));
     await page.keyboard.press('Control+Enter');await page.keyboard.press('Control+Enter');
-    await page.evaluate(()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,repeat:true,bubbles:true,cancelable:true})));
+    await page.evaluate(()=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,repeat:true,bubbles:true,cancelable:true})));
     assert.equal(sends.length,2,'Repeated shortcuts cannot create duplicate sends');assert.equal(await page.locator('#dialog[open]').count(),0);
     holdSend=false;releaseSend();await sent();
     await compose();await sendButton.click();await sent();assert.equal(sends.length,3,'Button also skips disabled confirmation');

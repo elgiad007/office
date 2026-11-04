@@ -3,7 +3,7 @@ import {createKeyboardScroller, type ScrollDirection} from './keyboard-scroll.js
 import {CommandError,resolveCommand} from './commands.js';
 import {asError} from './utils.js';
 import {isPresent} from './utils.js';
-import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, DeleteMail, ItemInput, ItemKind, ItemMeta, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
+import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
 
 interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; removedIds?: string[]; error?: string; code?: string}
 interface RequestPayload {id?: string; revision?: number; action?: string; account?: string; summary?: boolean}
@@ -36,7 +36,24 @@ const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf});
-const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,open:selectRecord,create:(start,end)=>createRecord({meta:{start,end}}),before:commit,error:action=>{void attempt(action);}});
+const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,open:selectRecord,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
+let unsavedDraft: OfficeRecord | null=null;
+class DraftCancelled extends Error {}
+const isUnsavedDraft=()=>!!unsavedDraft && state.current===unsavedDraft;
+interface MailDraftOrigin {folder: string; scope: MailScope | null; search: string; selectedId?: string}
+const mailDraftOrigins=new Map<string,MailDraftOrigin>();
+let lastMailView: MailDraftOrigin={folder:'Inbox',scope:null,search:''};
+function mailDraftOrigin(inherit=true): MailDraftOrigin {
+  return structuredClone((inherit?mailDraftOrigins.get(state.current?.id||''):undefined) ||
+    (!state.mailScope&&state.mailFolder==='Drafts'?lastMailView:{folder:state.mailFolder,scope:state.mailScope,search:state.search,selectedId:state.current?.id}));
+}
+function returnFromMailDraft(id: string) {
+  const origin=mailDraftOrigins.get(id)||lastMailView;mailDraftOrigins.delete(id);
+  state.mailFolder=origin.folder;state.mailScope=structuredClone(origin.scope);state.search=origin.search;
+  state.selected.clear();selectionAnchor=null;keyboardSelection=false;
+  state.current=navigableRows().find(r=>r.id===origin.selectedId)||navigableRows()[0]||null;
+  renderWorkspace();setMode('normal');focusList();
+}
 let saveTimer: ReturnType<typeof setTimeout>, keySequence='', sequenceTime=0;
 let selectionAnchor: string | null=null,keyboardSelection=false;
 let sendingMail=false;
@@ -62,7 +79,7 @@ function closeCommand(restore=false) {
   if(restore)(commandFocus?.isConnected?commandFocus:document.querySelector<HTMLElement>('#main'))?.focus({preventScroll:true});
   commandFocus=null;
 }
-async function signOut() {await waitForAttachments();await commit();await api('logout',{});await boot();}
+async function signOut() {await waitForAttachments();await leaveEditor();await api('logout',{});await boot();}
 const commandHandlers={
   mail:()=>changeApp('mail'),
   calendar:()=>changeApp('calendar'),
@@ -101,7 +118,7 @@ function openCommand() {
     try{command=resolveCommand(input.value);}catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});closeCommand(true);return;}
     activity.clearCommandError();
     commandBusy=true;closeCommand(true);
-    void (async()=>{try{await commandHandlers[command.name](command.argument);}catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});}finally{commandBusy=false;}})();
+    void (async()=>{try{await commandHandlers[command.name](command.argument);}catch(cause){if(!(cause instanceof DraftCancelled))activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});}finally{commandBusy=false;}})();
   });
 }
 function rememberMail(record?: OfficeRecord | null) {
@@ -250,7 +267,7 @@ function setMailFolderPanel(open: boolean) {
   document.querySelector<HTMLElement>('.shell')!?.classList.toggle('folders-open',open);
   document.querySelector<HTMLElement>('#mail-folders-toggle')!?.setAttribute('aria-expanded',String(open));
 }
-function mailFolderEnv() { return {state,api,commit,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,closeFolderPanel:()=>setMailFolderPanel(false)}; }
+function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,closeFolderPanel:()=>setMailFolderPanel(false)}; }
 function mailLocation(record: OfficeRecord) {
   const m=record.meta, account=state.accounts.find(a=>a.id===m.account);
   if(!m.remote || ['Recovery copies','Not in Inbox'].includes(m.folder||''))return m.folder||'';
@@ -268,6 +285,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
   const pane=activePane();
   const ids=new Set(rows.map(r=>r.id)),visible=navigableRows().map(r=>r.id),currentId=state.current?.id!;
   const context=JSON.stringify([state.mailFolder,state.mailScope,state.search]);
+  const completingDraft=rows.some(r=>r.id===currentId&&r.meta.folder==='Drafts');
   let gesture: MailDeleteGesture | undefined;
   if(undoable){
     if(undoingMailDelete)throw Error('Wait for deletion undo to finish.');
@@ -282,6 +300,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
     const next=[...visible.slice(index+1),...visible.slice(0,index).reverse()].find(id=>!ids.has(id));
     state.current=state.rows.find(r=>r.id===next)||null;
   }
+  const nextId=state.current?.id;
   if(gesture)gesture.nextId=state.current?.id;
   renderList();if(advance)renderDetail();
   restorePane(pane);
@@ -313,6 +332,8 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
       // Keep confirmed moves available when switching folders.
       if(state.app==='mail'&&row.meta.remote&&result?.record){state.rows=state.rows.filter(r=>r.id!==row.id&&r.id!==result.record!.id);state.rows.push(result.record);state.rows.sort(compareMail);}
     }
+    if(completingDraft&&state.app==='mail'&&state.current?.id===nextId&&context===JSON.stringify([state.mailFolder,state.mailScope,state.search]))returnFromMailDraft(currentId);
+    for(const row of rows)mailDraftOrigins.delete(row.id);
   }catch(cause) { const error=asError(cause);
     const remaining=rows.slice(count);
     for(const row of remaining){pendingMailDeletes.delete(row.id);failedMailActions.set(row.id,error.message);}
@@ -408,6 +429,8 @@ function captureMailReader(): MailReaderSnapshot | undefined {
 }
 async function load(preferId?: string,{selectFirst=true,preserveSelection=false}={},initialRecords?: OfficeRecord[]) {
   await waitForAttachments();
+  // A background refresh must never replace an in-memory draft.
+  if(isUnsavedDraft())return;
   if(state.app!=='mail')displayedMailId=null;
   itemMenus.close();
   if(!preserveSelection){selectionAnchor=null;keyboardSelection=false;state.selected.clear();}
@@ -424,6 +447,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
   do{version=mailDeleteVersion+mailReadVersion;records=initialRecords??(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;initialRecords=undefined;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
+  if(isUnsavedDraft())return;
   if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
   const contentFocused=preserveSelection&&activePane()==='content'&&!editable(document.activeElement as HTMLElement);
   const listViewport=preserveSelection?captureMailListViewport():undefined;
@@ -472,8 +496,9 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
     document.querySelector<HTMLSelectElement>('#mail-folder')!.onchange=event=>void attempt(async()=>{
       const select=(event.target as HTMLSelectElement), folder=select.value; select.disabled=true;
       try {
-        await commit();
+        await leaveEditor();
         state.mailFolder=folder; state.mailScope=null;mailListLimit=100; state.current=navigableRows()[0]||null; state.selected.clear(); selectionAnchor=null;keyboardSelection=false;setMode('normal');
+        if(state.current?.meta.folder==='Drafts')mailDraftOrigins.set(state.current.id,mailDraftOrigin(false));
         renderWorkspace();
         if(matchMedia('(max-width: 800px)').matches)setMailFolderPanel(false);
       } finally { select.value=state.mailFolder; select.disabled=false; }
@@ -506,6 +531,7 @@ function bindMailViewControls() {
 let mailViewControlAbort: AbortController | undefined;
 function mailViewControlSignal() {mailViewControlAbort?.abort();mailViewControlAbort=new AbortController();return mailViewControlAbort.signal;}
 function renderList() {
+  if(state.app==='mail'&&(state.mailScope||state.mailFolder!=='Drafts'))lastMailView={folder:state.mailFolder,scope:structuredClone(state.mailScope),search:state.search,selectedId:state.current?.meta.folder==='Drafts'?undefined:state.current?.id};
   if(state.app==='calendar'){calendar.render();return;}
   const model=state.app==='mail'?mailView(matchingRows(),state.prefs.mailView):undefined;
   const rows=model?.rows||filteredRows(),count=document.querySelector<HTMLElement>('#list-count')!;
@@ -554,7 +580,7 @@ async function hydrateMailBody(record: OfficeRecord,manual=false) {
   finally{bodyDownloads.delete(record.id);}
 }
 let displayedMailBody: string | undefined;
-function renderDetail(readerSnapshot=captureMailReader()) {
+function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const scrollingPanel=document.querySelector<HTMLElement>('#detail');
   if(scrollingPanel)keyboardScrollers.get(scrollingPanel)?.cancel();
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
@@ -577,7 +603,12 @@ function renderDetail(readerSnapshot=captureMailReader()) {
   const bodyKey=viewingMail?JSON.stringify([r.id,r.body,r.bodyHash,mailBody(r,state.prefs)]):undefined;
   const retainBody=viewingMail&&!newlyOpened&&bodyKey===displayedMailBody&&!!panel.querySelector('.mail-reader-header');
   displayedMailBody=bodyKey;
-  const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':'Saved'}</span>${['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?'<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>':''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+  const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':isUnsavedDraft()?'Unsaved draft':state.dirty?'Unsaved changes':'Saved'}</span>${!isUnsavedDraft()&&['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?`<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete selected item'}">${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete'}</button>`:''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+  if(toolbarOnly){
+    const template=document.createElement('template');template.innerHTML=markup;
+    for(const selector of ['.detail-toolbar','.print-only'])panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector)!);
+    return;
+  }
   if(retainBody){
     // Keep the body connected: moving an iframe reloads its browsing context.
     const template=document.createElement('template');template.innerHTML=markup;
@@ -590,7 +621,7 @@ function renderDetail(readerSnapshot=captureMailReader()) {
   const form=panel.querySelector<HTMLFormElement>('#record-form')!;
   if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail,keys());
   if(contentFocused)focusContent();
-  if(state.app==='mail')bindAttachments(panel,r,{api,commit,notice,modal,update:record=>{
+  if(state.app==='mail')bindAttachments(panel,r,{api,commit:requireSaved,notice,modal,update:record=>{
     if(state.current?.id===record.id){state.current.revision=record.revision;state.current.meta.attachments=record.meta.attachments;state.current.meta.hasAttachments=record.meta.hasAttachments;}
     const row=state.rows.find(row=>row.id===record.id);if(row){row.revision=record.revision;row.meta.attachments=record.meta.attachments;row.meta.hasAttachments=record.meta.hasAttachments;}
   }});
@@ -603,9 +634,9 @@ function renderDetail(readerSnapshot=captureMailReader()) {
   if(newlyOpened && openedMail)markOpenedMailRead(r);
   const bodyButton=panel.querySelector<HTMLButtonElement>('[data-download-body]');
   if(bodyButton){bodyButton.onclick=()=>void hydrateMailBody(r,true);if(Number(r.meta.messageSize||0)<=1400000&&!['Recovery copies','Not in Inbox'].includes(r.meta.folder||''))void hydrateMailBody(r);}
-  if (form) { form.oninput=()=>markDirty(); form.onsubmit=async ev=>{ev.preventDefault(); await attempt(()=>commit());}; }
+  if (form) { form.oninput=()=>markDirty(); form.onsubmit=async ev=>{ev.preventDefault(); await attempt(()=>commit(true));}; }
   if(state.app==='calendar'){
-    const close=document.createElement('button');close.textContent='Close event';close.className='calendar-close';close.onclick=()=>void attempt(async()=>{await commit();state.current=null;renderDetail();renderList();document.querySelector<HTMLElement>('#items button')?.focus();});panel.prepend(close);
+    const close=document.createElement('button');close.textContent='Close event';close.className='calendar-close';close.onclick=()=>void attempt(async()=>{await leaveEditor();state.current=null;renderDetail();renderList();document.querySelector<HTMLElement>('#items button')?.focus();});panel.prepend(close);
     const allDay=form?.querySelector<HTMLInputElement>('[name="allDay"]');if(allDay)allDay.onchange=()=>{for(const name of ['start','end']){const input=form!.querySelector<HTMLInputElement>(`[name="${name}"]`)!;const value=input.value;input.type=allDay.checked?'date':'datetime-local';input.value=allDay.checked?value.slice(0,10):value+'T00:00';}markDirty();};
   }
   if (fillSender) markDirty();
@@ -666,16 +697,46 @@ function collect() {
   if (state.app==='tasks') m.done=values.done==='on';
   if (state.app==='documents') state.current!.body=safeDocument(document.querySelector<HTMLElement>('#rich-editor')!.innerHTML);
 }
-function markDirty() { state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Unsaved changes'; clearTimeout(saveTimer); saveTimer=setTimeout(()=>void attempt(()=>commit()),800); }
-async function commit(): Promise<void> {
+function markDirty() { collect();state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=isUnsavedDraft()?'Unsaved draft':'Unsaved changes'; clearTimeout(saveTimer); if(!isUnsavedDraft())saveTimer=setTimeout(()=>void attempt(()=>commit()),800); }
+async function requireSaved() {
+  if(isUnsavedDraft())throw Error('Save this draft first.');
+  await commit();
+}
+function discardUnsavedDraft() {
+  const draft=unsavedDraft;
+  clearTimeout(saveTimer);unsavedDraft=null;state.current=null;state.dirty=false;
+  if(draft?.kind==='mail'){returnFromMailDraft(draft.id);return;}
+  renderList();renderDetail();
+}
+async function leaveEditor() {
+  if(state.savePromise)await state.savePromise;
+  if(isUnsavedDraft()){
+    collect();
+    const choice=await new Promise<string>(resolve=>{
+      modal('Unsaved draft','<p>Save this draft before leaving?</p><div class="dialog-actions"><button data-draft-choice="cancel">Cancel</button><button data-draft-choice="discard">Discard Draft</button><button class="primary" data-draft-choice="save">Save</button></div>');
+      dialog.addEventListener('close',()=>resolve('cancel'),{once:true});
+      dialog.querySelectorAll<HTMLButtonElement>('[data-draft-choice]').forEach(button=>button.onclick=()=>{resolve(button.dataset.draftChoice!);dialog.close();});
+      dialog.querySelector<HTMLButtonElement>('[data-draft-choice="cancel"]')!.focus();
+    });
+    if(choice==='cancel')throw new DraftCancelled();
+    if(choice==='discard')discardUnsavedDraft();else await commit(true);
+  }else await commit();
+}
+async function commit(explicit=false): Promise<void> {
   clearTimeout(saveTimer); if(state.savePromise) await state.savePromise; if(!state.dirty || !state.current) return;
-  collect(); const payload=structuredClone(state.current); state.dirty=false; const id=payload.id;
-  state.savePromise=(async()=>{try { const result=await api('save',payload); if(state.current?.id===id) { state.current!.revision=result.record.revision; state.current!.updated=result.record.updated; const pos=state.rows.findIndex(r=>r.id===id); if(pos>=0)state.rows[pos]=state.current; }
+  collect();if(isUnsavedDraft()&&!explicit)return;
+  const firstSave=isUnsavedDraft(),payload=structuredClone(state.current); state.dirty=false; const id=payload.id;
+  const input=firstSave?{kind:payload.kind,title:payload.title,body:payload.body,meta:payload.meta}:payload;
+  state.savePromise=(async()=>{try { const result=await api('save',input); if(state.current?.id===id) {
+    if(firstSave){const origin=mailDraftOrigins.get(id);if(origin){mailDraftOrigins.set(result.record.id,origin);mailDraftOrigins.delete(id);}Object.assign(state.current!,{id:result.record.id,revision:result.record.revision,created:result.record.created,updated:result.record.updated});unsavedDraft=null;state.rows.push(state.current!);}
+    else {state.current!.revision=result.record.revision;state.current!.updated=result.record.updated;const pos=state.rows.findIndex(r=>r.id===id);if(pos>=0)state.rows[pos]=state.current;}
+  }
     const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved'; renderList();
   } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
   await state.savePromise; if(state.dirty) await commit();
+  if(firstSave)renderDetail(undefined,true);
 }
-async function changeApp(name: AppName) { await waitForAttachments(); await commit(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
+async function changeApp(name: AppName) { await waitForAttachments(); await leaveEditor(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(); }
 function updateMailListItem(id: string) {
   const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
   if(!row||!button)return;
@@ -686,13 +747,13 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus=false) { const pane=activePane(); await waitForAttachments(); await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
+async function selectRecord(id: string,focus=false) { const pane=activePane(); await waitForAttachments(); await leaveEditor(); const previous=state.current?.id,origin=mailDraftOrigin(false);state.current=state.rows.find(r=>r.id===id)||null;if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin); state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
   const selected=document.querySelector<HTMLElement>('#selected-item');
   selected?.focus({preventScroll:true});
   selected?.scrollIntoView({block:'nearest',inline:'nearest'});
 } }
 async function clickRecord(id: string,event: MouseEvent) {
-  await commit();
+  await leaveEditor();
   if(event.shiftKey){
     keyboardSelection=false;
     const rows=navigableRows(),to=rows.findIndex(r=>r.id===id),anchor=rows.findIndex(r=>r.id===(selectionAnchor||state.current?.id)),from=anchor<0?to:anchor;
@@ -712,23 +773,22 @@ function draftAccount(context?: OfficeRecord | null) {
   return [context?.meta.sendAccount,context?.meta.account,state.prefs.defaultMailAccount,accounts.length===1?accounts[0].id:''].find(id=>accounts.some(a=>a.id===id)) || '';
 }
 async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,focusBody=false}={}) {
-  await waitForAttachments(); await commit(); const kind=state.app;
+  await waitForAttachments(); await leaveEditor(); const kind=state.app;
   if (!apps[kind]) return;
-  // Remove the previous editor before the network round-trip, so fast typing cannot overwrite it.
   const previous=state.current;
-  document.querySelector<HTMLElement>('#detail')!.innerHTML='<p class="muted" role="status">Creating item…</p>';
+  const origin=kind==='mail'?mailDraftOrigin():undefined;
   const record: ItemInput={kind:kind as ItemKind,title:initial.title||'Untitled '+apps[kind].singular,body:initial.body||'',meta:{...(kind==='mail'?{folder:'Drafts'}:{}),...initial.meta}};
   if(kind==='mail' && !record.meta.sendAccount)record.meta.sendAccount=draftAccount(previous);
   if(kind==='calendar'&&!record.meta.start) { const start=new Date(); start.setMinutes(0,0,0); record.meta.start=start.toISOString(); record.meta.end=new Date(+start+3600000).toISOString(); }
   if(kind==='sheets')record.meta.workbook={sheets:[{name:'Sheet 1',cells:{}}]};
   if(kind==='mail'&&!keepMailList){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
   try {
-    const result=await api('save',record);state.wikiPreview=false;
-    if(kind==='mail'&&keepMailList){
-      state.rows.push(result.record);state.rows.sort(compareMail);state.current=result.record;
-      state.selected.clear();selectionAnchor=null;keyboardSelection=false;
-      renderList();renderDetail();
-    }else await load(result.record.id);
+    const now=new Date().toISOString();
+    state.current={...record,id:'draft-'+crypto.randomUUID(),revision:0,created:now,updated:now};unsavedDraft=state.current;
+    if(origin)mailDraftOrigins.set(state.current.id,origin);
+    state.dirty=true;state.wikiPreview=false;state.sheet=0;state.cell='A1';
+    state.selected.clear();selectionAnchor=null;keyboardSelection=false;
+    renderWorkspace();
     if(kind==='mail'&&focusBody){
       const body=document.querySelector<HTMLTextAreaElement>('#detail [name="body"]')!;
       body?.focus();body?.setSelectionRange(0,0);setMode('insert');
@@ -743,7 +803,7 @@ function enterEdit(preferTitle=false) {
   target?.focus();if(target instanceof HTMLInputElement&&(preferTitle||target.id==='formula'))target.select();setMode('insert');
 }
 function setMode(mode: string) {state.mode=mode;const m=document.querySelector<HTMLElement>('#mode')!;if(m)m.textContent=mode.toUpperCase();}
-async function attempt<T>(fn: () => T | Promise<T>) { try{return await fn();}catch(cause) { const error=asError(cause);notice(error.message,true);} }
+async function attempt<T>(fn: () => T | Promise<T>) { try{return await fn();}catch(cause) { if(cause instanceof DraftCancelled)return;const error=asError(cause);notice(error.message,true);} }
 function modal(title: string,body: string) { dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector<HTMLElement>('[data-close]')!.onclick=()=>dialog.close(); dialog.showModal(); }
 function confirmation(title: string,message: string,action: () => unknown) { modal(title,`<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`); dialog.querySelector<HTMLElement>('#cancel')!.onclick=()=>dialog.close();dialog.querySelector<HTMLElement>('#cancel')!.focus();dialog.querySelector<HTMLElement>('#confirm')!.onclick=async()=>{dialog.close();await attempt(action);}; }
 function download(name: string,text: BlobPart,type='text/plain') { const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'_');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
@@ -782,7 +842,7 @@ async function exportRecords(all=false,selectedRecords: OfficeRecord[] | null=nu
   else download(name+'.json',JSON.stringify({format:'portable-office-items',version:1,records},null,2),'application/json');
 }
 async function importFile() {
-  await commit();const input=document.createElement('input');input.type='file';input.accept='.json,.md,.txt,.html,.htm,.csv,.ics,.vcf,.eml';
+  await leaveEditor();const input=document.createElement('input');input.type='file';input.accept='.json,.md,.txt,.html,.htm,.csv,.ics,.vcf,.eml';
   input.onchange=()=>void attempt(async()=>{const file=input.files?.[0];if(!file)return;if(file.size>8*1024*1024)throw Error('Import files up to 8 MB.');const text=await file.text(), ext=file.name.split('.').at(-1)!.toLowerCase();let records: ItemInput[]=[];
     if(ext==='ics'||ext==='eml'){const payload: {format: string; text: string; base64?: string}={format:ext,text:ext==='ics'?text:''};if(ext==='eml'){if(file.size>1400000)throw Error('Original EML import supports up to 1.4 MB.');const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));payload.base64=btoa(binary);}const r=await api('import',payload);notice(`Imported ${r.count} items locally.`);await load();return;}
     if(ext==='json'){const data=JSON.parse(text) as {format?: string; version?: number; records?: ItemInput[]; preferences?: Preferences};if(data.format==='portable-office'){confirmation('Restore backup','Restore into this empty workspace? Remote copies become local archives. Accounts and credentials are not restored.',async()=>{const r=await api('restore',{backup:data});state.prefs=data.preferences||{};applyTheme();await load();notice(`Restored ${r.count} items.`);});return;}if(data.format!=='portable-office-items'||data.version!==1||!Array.isArray(data.records))throw Error('Unsupported JSON file.');records=data.records;}
@@ -831,7 +891,7 @@ async function syncAccounts(manual=true) {
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }
 function help() {openHelp(dialog,keys(),e,()=>setMode('normal'));}
-async function history() {await commit();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
+async function history() {await requireSaved();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
 async function handleClick(event: MouseEvent) {
   const disclosure=(event.target as HTMLElement).closest<HTMLElement>('[data-mail-disclosure]')?.dataset.mailDisclosure;
   document.querySelectorAll<HTMLDetailsElement>('#detail [data-mail-disclosure][open]').forEach(d=>{if(d.dataset.mailDisclosure!==disclosure)d.open=false;});
@@ -849,6 +909,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='toggle-mail-folders')setMailFolderPanel(!document.querySelector<HTMLElement>('.shell')!.classList.contains('folders-open'));
     if(action==='close-mail-folders'){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();}
     if(action==='new')await createRecord();
+    if(action==='save')await commit(true);
     if(action==='help')help();
     if(action==='sync')await syncAccounts();
     if(action==='file-mail')await fileMail(mailFolderEnv());
@@ -866,6 +927,8 @@ async function handleClick(event: MouseEvent) {
     if(action==='wiki-mode'){await commit();state.wikiPreview=!state.wikiPreview;renderDetail();if(!state.wikiPreview)enterEdit();}
     if(action==='history')await history();
     if(action==='delete'){
+      if(state.savePromise)await state.savePromise;
+      if(isUnsavedDraft()){confirmation('Discard Draft','Discard this unsaved draft?',discardUnsavedDraft);return;}
       if(state.app==='mail')await deleteSelectedMail();
       else confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current!,reload=mailDeletionReload();await api('delete',{id:record.id,revision:record.revision});await reload([record.id]);notice('Item deleted.');});
     }
@@ -878,8 +941,11 @@ async function handleClick(event: MouseEvent) {
     if(action==='reply'){const original=state.current!;const r=original.meta.headerOnly?await fullMailRecord(original):original;if(state.current?.id!==original.id)return;const match=(r.meta.from||'').match(/<([^>]+)>/);await createRecord({title:/^Re:/i.test(r.title)?r.title:'Re: '+r.title,body:'\n\nOn '+(r.meta.date||'')+', '+(r.meta.from||'')+' wrote:\n'+r.body.split('\n').map(l=>'> '+l).join('\n'),meta:{to:match?match[1]:r.meta.from}},{keepMailList:true,focusBody:true});}
     if(action==='forward'){
       const original=state.current!;await waitForAttachments();await commit();await pendingMailReads.get(original.id);
+      const origin=mailDraftOrigin();
       const source=original.meta.headerOnly?await fullMailRecord(original):original;
       const response=await api('mail-files',{id:source.id,action:'forward'});
+      mailDraftOrigins.set(response.record.id,origin);
+      if(state.app!=='mail'||state.current?.id!==original.id)return;
       state.mailScope=null;state.mailFolder='Drafts';await load(response.record.id);enterEdit();
     }
     if(action==='send')await sendMail();
@@ -895,7 +961,7 @@ async function sendMail() {
   sendingMail=true;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,true);
   try{
     await waitForAttachments();
-    await commit();
+    await requireSaved();
     if(state.app!=='mail'||state.current?.id!==record.id)return;
     if(!mailAccounts().some(a=>a.id===record.meta.sendAccount))throw Error('Choose a sending account first.');
     if(state.prefs.confirmBeforeSend!==false){
@@ -907,6 +973,8 @@ async function sendMail() {
     }
     try{
       await api('send',{id:record.id,revision:record.revision,account:record.meta.sendAccount});
+      if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise){returnFromMailDraft(record.id);await load(state.current?.id);}
+      else mailDraftOrigins.delete(record.id);
       notice('Message accepted by the provider.');
     }finally{
       if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise)await load();
@@ -917,6 +985,7 @@ async function sendMail() {
 }
 async function deleteSelectedMail() {
   if(state.app!=='mail')return;
+  if(isUnsavedDraft()){document.querySelector<HTMLButtonElement>('#detail [data-action="delete"]')?.click();return;}
   await commit();
   const visible=filteredRows();
   const rows=state.selected.size?visible.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
@@ -932,7 +1001,8 @@ async function deleteSelectedMail() {
     await deleteMailImmediately(current.filter(isPresent),r=>r.meta.remote?api('mail-action',{id:r.id,revision:r.revision,action:'trash',undoable:true}):api('delete',{id:r.id,revision:r.revision,undoable:true}),true);
     notice(rows.length===1?(local?'Item deleted.':'Moved to Trash.'):`${rows.length} items updated.`);
   };
-  if(local)confirmation(rows.length===1?'Delete item':'Delete selected messages',`Delete ${local} local message(s)? Undo is available for fifteen minutes.${local<rows.length?` Also move ${rows.length-local} connected message(s) to Trash.`:''}`,apply);
+  const singleDraft=rows.length===1&&rows[0].meta.folder==='Drafts';
+  if(local)confirmation(singleDraft?'Discard Draft':rows.length===1?'Delete item':'Delete selected messages',singleDraft?'Discard this saved draft? Undo is available for fifteen minutes.':`Delete ${local} local message(s)? Undo is available for fifteen minutes.${local<rows.length?` Also move ${rows.length-local} connected message(s) to Trash.`:''}`,apply);
   else await apply();
 }
 async function archiveLocal() {
@@ -1060,7 +1130,7 @@ function accountDialog() {
     renderSettings();
   }});
 }
-const itemMenus=installItemMenus({state,e,commit,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,setMailRead,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+const itemMenus=installItemMenus({state,e,commit:leaveEditor,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,setMailRead,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 function contentEntry() {
   const panel=document.querySelector<HTMLElement>('#detail');
   return panel?.querySelector<HTMLElement>('.mail-html, .mail-body, .sheet-wrap')||panel;
@@ -1103,8 +1173,8 @@ document.addEventListener('keydown',event=>{
     event.preventDefault();if(!event.repeat)void attempt(sendMail);return;
   }
   if(event.key==='Escape'&&document.querySelector<HTMLElement>('.shell')!?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();event.preventDefault();return;}
-  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(commit);return;}
-  if(event.key==='Escape'){if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(()=>commit(true));return;}
+  if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
   if(editable((event.target as HTMLElement))){setMode('insert');return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
   if((event.target as HTMLElement).closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
@@ -1130,7 +1200,7 @@ document.addEventListener('keydown',event=>{
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}
   if(action==='edit'||(state.app==='sheets'&&key==='Enter')){event.preventDefault();enterEdit();return;}
-  if(action==='save'){event.preventDefault();void attempt(commit);return;}
+  if(action==='save'){event.preventDefault();void attempt(()=>commit(true));return;}
   if(action==='delete'){
     event.preventDefault();
     if(!event.repeat){

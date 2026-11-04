@@ -33,7 +33,7 @@ export function installItemMenus(env: MenuEnvironment) {
     if(state.app==='tasks'&&local){add('complete','Mark complete');add('incomplete','Mark incomplete');}
     if(single&&local&&['documents','wiki'].includes(state.app))add('history','Revision history');
     add('export',single?'Export':'Export selected');
-    if(local)add('delete',single?'Delete…':`Delete ${rows.length} items…`,true);
+    if(local)add('delete',single&&r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft…':single?'Delete…':`Delete ${rows.length} items…`,true);
     return result;
   }
   async function run(id: string,ids: string[],app: AppName) {
@@ -86,7 +86,7 @@ export function installItemMenus(env: MenuEnvironment) {
       finally{await reload(removed);}
       env.notice(`${count} ${count===1?'item':'items'} updated.`);
     };
-    if(id==='delete'||id==='discard')env.confirmation(id==='delete'?'Delete selected items':'Discard copies',id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply);
+    if(id==='delete'||id==='discard')env.confirmation(id==='delete'?(app==='mail'&&rows.length===1&&rows[0].meta.folder==='Drafts'?'Discard Draft':'Delete selected items'):'Discard copies',id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply);
     else await apply();
   }
   async function open(row: HTMLElement,x: number,y: number) {

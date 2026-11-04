@@ -30,7 +30,31 @@ const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new:
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
-const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: commit, error: action => { void attempt(action); } });
+const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
+let unsavedDraft = null;
+class DraftCancelled extends Error {
+}
+const isUnsavedDraft = () => !!unsavedDraft && state.current === unsavedDraft;
+const mailDraftOrigins = new Map();
+let lastMailView = { folder: 'Inbox', scope: null, search: '' };
+function mailDraftOrigin(inherit = true) {
+    return structuredClone((inherit ? mailDraftOrigins.get(state.current?.id || '') : undefined) ||
+        (!state.mailScope && state.mailFolder === 'Drafts' ? lastMailView : { folder: state.mailFolder, scope: state.mailScope, search: state.search, selectedId: state.current?.id }));
+}
+function returnFromMailDraft(id) {
+    const origin = mailDraftOrigins.get(id) || lastMailView;
+    mailDraftOrigins.delete(id);
+    state.mailFolder = origin.folder;
+    state.mailScope = structuredClone(origin.scope);
+    state.search = origin.search;
+    state.selected.clear();
+    selectionAnchor = null;
+    keyboardSelection = false;
+    state.current = navigableRows().find(r => r.id === origin.selectedId) || navigableRows()[0] || null;
+    renderWorkspace();
+    setMode('normal');
+    focusList();
+}
 let saveTimer, keySequence = '', sequenceTime = 0;
 let selectionAnchor = null, keyboardSelection = false;
 let sendingMail = false;
@@ -60,7 +84,7 @@ function closeCommand(restore = false) {
         (commandFocus?.isConnected ? commandFocus : document.querySelector('#main'))?.focus({ preventScroll: true });
     commandFocus = null;
 }
-async function signOut() { await waitForAttachments(); await commit(); await api('logout', {}); await boot(); }
+async function signOut() { await waitForAttachments(); await leaveEditor(); await api('logout', {}); await boot(); }
 const commandHandlers = {
     mail: () => changeApp('mail'),
     calendar: () => changeApp('calendar'),
@@ -135,7 +159,8 @@ function openCommand() {
             await commandHandlers[command.name](command.argument);
         }
         catch (cause) {
-            activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
+            if (!(cause instanceof DraftCancelled))
+                activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
         }
         finally {
             commandBusy = false;
@@ -386,7 +411,7 @@ function setMailFolderPanel(open) {
     document.querySelector('.shell')?.classList.toggle('folders-open', open);
     document.querySelector('#mail-folders-toggle')?.setAttribute('aria-expanded', String(open));
 }
-function mailFolderEnv() { return { state, api, commit, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, closeFolderPanel: () => setMailFolderPanel(false) }; }
+function mailFolderEnv() { return { state, api, commit: leaveEditor, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, closeFolderPanel: () => setMailFolderPanel(false) }; }
 function mailLocation(record) {
     const m = record.meta, account = state.accounts.find(a => a.id === m.account);
     if (!m.remote || ['Recovery copies', 'Not in Inbox'].includes(m.folder || ''))
@@ -406,6 +431,7 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
     const pane = activePane();
     const ids = new Set(rows.map(r => r.id)), visible = navigableRows().map(r => r.id), currentId = state.current?.id;
     const context = JSON.stringify([state.mailFolder, state.mailScope, state.search]);
+    const completingDraft = rows.some(r => r.id === currentId && r.meta.folder === 'Drafts');
     let gesture;
     if (undoable) {
         if (undoingMailDelete)
@@ -428,6 +454,7 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
         const next = [...visible.slice(index + 1), ...visible.slice(0, index).reverse()].find(id => !ids.has(id));
         state.current = state.rows.find(r => r.id === next) || null;
     }
+    const nextId = state.current?.id;
     if (gesture)
         gesture.nextId = state.current?.id;
     renderList();
@@ -480,6 +507,10 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
                 state.rows.sort(compareMail);
             }
         }
+        if (completingDraft && state.app === 'mail' && state.current?.id === nextId && context === JSON.stringify([state.mailFolder, state.mailScope, state.search]))
+            returnFromMailDraft(currentId);
+        for (const row of rows)
+            mailDraftOrigins.delete(row.id);
     }
     catch (cause) {
         const error = asError(cause);
@@ -621,6 +652,9 @@ function captureMailReader() {
 }
 async function load(preferId, { selectFirst = true, preserveSelection = false } = {}, initialRecords) {
     await waitForAttachments();
+    // A background refresh must never replace an in-memory draft.
+    if (isUnsavedDraft())
+        return;
     if (state.app !== 'mail')
         displayedMailId = null;
     itemMenus.close();
@@ -658,6 +692,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
         if (state.app !== app)
             return;
     } while (app === 'mail' && version !== mailDeleteVersion + mailReadVersion);
+    if (isUnsavedDraft())
+        return;
     if (preserveSelection && selectionContext !== JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]))
         return;
     const contentFocused = preserveSelection && activePane() === 'content' && !editable(document.activeElement);
@@ -729,7 +765,7 @@ function renderWorkspace(readerSnapshot) {
             const select = event.target, folder = select.value;
             select.disabled = true;
             try {
-                await commit();
+                await leaveEditor();
                 state.mailFolder = folder;
                 state.mailScope = null;
                 mailListLimit = 100;
@@ -738,6 +774,8 @@ function renderWorkspace(readerSnapshot) {
                 selectionAnchor = null;
                 keyboardSelection = false;
                 setMode('normal');
+                if (state.current?.meta.folder === 'Drafts')
+                    mailDraftOrigins.set(state.current.id, mailDraftOrigin(false));
                 renderWorkspace();
                 if (matchMedia('(max-width: 800px)').matches)
                     setMailFolderPanel(false);
@@ -788,6 +826,8 @@ function bindMailViewControls() {
 let mailViewControlAbort;
 function mailViewControlSignal() { mailViewControlAbort?.abort(); mailViewControlAbort = new AbortController(); return mailViewControlAbort.signal; }
 function renderList() {
+    if (state.app === 'mail' && (state.mailScope || state.mailFolder !== 'Drafts'))
+        lastMailView = { folder: state.mailFolder, scope: structuredClone(state.mailScope), search: state.search, selectedId: state.current?.meta.folder === 'Drafts' ? undefined : state.current?.id };
     if (state.app === 'calendar') {
         calendar.render();
         return;
@@ -868,7 +908,7 @@ async function hydrateMailBody(record, manual = false) {
     }
 }
 let displayedMailBody;
-function renderDetail(readerSnapshot = captureMailReader()) {
+function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false) {
     const scrollingPanel = document.querySelector('#detail');
     if (scrollingPanel)
         keyboardScrollers.get(scrollingPanel)?.cancel();
@@ -900,7 +940,14 @@ function renderDetail(readerSnapshot = captureMailReader()) {
     const bodyKey = viewingMail ? JSON.stringify([r.id, r.body, r.bodyHash, mailBody(r, state.prefs)]) : undefined;
     const retainBody = viewingMail && !newlyOpened && bodyKey === displayedMailBody && !!panel.querySelector('.mail-reader-header');
     displayedMailBody = bodyKey;
-    const markup = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : 'Saved'}</span>${['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiPreview ? 'Edit' : 'Preview'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? '<button class="quiet danger" data-action="delete" title="Delete selected item">Delete</button>' : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+    const markup = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : isUnsavedDraft() ? 'Unsaved draft' : state.dirty ? 'Unsaved changes' : 'Saved'}</span>${!isUnsavedDraft() && ['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiPreview ? 'Edit' : 'Preview'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? `<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft() || r.kind === 'mail' && r.meta.folder === 'Drafts' ? 'Discard Draft' : 'Delete selected item'}">${isUnsavedDraft() || r.kind === 'mail' && r.meta.folder === 'Drafts' ? 'Discard Draft' : 'Delete'}</button>` : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+    if (toolbarOnly) {
+        const template = document.createElement('template');
+        template.innerHTML = markup;
+        for (const selector of ['.detail-toolbar', '.print-only'])
+            panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
+        return;
+    }
     if (retainBody) {
         // Keep the body connected: moving an iframe reloads its browsing context.
         const template = document.createElement('template');
@@ -920,7 +967,7 @@ function renderDetail(readerSnapshot = captureMailReader()) {
     if (contentFocused)
         focusContent();
     if (state.app === 'mail')
-        bindAttachments(panel, r, { api, commit, notice, modal, update: record => {
+        bindAttachments(panel, r, { api, commit: requireSaved, notice, modal, update: record => {
                 if (state.current?.id === record.id) {
                     state.current.revision = record.revision;
                     state.current.meta.attachments = record.meta.attachments;
@@ -949,13 +996,13 @@ function renderDetail(readerSnapshot = captureMailReader()) {
     }
     if (form) {
         form.oninput = () => markDirty();
-        form.onsubmit = async (ev) => { ev.preventDefault(); await attempt(() => commit()); };
+        form.onsubmit = async (ev) => { ev.preventDefault(); await attempt(() => commit(true)); };
     }
     if (state.app === 'calendar') {
         const close = document.createElement('button');
         close.textContent = 'Close event';
         close.className = 'calendar-close';
-        close.onclick = () => void attempt(async () => { await commit(); state.current = null; renderDetail(); renderList(); document.querySelector('#items button')?.focus(); });
+        close.onclick = () => void attempt(async () => { await leaveEditor(); state.current = null; renderDetail(); renderList(); document.querySelector('#items button')?.focus(); });
         panel.prepend(close);
         const allDay = form?.querySelector('[name="allDay"]');
         if (allDay)
@@ -1068,27 +1115,82 @@ function collect() {
     if (state.app === 'documents')
         state.current.body = safeDocument(document.querySelector('#rich-editor').innerHTML);
 }
-function markDirty() { state.dirty = true; const s = document.querySelector('#save-status'); if (s)
-    s.textContent = 'Unsaved changes'; clearTimeout(saveTimer); saveTimer = setTimeout(() => void attempt(() => commit()), 800); }
-async function commit() {
+function markDirty() { collect(); state.dirty = true; const s = document.querySelector('#save-status'); if (s)
+    s.textContent = isUnsavedDraft() ? 'Unsaved draft' : 'Unsaved changes'; clearTimeout(saveTimer); if (!isUnsavedDraft())
+    saveTimer = setTimeout(() => void attempt(() => commit()), 800); }
+async function requireSaved() {
+    if (isUnsavedDraft())
+        throw Error('Save this draft first.');
+    await commit();
+}
+function discardUnsavedDraft() {
+    const draft = unsavedDraft;
+    clearTimeout(saveTimer);
+    unsavedDraft = null;
+    state.current = null;
+    state.dirty = false;
+    if (draft?.kind === 'mail') {
+        returnFromMailDraft(draft.id);
+        return;
+    }
+    renderList();
+    renderDetail();
+}
+async function leaveEditor() {
+    if (state.savePromise)
+        await state.savePromise;
+    if (isUnsavedDraft()) {
+        collect();
+        const choice = await new Promise(resolve => {
+            modal('Unsaved draft', '<p>Save this draft before leaving?</p><div class="dialog-actions"><button data-draft-choice="cancel">Cancel</button><button data-draft-choice="discard">Discard Draft</button><button class="primary" data-draft-choice="save">Save</button></div>');
+            dialog.addEventListener('close', () => resolve('cancel'), { once: true });
+            dialog.querySelectorAll('[data-draft-choice]').forEach(button => button.onclick = () => { resolve(button.dataset.draftChoice); dialog.close(); });
+            dialog.querySelector('[data-draft-choice="cancel"]').focus();
+        });
+        if (choice === 'cancel')
+            throw new DraftCancelled();
+        if (choice === 'discard')
+            discardUnsavedDraft();
+        else
+            await commit(true);
+    }
+    else
+        await commit();
+}
+async function commit(explicit = false) {
     clearTimeout(saveTimer);
     if (state.savePromise)
         await state.savePromise;
     if (!state.dirty || !state.current)
         return;
     collect();
-    const payload = structuredClone(state.current);
+    if (isUnsavedDraft() && !explicit)
+        return;
+    const firstSave = isUnsavedDraft(), payload = structuredClone(state.current);
     state.dirty = false;
     const id = payload.id;
+    const input = firstSave ? { kind: payload.kind, title: payload.title, body: payload.body, meta: payload.meta } : payload;
     state.savePromise = (async () => {
         try {
-            const result = await api('save', payload);
+            const result = await api('save', input);
             if (state.current?.id === id) {
-                state.current.revision = result.record.revision;
-                state.current.updated = result.record.updated;
-                const pos = state.rows.findIndex(r => r.id === id);
-                if (pos >= 0)
-                    state.rows[pos] = state.current;
+                if (firstSave) {
+                    const origin = mailDraftOrigins.get(id);
+                    if (origin) {
+                        mailDraftOrigins.set(result.record.id, origin);
+                        mailDraftOrigins.delete(id);
+                    }
+                    Object.assign(state.current, { id: result.record.id, revision: result.record.revision, created: result.record.created, updated: result.record.updated });
+                    unsavedDraft = null;
+                    state.rows.push(state.current);
+                }
+                else {
+                    state.current.revision = result.record.revision;
+                    state.current.updated = result.record.updated;
+                    const pos = state.rows.findIndex(r => r.id === id);
+                    if (pos >= 0)
+                        state.rows[pos] = state.current;
+                }
             }
             const s = document.querySelector('#save-status');
             if (s)
@@ -1110,8 +1212,10 @@ async function commit() {
     await state.savePromise;
     if (state.dirty)
         await commit();
+    if (firstSave)
+        renderDetail(undefined, true);
 }
-async function changeApp(name) { await waitForAttachments(); await commit(); if (name === 'mail' && state.app !== 'mail') {
+async function changeApp(name) { await waitForAttachments(); await leaveEditor(); if (name === 'mail' && state.app !== 'mail') {
     state.mailFolder = 'Inbox';
     state.mailScope = null;
 } state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(); }
@@ -1138,9 +1242,11 @@ function updateMailListItem(id) {
 async function selectRecord(id, focus = false) {
     const pane = activePane();
     await waitForAttachments();
-    await commit();
-    const previous = state.current?.id;
+    await leaveEditor();
+    const previous = state.current?.id, origin = mailDraftOrigin(false);
     state.current = state.rows.find(r => r.id === id) || null;
+    if (state.app === 'mail' && state.current?.meta.folder === 'Drafts' && previous !== id)
+        mailDraftOrigins.set(id, origin);
     state.sheet = 0;
     state.cell = 'A1';
     if (state.app === 'mail') {
@@ -1167,7 +1273,7 @@ async function selectRecord(id, focus = false) {
     }
 }
 async function clickRecord(id, event) {
-    await commit();
+    await leaveEditor();
     if (event.shiftKey) {
         keyboardSelection = false;
         const rows = navigableRows(), to = rows.findIndex(r => r.id === id), anchor = rows.findIndex(r => r.id === (selectionAnchor || state.current?.id)), from = anchor < 0 ? to : anchor;
@@ -1201,13 +1307,12 @@ function draftAccount(context) {
 }
 async function createRecord(initial = {}, { keepMailList = false, focusBody = false } = {}) {
     await waitForAttachments();
-    await commit();
+    await leaveEditor();
     const kind = state.app;
     if (!apps[kind])
         return;
-    // Remove the previous editor before the network round-trip, so fast typing cannot overwrite it.
     const previous = state.current;
-    document.querySelector('#detail').innerHTML = '<p class="muted" role="status">Creating item…</p>';
+    const origin = kind === 'mail' ? mailDraftOrigin() : undefined;
     const record = { kind: kind, title: initial.title || 'Untitled ' + apps[kind].singular, body: initial.body || '', meta: { ...(kind === 'mail' ? { folder: 'Drafts' } : {}), ...initial.meta } };
     if (kind === 'mail' && !record.meta.sendAccount)
         record.meta.sendAccount = draftAccount(previous);
@@ -1225,20 +1330,19 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
             state.mailFolder = 'Drafts';
     }
     try {
-        const result = await api('save', record);
+        const now = new Date().toISOString();
+        state.current = { ...record, id: 'draft-' + crypto.randomUUID(), revision: 0, created: now, updated: now };
+        unsavedDraft = state.current;
+        if (origin)
+            mailDraftOrigins.set(state.current.id, origin);
+        state.dirty = true;
         state.wikiPreview = false;
-        if (kind === 'mail' && keepMailList) {
-            state.rows.push(result.record);
-            state.rows.sort(compareMail);
-            state.current = result.record;
-            state.selected.clear();
-            selectionAnchor = null;
-            keyboardSelection = false;
-            renderList();
-            renderDetail();
-        }
-        else
-            await load(result.record.id);
+        state.sheet = 0;
+        state.cell = 'A1';
+        state.selected.clear();
+        selectionAnchor = null;
+        keyboardSelection = false;
+        renderWorkspace();
         if (kind === 'mail' && focusBody) {
             const body = document.querySelector('#detail [name="body"]');
             body?.focus();
@@ -1276,6 +1380,8 @@ async function attempt(fn) { try {
     return await fn();
 }
 catch (cause) {
+    if (cause instanceof DraftCancelled)
+        return;
     const error = asError(cause);
     notice(error.message, true);
 } }
@@ -1342,7 +1448,7 @@ async function exportRecords(all = false, selectedRecords = null) {
         download(name + '.json', JSON.stringify({ format: 'portable-office-items', version: 1, records }, null, 2), 'application/json');
 }
 async function importFile() {
-    await commit();
+    await leaveEditor();
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json,.md,.txt,.html,.htm,.csv,.ics,.vcf,.eml';
@@ -1498,7 +1604,7 @@ async function syncAccounts(manual = true) {
         await load(undefined, { preserveSelection: state.app === 'mail' });
 }
 function help() { openHelp(dialog, keys(), e, () => setMode('normal')); }
-async function history() { await commit(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
+async function history() { await requireSaved(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
     const disclosure = event.target.closest('[data-mail-disclosure]')?.dataset.mailDisclosure;
     document.querySelectorAll('#detail [data-mail-disclosure][open]').forEach(d => { if (d.dataset.mailDisclosure !== disclosure)
@@ -1551,6 +1657,8 @@ async function handleClick(event) {
         }
         if (action === 'new')
             await createRecord();
+        if (action === 'save')
+            await commit(true);
         if (action === 'help')
             help();
         if (action === 'sync')
@@ -1597,6 +1705,12 @@ async function handleClick(event) {
         if (action === 'history')
             await history();
         if (action === 'delete') {
+            if (state.savePromise)
+                await state.savePromise;
+            if (isUnsavedDraft()) {
+                confirmation('Discard Draft', 'Discard this unsaved draft?', discardUnsavedDraft);
+                return;
+            }
             if (state.app === 'mail')
                 await deleteSelectedMail();
             else
@@ -1629,8 +1743,12 @@ async function handleClick(event) {
             await waitForAttachments();
             await commit();
             await pendingMailReads.get(original.id);
+            const origin = mailDraftOrigin();
             const source = original.meta.headerOnly ? await fullMailRecord(original) : original;
             const response = await api('mail-files', { id: source.id, action: 'forward' });
+            mailDraftOrigins.set(response.record.id, origin);
+            if (state.app !== 'mail' || state.current?.id !== original.id)
+                return;
             state.mailScope = null;
             state.mailFolder = 'Drafts';
             await load(response.record.id);
@@ -1666,7 +1784,7 @@ async function sendMail() {
     busyButton(document.querySelector('#detail [data-action="send"]'), true);
     try {
         await waitForAttachments();
-        await commit();
+        await requireSaved();
         if (state.app !== 'mail' || state.current?.id !== record.id)
             return;
         if (!mailAccounts().some(a => a.id === record.meta.sendAccount))
@@ -1681,6 +1799,12 @@ async function sendMail() {
         }
         try {
             await api('send', { id: record.id, revision: record.revision, account: record.meta.sendAccount });
+            if (state.app === 'mail' && state.current?.id === record.id && !state.dirty && !state.savePromise) {
+                returnFromMailDraft(record.id);
+                await load(state.current?.id);
+            }
+            else
+                mailDraftOrigins.delete(record.id);
             notice('Message accepted by the provider.');
         }
         finally {
@@ -1696,6 +1820,10 @@ async function sendMail() {
 async function deleteSelectedMail() {
     if (state.app !== 'mail')
         return;
+    if (isUnsavedDraft()) {
+        document.querySelector('#detail [data-action="delete"]')?.click();
+        return;
+    }
     await commit();
     const visible = filteredRows();
     const rows = state.selected.size ? visible.filter(r => state.selected.has(r.id)) : [state.current].filter(isPresent);
@@ -1715,8 +1843,9 @@ async function deleteSelectedMail() {
         await deleteMailImmediately(current.filter(isPresent), r => r.meta.remote ? api('mail-action', { id: r.id, revision: r.revision, action: 'trash', undoable: true }) : api('delete', { id: r.id, revision: r.revision, undoable: true }), true);
         notice(rows.length === 1 ? (local ? 'Item deleted.' : 'Moved to Trash.') : `${rows.length} items updated.`);
     };
+    const singleDraft = rows.length === 1 && rows[0].meta.folder === 'Drafts';
     if (local)
-        confirmation(rows.length === 1 ? 'Delete item' : 'Delete selected messages', `Delete ${local} local message(s)? Undo is available for fifteen minutes.${local < rows.length ? ` Also move ${rows.length - local} connected message(s) to Trash.` : ''}`, apply);
+        confirmation(singleDraft ? 'Discard Draft' : rows.length === 1 ? 'Delete item' : 'Delete selected messages', singleDraft ? 'Discard this saved draft? Undo is available for fifteen minutes.' : `Delete ${local} local message(s)? Undo is available for fifteen minutes.${local < rows.length ? ` Also move ${rows.length - local} connected message(s) to Trash.` : ''}`, apply);
     else
         await apply();
 }
@@ -1952,7 +2081,7 @@ function accountDialog() {
             renderSettings();
         } });
 }
-const itemMenus = installItemMenus({ state, e, commit, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, setMailRead, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
+const itemMenus = installItemMenus({ state, e, commit: leaveEditor, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, setMailRead, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
 function contentEntry() {
     const panel = document.querySelector('#detail');
     return panel?.querySelector('.mail-html, .mail-body, .sheet-wrap') || panel;
@@ -2054,10 +2183,11 @@ document.addEventListener('keydown', event => {
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        void attempt(commit);
+        void attempt(() => commit(true));
         return;
     }
     if (event.key === 'Escape') {
+        setMode('normal');
         if (editable(event.target)) {
             event.target.blur();
             setMode('normal');
@@ -2178,7 +2308,7 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'save') {
         event.preventDefault();
-        void attempt(commit);
+        void attempt(() => commit(true));
         return;
     }
     if (action === 'delete') {

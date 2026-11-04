@@ -38,8 +38,10 @@ export async function testMailReply(page,url) {
       await page.keyboard.type(replyText);
       assert.equal(await body.inputValue(),replyText+quotedBody,'Typing starts above the intact quoted email');
       assert.equal(await page.locator('.title-input').inputValue(),'Re: Received inbox-a','Typing leaves the subject intact');
-      // Selecting another message must save the reply without losing the list.
+      // Navigation asks before the first save and preserves the source list.
       await page.locator('[data-id="inbox-b"]').click();
+      await page.locator('[data-draft-choice="save"]').click();
+      await page.locator('.mail-reader').waitFor();
       assert.equal(records.find(r=>r.id==='reply-'+sequence).body,replyText+quotedBody);
       assert.equal(records.find(r=>r.id==='reply-'+sequence).meta.folder,'Drafts');
       assert.deepEqual(await ids(),before);
@@ -49,7 +51,7 @@ export async function testMailReply(page,url) {
     await page.locator('[data-id="custom-a"]').click();
     await page.getByRole('button',{name:'Reply',exact:true}).click();await body.waitFor();
     assert.equal(await folder.inputValue(),'account-folder');assert.deepEqual(await ids(),['custom-a']);
-    await body.fill('Scoped reply stays open');await page.keyboard.press('Escape');await page.getByText('Saved',{exact:true}).waitFor();
+    await body.fill('Scoped reply stays open');await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
     const previousEditor=await body.elementHandle();
     await page.locator('#folder-refresh').click();
     // The editor must survive the records reload after folder synchronization.
@@ -61,9 +63,11 @@ export async function testMailReply(page,url) {
     assert.equal(await body.inputValue(),'Scoped reply stays open','Reply can be reopened in Drafts');
     await folder.selectOption('Inbox');await search.fill('source-only-marker');await page.locator('[data-id="inbox-a"]').click();
     reject=true;await page.getByRole('button',{name:'Reply',exact:true}).click();
+    await page.keyboard.press('Control+s');
     await page.locator('#notice').filter({hasText:'Reply save failed for test'}).waitFor();
     assert.equal(await folder.inputValue(),'Inbox');assert.deepEqual(await ids(),['inbox-a','inbox-b']);
-    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'inbox-a');
-    console.log('PASS mail reply: toolbar/keyboard/menu, original folder/search/list, recipient/account/quote, save on navigation, scoped refresh, draft reopening and failed creation.');
+    assert.equal(await page.locator('.title-input').inputValue(),'Re: Received inbox-a','Failed first save keeps the reply open');
+    await page.locator('#detail [data-action="delete"]').click();await page.locator('#confirm').click();
+    console.log('PASS mail reply: toolbar/keyboard/menu, original folder/search/list, recipient/account/quote, explicit save on navigation, scoped refresh, draft reopening and failed first save.');
   }finally{await page.unroute(routes);await page.reload();}
 }

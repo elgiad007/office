@@ -98,7 +98,7 @@ export async function testAccountFolders(page,url) {
     const refreshed=page.waitForResponse(r=>r.url().includes('r=mail-folder-sync'));releaseSync();await refreshed;
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     assert.equal(await page.locator('[name="body"]').inputValue(),'Keep typing while a folder request finishes.','late folder response cannot replace a dirty draft');
-    await page.keyboard.press('Escape');await page.getByText('Saved',{exact:true}).waitFor();
+    await page.keyboard.press('Escape');await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
     console.log('PASS account folders: discovery, nesting, account isolation, load more, cached failure, bulk filing, Gmail labels, management, system protection, mobile.');
   }finally{await page.unroute(routes);await page.goto(url+'#mail');await page.reload();await page.locator('.shell').waitFor();}
 }

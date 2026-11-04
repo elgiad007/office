@@ -18,13 +18,13 @@ export function helpEntries(k) {
     add(k.select, 'Toggle current item selection');
     add(k.save, 'Save changes');
     add('Ctrl+S / Cmd+S', 'Save changes', 'Normal or insert mode, outside dialogs');
-    add('Escape', 'Leave editor and save; clear selection otherwise', 'Outside dialogs', 'In formula input, return focus to selected cell.');
+    add('Escape', 'Leave edit mode; clear selection otherwise', 'Outside dialogs', 'Saves existing items. New drafts stay unsaved until Save. In formula input, return focus to selected cell.');
     add(k.delete, 'Delete selected mail or current item', 'Normal mode', 'Local deletion requires confirmation. Connected mail moves to Trash; mail already in Trash and synced read-only items are protected.');
     add(k.undoDelete, 'Undo last mail deletion', 'Mail, normal mode', 'Includes batches; available for 15 minutes in this page.');
     add(k.archive, 'Archive messages', 'Mail, normal mode');
     add(k.move, 'Quick Move to folder', 'Mail, normal mode', 'Selected messages, or current message.');
     add(k.reply, 'Reply to message', 'Mail, normal mode');
-    add('Ctrl+Enter', 'Send current local draft', 'Mail, normal or insert mode', 'Confirmation enabled by default; change in Settings → Mail.');
+    add('Ctrl+Enter', 'Send current local draft', 'Mail, normal or insert mode', 'Save a new draft first. Confirmation enabled by default; change in Settings → Mail.');
     add(':', 'Open command line', 'Normal mode, including Settings', 'Enter executes once; Escape cancels and restores focus.');
     for (const [name, entry] of Object.entries(commandRegistry))
         add(':' + name, entry.action, entry.context, entry.options + ('aliases' in entry ? ' Aliases: ' + entry.aliases.map(alias => ':' + alias).join(', ') + '.' : ''));
