@@ -1,6 +1,7 @@
 // Generated from frontend/activity.ts by pnpm build. Do not edit.
 import { isPresent } from './utils.js';
 import { escapeHtml as e } from './formats.js';
+import { timestampLabel, timestampText } from './time-labels.js';
 export function createActivity({ csrf }) {
     const bar = document.querySelector('#activity-status'), status = document.querySelector('#notice'), button = document.querySelector('#view-activity'), dialog = document.querySelector('#activity-dialog');
     let enabled = false, entries = [], cursor = 0, polling = false, generation = 0, lastMessage = 'Ready.', lastError = false, sequence = 0;
@@ -43,7 +44,7 @@ export function createActivity({ csrf }) {
         const select = dialog.querySelector('#activity-account'), selected = select.value;
         select.innerHTML = '<option value="">All accounts</option>' + [...new Set(entries.map(entry => entry.account).filter(isPresent))].sort().map(account => `<option ${account === selected ? 'selected' : ''}>${e(account)}</option>`).join('');
         const rows = filtered().slice().reverse();
-        dialog.querySelector('#activity-entries').innerHTML = rows.length ? rows.map(entry => `<li data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${e(new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account ? ' · ' + e(entry.account) : ''}${entry.duration_ms !== null ? ' · ' + e(entry.duration_ms) + ' ms' : ''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join('') : '<li>No recent activity matches these filters.</li>';
+        dialog.querySelector('#activity-entries').innerHTML = rows.length ? rows.map(entry => `<li data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${timestampLabel(entry.time, new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account ? ' · ' + e(entry.account) : ''}${entry.duration_ms !== null ? ' · ' + e(entry.duration_ms) + ' ms' : ''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join('') : '<li>No recent activity matches these filters.</li>';
         dialog.querySelector('#activity-count').textContent = `${rows.length} of ${entries.length} recent entries · latest 500 retained`;
     }
     function receive(newEntries) {
@@ -115,7 +116,7 @@ export function createActivity({ csrf }) {
         dialog.querySelector('#activity-close').onclick = () => dialog.close();
         dialog.querySelectorAll('select').forEach(select => select.onchange = renderEntries);
         dialog.querySelector('#activity-copy').onclick = async () => {
-            const text = filtered().map(entry => `${entry.time} [${entry.level}] ${entry.account ? entry.account + ' · ' : ''}${entry.operation}: ${entry.message}${entry.duration_ms !== null ? ' (' + entry.duration_ms + ' ms)' : ''}`).join('\n');
+            const text = filtered().map(entry => `${timestampText(entry.time, entry.time)} [${entry.level}] ${entry.account ? entry.account + ' · ' : ''}${entry.operation}: ${entry.message}${entry.duration_ms !== null ? ' (' + entry.duration_ms + ' ms)' : ''}`).join('\n');
             try {
                 await navigator.clipboard.writeText(text);
                 dialog.querySelector('#activity-feedback').textContent = 'Visible log copied.';

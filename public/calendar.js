@@ -1,5 +1,6 @@
 // Generated from frontend/calendar.ts by pnpm build. Do not edit.
 import { escapeHtml as e } from './formats.js';
+import { timestampLabel } from './time-labels.js';
 export const dateOnly = (value = '') => /^\d{4}-\d{2}-\d{2}$/.test(value);
 export function calendarDate(value) { return dateOnly(value) ? new Date(value + 'T00:00:00') : new Date(value); }
 export function dayKey(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
@@ -61,7 +62,7 @@ export function createCalendar(env) {
         if (view === 'month')
             content = `<div class="calendar-month">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="calendar-weekday">${d}</div>`).join('')}${days.map(d => { const list = eventsOn(rows, d); return `<section class="calendar-day ${d.getMonth() !== anchor.getMonth() ? 'outside' : ''}">${dayButton(d)}${list.slice(0, 3).map(r => event(r)).join('')}${list.length > 3 ? `<button class="calendar-more" data-jump="${dayKey(d)}">+${list.length - 3} more</button>` : ''}</section>`; }).join('')}</div>`;
         else if (view === 'agenda')
-            content = `<div class="calendar-agenda">${rows.filter(r => { const b = eventBounds(r); return !!env.query() || !b || (b.start < new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1) && b.end > first); }).map(r => `<div><span>${r.meta.start ? e(calendarDate(r.meta.start).toLocaleDateString()) : 'No date'}</span>${event(r)}</div>`).join('') || '<p>No matching cached events.</p>'}</div>`;
+            content = `<div class="calendar-agenda">${rows.filter(r => { const b = eventBounds(r); return !!env.query() || !b || (b.start < new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1) && b.end > first); }).map(r => `<div><span>${r.meta.start ? timestampLabel(r.meta.start, calendarDate(r.meta.start).toLocaleDateString()) : 'No date'}</span>${event(r)}</div>`).join('') || '<p>No matching cached events.</p>'}</div>`;
         else
             content = `<div class="calendar-time-scroll"><div class="calendar-time-grid" data-calendar-style="--day-count:${days.length}"><div class="calendar-time-label">All day</div>${days.map(d => `<section class="calendar-all-day"><strong>${e(d.toLocaleDateString(undefined, { weekday: 'short' }))}</strong>${dayButton(d)}${eventsOn(rows, d).filter(r => dateOnly(r.meta.start)).map(r => event(r)).join('')}</section>`).join('')}<div class="calendar-hours">${Array.from({ length: 24 }, (_, h) => `<span>${String(h).padStart(2, '0')}:00</span>`).join('')}</div>${days.map(d => `<div class="calendar-time-day">${Array.from({ length: 24 }, (_, h) => `<button class="calendar-slot" data-slot="${dayKey(d)}T${String(h).padStart(2, '0')}:00" aria-label="New event ${dayKey(d)} ${h}:00"></button>`).join('')}${timedLayout(rows, d).map(x => event(x.record, `position:absolute;top:${x.start / 60 * 48}px;height:${Math.max(20, (x.end - x.start) / 60 * 48)}px;left:${x.column / x.columns * 100}%;width:${100 / x.columns}%`)).join('')}</div>`).join('')}</div></div>`;
         const undated = rows.filter(r => !eventBounds(r));

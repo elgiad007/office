@@ -1,6 +1,7 @@
 import {isPresent} from './utils.js';
 import type {ActivityEntry} from './types.js';
 import {escapeHtml as e} from './formats.js';
+import {timestampLabel, timestampText} from './time-labels.js';
 
 export function createActivity({csrf}: {csrf: () => string}) {
   const bar=document.querySelector<HTMLElement>('#activity-status')!,status=document.querySelector<HTMLElement>('#notice')!,button=document.querySelector<HTMLButtonElement>('#view-activity')!,dialog=document.querySelector<HTMLDialogElement>('#activity-dialog')!;
@@ -38,7 +39,7 @@ export function createActivity({csrf}: {csrf: () => string}) {
     const select=dialog.querySelector<HTMLSelectElement>('#activity-account')!,selected=select.value;
     select.innerHTML='<option value="">All accounts</option>'+[...new Set(entries.map(entry=>entry.account).filter(isPresent))].sort().map(account=>`<option ${account===selected?'selected':''}>${e(account)}</option>`).join('');
     const rows=filtered().slice().reverse();
-    dialog.querySelector<HTMLElement>('#activity-entries')!.innerHTML=rows.length?rows.map(entry=>`<li data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${e(new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account?' · '+e(entry.account):''}${entry.duration_ms!==null?' · '+e(entry.duration_ms)+' ms':''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join(''):'<li>No recent activity matches these filters.</li>';
+    dialog.querySelector<HTMLElement>('#activity-entries')!.innerHTML=rows.length?rows.map(entry=>`<li data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${timestampLabel(entry.time,new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account?' · '+e(entry.account):''}${entry.duration_ms!==null?' · '+e(entry.duration_ms)+' ms':''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join(''):'<li>No recent activity matches these filters.</li>';
     dialog.querySelector<HTMLElement>('#activity-count')!.textContent=`${rows.length} of ${entries.length} recent entries · latest 500 retained`;
   }
   function receive(newEntries: ActivityEntry[]) {
@@ -76,7 +77,7 @@ export function createActivity({csrf}: {csrf: () => string}) {
     dialog.showModal();dialog.querySelector<HTMLButtonElement>('#activity-close')!.onclick=()=>dialog.close();
     dialog.querySelectorAll<HTMLSelectElement>('select').forEach(select=>select.onchange=renderEntries);
     dialog.querySelector<HTMLButtonElement>('#activity-copy')!.onclick=async()=>{
-      const text=filtered().map(entry=>`${entry.time} [${entry.level}] ${entry.account?entry.account+' · ':''}${entry.operation}: ${entry.message}${entry.duration_ms!==null?' ('+entry.duration_ms+' ms)':''}`).join('\n');
+      const text=filtered().map(entry=>`${timestampText(entry.time,entry.time)} [${entry.level}] ${entry.account?entry.account+' · ':''}${entry.operation}: ${entry.message}${entry.duration_ms!==null?' ('+entry.duration_ms+' ms)':''}`).join('\n');
       try{await navigator.clipboard.writeText(text);dialog.querySelector<HTMLElement>('#activity-feedback')!.textContent='Visible log copied.';}
       catch{dialog.querySelector<HTMLElement>('#activity-feedback')!.textContent='Clipboard access is unavailable. Select and copy the log text.';}
     };

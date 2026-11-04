@@ -29,6 +29,8 @@ No Composer, Node, root access, Apache installation, cron job or persistent work
 
 Shared-host filesystem locking, outbound connections, PHP extensions and request limits must be confirmed on your actual account. This repository has not been deployed to hosting.com. Keep SQLite on a local filesystem with working locks, not a network-mounted folder.
 
+Elapsed time appears in parentheses beside timestamps by default, using “now” for less than a minute, then minutes, hours or days (for example, `Nov 4, 10:30 AM (5 minutes ago)`). Disable **Show elapsed time beside dates** in **Settings → Look & feel**. Labels refresh once per minute while the page is visible; original dates remain available.
+
 ## What works in this version
 
 - One-owner login, token-protected setup, CSRF-protected writes, idle session expiry, local encrypted provider credentials.

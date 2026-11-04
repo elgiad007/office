@@ -1,6 +1,7 @@
 import type {MailListField, MailListLayout, MailListSlot, OfficeRecord} from './types.js';
 import {escapeHtml as e} from './formats.js';
 import {messageTime} from './mail-sort.js';
+import {timestampLabel} from './time-labels.js';
 
 const fields: Record<MailListField,string>={none:'Hidden',sender:'Sender',date:'Sent date',subject:'Subject',attachment:'Attachment',preview:'Body preview'};
 export const defaultMailList=(): MailListLayout=>({sender:'both',rows:[
@@ -24,7 +25,7 @@ export function renderMailListCopy(record: OfficeRecord,value: unknown,failure='
     if(slot.field==='none')return '';
     const text=slot.field==='sender'?sender:slot.field==='subject'?record.title:slot.field==='preview'?preview:slot.field==='date'?(Number.isFinite(time)?parsed.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}):'Date unavailable'):record.meta.hasAttachments===true?'Has attachments':record.meta.hasAttachments===false?'':'Attachment status unknown';
     const attachment=slot.field==='attachment';
-    return `<span class="mail-list-cell mail-list-${side} mail-list-${slot.size} mail-field-${slot.field}" title="${e(text)}"${attachment&&text?` role="img" aria-label="${e(text)}"`:''}>${attachment?(text?(record.meta.hasAttachments===true?'&#128206;':'?'):''):e(text)}</span>`;
+    return `<span class="mail-list-cell mail-list-${side} mail-list-${slot.size} mail-field-${slot.field}" title="${e(text)}"${attachment&&text?` role="img" aria-label="${e(text)}"`:''}>${attachment?(text?(record.meta.hasAttachments===true?'&#128206;':'?'):''):slot.field==='date'&&Number.isFinite(time)?timestampLabel(parsed.toISOString(),text):e(text)}</span>`;
   };
   return `<span class="item-copy mail-list-copy">${layout.rows.map(row=>row.left.field==='none'&&row.right.field==='none'?'':`<span class="mail-list-line">${cell(row.left,'left')}${cell(row.right,'right')}</span>`).join('')}${failure?`<small class="mail-action-failure" title="${e(failure)}">Mail action failed — restored</small>`:''}</span>`;
 }

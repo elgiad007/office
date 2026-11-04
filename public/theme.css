@@ -112,6 +112,7 @@
 .mail-list-normal { font-size: 13px; }
 .mail-list-large { font-size: 15px; }
 .mail-field-preview, .mail-field-date, .mail-field-attachment { color: var(--muted); font-weight: 400; }
+.mail-field-date [data-elapsed-time]:not([hidden]) { display: block; white-space: normal; }
 .mail-attachments { margin: 1rem 0; padding: .8rem; border: 1px solid var(--line); border-radius: .6rem; }
 [data-save-files][hidden] { display: none; }
 .mail-attachment { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem 1rem; padding: .6rem 0; border-top: 1px solid var(--line); }

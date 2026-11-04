@@ -63,6 +63,7 @@ export interface Account {
   folders?: MailFolder[]; last_sync?: string | null; error?: string | null;
 }
 export interface Preferences {
+  showElapsedTime?: boolean;
   mailList?: MailListLayout;
   mailView?: MailViewPreferences;
   theme?: string; density?: string; accent?: string;
