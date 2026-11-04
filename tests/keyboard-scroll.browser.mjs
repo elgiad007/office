@@ -24,6 +24,12 @@ export async function testKeyboardScroll(page,url) {
       const top=()=>owner.evaluate(node=>node.scrollTop);
       const press=async key=>{await page.keyboard.press(key);await settleScroll(owner);};
       await press('Home');assert.equal(await top(),0);
+      const height=await owner.evaluate(node=>node.clientHeight);
+      await press('Control+d');assert.ok(Math.abs(await top()-height*.5)<=1,mode+' half page down');
+      await press('Control+u');assert.equal(await top(),0,mode+' half page up');
+      await press('Control+f');assert.ok(Math.abs(await top()-Math.max(56,height*.85))<=1,mode+' page down');
+      await press('Control+b');assert.equal(await top(),0,mode+' page up');
+      await press('Control+Shift+d');assert.equal(await top(),0,mode+' extra modifiers ignored');
       await press('j');assert.equal(await top(),56,mode+' configured shortcut distance');
       await press('ArrowDown');assert.equal(await top(),112,mode+' arrow distance matches');
       await press('ArrowUp');assert.equal(await top(),56);
@@ -51,6 +57,27 @@ export async function testKeyboardScroll(page,url) {
       await press('Home');await press('j');assert.equal(await top(),56,mode+' reduced motion retains distance');
       await page.emulateMedia({reducedMotion:'no-preference'});
       assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected);
+    }
+    const response=await page.request.post(url+'api.php?r=import-items',{headers:{'X-CSRF-Token':status.csrf},data:{records:Array.from({length:80},(_,i)=>({kind:'tasks',title:'Vim page fixture '+i,body:'',meta:{}}))}});
+    assert.equal(response.status(),200);
+    await page.getByRole('button',{name:'Tasks',exact:true}).click();
+    await page.locator('.item').filter({hasText:'Vim page fixture 0'}).first().click();
+    const list=page.locator('#items'),selectedTask=await page.locator('#selected-item').getAttribute('data-id');
+    await list.evaluate(node=>{node.scrollTop=0;});
+    await page.locator('#selected-item').focus();
+    const listHeight=await list.evaluate(node=>node.clientHeight);
+    for(const [key,distance] of [['Control+d',listHeight*.5],['Control+f',Math.max(56,listHeight*.85)]]){
+      await list.evaluate(node=>{node.scrollTop=0;});
+      await page.keyboard.press(key);await settleScroll(list);
+      assert.ok(Math.abs(await list.evaluate(node=>node.scrollTop)-distance)<=1,key+' scrolls focused list');
+      await page.keyboard.press(key==='Control+d'?'Control+u':'Control+b');await settleScroll(list);
+      assert.ok(await list.evaluate(node=>node.scrollTop)<=1,'reverse returns to top within pixel rounding');
+    }
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selectedTask);
+    assert.equal(await page.locator('#dialog[open]').count(),0,'Ctrl+d does not delete');
+    for(const field of [page.locator('#search'),page.locator('#detail textarea').first()]){
+      await field.focus();
+      for(const key of ['f','b','d','u'])assert.equal(await field.evaluate((node,key)=>node.dispatchEvent(new KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,cancelable:true})),key),true,'typing keeps Ctrl+'+key);
     }
   } finally {await page.emulateMedia({reducedMotion:'no-preference'});}
 }

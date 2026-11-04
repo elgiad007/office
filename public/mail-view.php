@@ -34,10 +34,11 @@ try {
     const data=event.data;
     if(!data||typeof data!=='object'||Array.isArray(data))return;
     if(data.type==='office-mail-config'&&Object.keys(data).length===2&&Array.isArray(data.keys)&&data.keys.length<=64&&data.keys.every(key=>typeof key==='string'&&key.length<=32)){keys=new Set(data.keys);return;}
-    if(data.type!=='office-mail-scroll'||Object.keys(data).length!==2||!['up','down','page-up','page-down','start','end'].includes(data.direction))return;
+    if(data.type!=='office-mail-scroll'||Object.keys(data).length!==2||!['up','down','page-up','page-down','half-page-up','half-page-down','start','end'].includes(data.direction))return;
     scroll(data.direction);
   });
   addEventListener('keydown',event=>{
+    if(!event.defaultPrevented&&vimScrollDirection(event)&&!event.target.closest('input,textarea,select,[contenteditable]')){event.preventDefault();parent.postMessage({type:'office-mail-vim-scroll',key:event.key.toLowerCase(),repeat:event.repeat},'*');return;}
     if(!event.defaultPrevented&&!event.isComposing&&!event.altKey&&!event.shiftKey&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();parent.postMessage({type:'office-mail-save',ctrlKey:event.ctrlKey,metaKey:event.metaKey,repeat:event.repeat},'*');return;}
     if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,[contenteditable]'))return;
     if(event.target.closest('a,button')&&['Enter',' ','Tab','ContextMenu','F10'].includes(event.key))return;

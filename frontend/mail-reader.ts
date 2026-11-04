@@ -42,6 +42,7 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
       if(data.type==='office-mail-pointer'&&Object.keys(data).length===1){more.open=false;return;}
       if(data.type==='office-mail-context'&&Object.keys(data).length===3&&Number.isFinite(data.x)&&Number.isFinite(data.y)&&data.x>=0&&data.y>=0&&data.x<=frame.clientWidth&&data.y<=frame.clientHeight){const rect=frame.getBoundingClientRect();frame.dispatchEvent(new MouseEvent('contextmenu',{clientX:rect.left+data.x,clientY:rect.top+data.y,bubbles:true,cancelable:true}));return;}
       if(data.type==='office-mail-save'&&Object.keys(data).length===4&&typeof data.ctrlKey==='boolean'&&typeof data.metaKey==='boolean'&&(data.ctrlKey||data.metaKey)&&typeof data.repeat==='boolean'){frame.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:data.ctrlKey,metaKey:data.metaKey,repeat:data.repeat,bubbles:true,cancelable:true}));return;}
+      if(data.type==='office-mail-vim-scroll'&&Object.keys(data).length===3&&typeof data.key==='string'&&['f','b','d','u'].includes(data.key)&&typeof data.repeat==='boolean'){frame.dispatchEvent(new KeyboardEvent('keydown',{key:data.key,ctrlKey:true,repeat:data.repeat,bubbles:true,cancelable:true}));return;}
       if(data.type!=='office-mail-key'||Object.keys(data).length!==4||typeof data.key!=='string'||!allowed.has(data.key)||typeof data.shiftKey!=='boolean'||typeof data.repeat!=='boolean')return;
       frame.dispatchEvent(new KeyboardEvent('keydown',{key:data.key,shiftKey:data.shiftKey,repeat:data.repeat,bubbles:true,cancelable:true}));
     };

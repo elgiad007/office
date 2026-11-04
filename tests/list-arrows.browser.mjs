@@ -6,7 +6,7 @@ export async function testListArrows(page,url) {
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');
     const records=[0,1,2].map(i=>({id:`arrows-${kind}-${i}`,kind,title:`Arrows ${kind} ${i}`,body:'Fixture content',revision:1,meta:kind==='mail'?{folder:'Inbox',read:true,from:'sender@example.com'}:kind==='sheets'?{workbook:{sheets:[{name:'Sheet 1',cells:{}}]}}:{}}));
-    const responses={status:{authenticated:true,csrf:'fixture',preferences:{keys:{down:'J',up:'K'}}},accounts:{accounts:[]},records:{records},'google-settings':{configured:false}};
+    const responses={status:{authenticated:true,csrf:'fixture',preferences:{keys:{down:'J',up:'K'}}},accounts:{accounts:[]},records:{records},connections:{items:[],links:[],more:false},'google-settings':{configured:false}};
     assert.ok(action in responses,`Unexpected list-arrow API: ${action}`);
     await route.fulfill({json:responses[action]});
   });

@@ -1,5 +1,5 @@
 import {openHelp} from './help.js';
-import {createKeyboardScroller, type ScrollDirection} from './keyboard-scroll.js';
+import {createKeyboardScroller, vimScrollDirection, type ScrollDirection} from './keyboard-scroll.js';
 import {CommandError,resolveCommand} from './commands.js';
 import {createConnections} from './connections.js';
 import {asError} from './utils.js';
@@ -1227,6 +1227,20 @@ function scrollMailBody(target: HTMLElement,direction: ScrollDirection) {
   if(!scroll){scroll=createKeyboardScroller(panel);keyboardScrollers.set(panel,scroll);}
   scroll(direction);
 }
+function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
+  if(target.closest('.mail-html')){scrollMailBody(target,direction);return;}
+  const pane=target.closest<HTMLElement>('#items,#detail')||document.querySelector<HTMLElement>(activePane()==='content'?'#detail':'#items');
+  if(!pane)return false;
+  let panel=pane;
+  for(let node: HTMLElement|null=target;node&&pane.contains(node);node=node.parentElement){
+    if(node.scrollHeight>node.clientHeight&&/auto|scroll/.test(getComputedStyle(node).overflowY)){panel=node;break;}
+    if(node===pane)break;
+  }
+  let scroll=keyboardScrollers.get(panel);
+  if(!scroll){scroll=createKeyboardScroller(panel);keyboardScrollers.set(panel,scroll);}
+  scroll(direction);
+  return true;
+}
 let lastPane: 'content'|'list'='list';
 function activePane(): 'content'|'list' {const node=document.activeElement;if(node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
 document.addEventListener('focusin',event=>{const node=event.target as HTMLElement;if(node.closest('#detail'))lastPane='content';else if(node.closest('#items'))lastPane='list';});
@@ -1250,6 +1264,8 @@ document.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(()=>commit(true));return;}
   if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
   if(editable((event.target as HTMLElement))){setMode('insert');return;}
+  const vimDirection=vimScrollDirection(event);
+  if(vimDirection){if(scrollFocusedPane(event.target as HTMLElement,vimDirection)!==false){event.preventDefault();keySequence='';}return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
   if((event.target as HTMLElement).closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
   const target=event.target as HTMLElement;

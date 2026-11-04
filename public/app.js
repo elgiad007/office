@@ -1,6 +1,6 @@
 // Generated from frontend/app.ts by pnpm build. Do not edit.
 import { openHelp } from './help.js';
-import { createKeyboardScroller } from './keyboard-scroll.js';
+import { createKeyboardScroller, vimScrollDirection } from './keyboard-scroll.js';
 import { CommandError, resolveCommand } from './commands.js';
 import { createConnections } from './connections.js';
 import { asError } from './utils.js';
@@ -2229,6 +2229,31 @@ function scrollMailBody(target, direction) {
     }
     scroll(direction);
 }
+function scrollFocusedPane(target, direction) {
+    if (target.closest('.mail-html')) {
+        scrollMailBody(target, direction);
+        return;
+    }
+    const pane = target.closest('#items,#detail') || document.querySelector(activePane() === 'content' ? '#detail' : '#items');
+    if (!pane)
+        return false;
+    let panel = pane;
+    for (let node = target; node && pane.contains(node); node = node.parentElement) {
+        if (node.scrollHeight > node.clientHeight && /auto|scroll/.test(getComputedStyle(node).overflowY)) {
+            panel = node;
+            break;
+        }
+        if (node === pane)
+            break;
+    }
+    let scroll = keyboardScrollers.get(panel);
+    if (!scroll) {
+        scroll = createKeyboardScroller(panel);
+        keyboardScrollers.set(panel, scroll);
+    }
+    scroll(direction);
+    return true;
+}
 let lastPane = 'list';
 function activePane() { const node = document.activeElement; if (node?.closest('#detail'))
     return 'content'; if (node?.closest('#items'))
@@ -2317,6 +2342,14 @@ document.addEventListener('keydown', event => {
     }
     if (editable(event.target)) {
         setMode('insert');
+        return;
+    }
+    const vimDirection = vimScrollDirection(event);
+    if (vimDirection) {
+        if (scrollFocusedPane(event.target, vimDirection) !== false) {
+            event.preventDefault();
+            keySequence = '';
+        }
         return;
     }
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey)

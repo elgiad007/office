@@ -58,6 +58,10 @@ export function bindMailReader(panel, record, render, navigation = {}) {
                 frame.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: data.ctrlKey, metaKey: data.metaKey, repeat: data.repeat, bubbles: true, cancelable: true }));
                 return;
             }
+            if (data.type === 'office-mail-vim-scroll' && Object.keys(data).length === 3 && typeof data.key === 'string' && ['f', 'b', 'd', 'u'].includes(data.key) && typeof data.repeat === 'boolean') {
+                frame.dispatchEvent(new KeyboardEvent('keydown', { key: data.key, ctrlKey: true, repeat: data.repeat, bubbles: true, cancelable: true }));
+                return;
+            }
             if (data.type !== 'office-mail-key' || Object.keys(data).length !== 4 || typeof data.key !== 'string' || !allowed.has(data.key) || typeof data.shiftKey !== 'boolean' || typeof data.repeat !== 'boolean')
                 return;
             frame.dispatchEvent(new KeyboardEvent('keydown', { key: data.key, shiftKey: data.shiftKey, repeat: data.repeat, bubbles: true, cancelable: true }));

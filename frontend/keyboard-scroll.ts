@@ -1,4 +1,9 @@
-export type ScrollDirection = 'up'|'down'|'page-up'|'page-down'|'start'|'end';
+export type ScrollDirection = 'up'|'down'|'page-up'|'page-down'|'half-page-up'|'half-page-down'|'start'|'end';
+
+export function vimScrollDirection(event: Pick<KeyboardEvent,'key'|'ctrlKey'|'metaKey'|'altKey'|'shiftKey'|'isComposing'>): ScrollDirection | undefined {
+  if(!event.ctrlKey||event.metaKey||event.altKey||event.shiftKey||event.isComposing)return;
+  return ({f:'page-down',b:'page-up',d:'half-page-down',u:'half-page-up'} as Record<string,ScrollDirection>)[event.key.toLowerCase()];
+}
 
 // Use the same animation in the outer reader and the sandboxed HTML reader.
 export function createKeyboardScroller(panel: HTMLElement) {
@@ -20,8 +25,8 @@ export function createKeyboardScroller(panel: HTMLElement) {
   panel.addEventListener('pointerdown',cancel,{passive:true});
   panel.addEventListener('focusout',cancel);
   const scroll=(direction: ScrollDirection)=>{
-    const sign=direction==='up'||direction==='page-up'||direction==='start'?-1:1;
-    const step=direction.startsWith('page-')?Math.max(56,panel.clientHeight*.85):56;
+    const sign=direction==='up'||direction.endsWith('-up')||direction==='start'?-1:1;
+    const step=direction.startsWith('half-page-')?Math.max(1,panel.clientHeight*.5):direction.startsWith('page-')?Math.max(56,panel.clientHeight*.85):56;
     // Reverse immediately and cap the distance ahead during rapid key repeat.
     if(!frame||sign!==lastDirection)target=position=panel.scrollTop;
     target=clamp(direction==='start'?0:direction==='end'?panel.scrollHeight:
