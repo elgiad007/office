@@ -54,21 +54,52 @@ export function createConnections(env:{api:RequestApi;current:()=>string|undefin
     await env.api('connection',{id,target:target.id,action:action==='link'?'add':'remove'});env.notice(action==='link'?'Items linked.':'Connection removed.');
     await section();
   }
+  let headerEvents:AbortController|undefined,headerVersion=0;
   async function section(){
+    const version=++headerVersion;
+    headerEvents?.abort();headerEvents=new AbortController();
     const id=env.current(),panel=document.querySelector('#detail');if(!id||!panel)return;
-    let host=panel.querySelector<HTMLElement>('.item-connections');
-    if(!host){host=document.createElement('section');host.className='item-connections';host.setAttribute('aria-label','Connections');panel.append(host);}
-    const target=host;
-    if(id.startsWith('draft-')){target.innerHTML='<h3>Connections</h3><p class="muted">Connections become available when this draft is saved.</p>';return;}
+    const header=panel.querySelector('.mail-header-badges, .detail-toolbar .left');if(!header)return;
+    let host=header.querySelector<HTMLElement>('.item-connections');
+    if(!host){host=document.createElement('div');host.className='item-connections';host.setAttribute('role','group');host.setAttribute('aria-label','Connections');header.append(host);}
+    const target=host,wasOpen=!!target.querySelector(':popover-open'),hadFocus=target.contains(document.activeElement);
+    const draft=id.startsWith('draft-');
+    target.innerHTML=`<button type="button" class="connection-count" id="connection-count" popovertarget="item-connection-popover" aria-expanded="false" ${draft?'disabled title="Save this draft to manage connections"':''}>Connections · ${draft?'—':'…'}</button><button type="button" class="connection-add" data-connections-add aria-label="Link item" title="Link an existing item (:link)" ${draft?'disabled':''}>+ Link</button><div id="item-connection-popover" class="connection-popover" popover="auto" role="region" aria-label="Item connections"><div class="connection-popover-heading"><strong>Connections</strong><button type="button" data-connections-view>View map</button></div><div data-connection-items><p class="muted" role="status">Loading connections…</p></div></div>`;
+    const toggle=target.querySelector<HTMLButtonElement>('.connection-count')!,popover=target.querySelector<HTMLElement>('[popover]')!,itemsHost=target.querySelector<HTMLElement>('[data-connection-items]')!;
+    function position(){
+      if(!popover.matches(':popover-open'))return;
+      const anchor=toggle.getBoundingClientRect(),width=popover.offsetWidth,height=popover.offsetHeight,gap=6;
+      popover.style.left=Math.max(8,Math.min(anchor.left,innerWidth-width-8))+'px';
+      popover.style.top=Math.max(8,Math.min(anchor.bottom+gap,innerHeight-height-8))+'px';
+    }
+    const close=()=>{if(popover.matches(':popover-open'))popover.hidePopover();};
+    popover.addEventListener('toggle',()=>{toggle.setAttribute('aria-expanded',String(popover.matches(':popover-open')));position();});
+    target.onkeydown=event=>{
+      if(event.key==='Escape'&&popover.matches(':popover-open')){event.preventDefault();event.stopPropagation();close();toggle.focus();return;}
+      if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
+        event.preventDefault();event.stopPropagation();if(!popover.matches(':popover-open')&&!draft)popover.showPopover();
+        const buttons=Array.from(popover.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+        const current=buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const index=event.key==='Home'?0:event.key==='End'?buttons.length-1:current<0?(event.key==='ArrowUp'?buttons.length-1:0):(current+(event.key==='ArrowUp'?-1:1)+buttons.length)%buttons.length;
+        buttons[index]?.focus();position();
+      }else if(popover.contains(event.target as Node))event.stopPropagation();
+    };
+    window.addEventListener('resize',position,{signal:headerEvents.signal});
+    document.addEventListener('scroll',position,{capture:true,signal:headerEvents.signal});
+    target.querySelector<HTMLButtonElement>('[data-connections-view]')!.onclick=()=>{close();void view(false).catch(error=>env.notice(error.message,true));};
+    target.querySelector<HTMLButtonElement>('[data-connections-add]')!.onclick=()=>{close();env.command(':link ');};
+    if(wasOpen&&!draft)popover.showPopover();if(hadFocus)toggle.focus();
+    if(draft)return;
     try{
-      const result=await env.api(`connections&id=${encodeURIComponent(id)}`);if(env.current()!==id||!target.isConnected)return;
+      const result=await env.api(`connections&id=${encodeURIComponent(id)}`);if(version!==headerVersion||env.current()!==id||!target.isConnected)return;
       const items=result.items.filter(item=>item.id!==id);
-      target.innerHTML=`<div class="connection-heading"><h3>Connections (${result.links.length}${result.more?'+':''})</h3><button data-connections-view>View connections</button><button data-connections-add>Link item</button></div>${items.length?Object.entries(itemTypes).map(([kind,type])=>{const group=items.filter(item=>item.kind===kind);return group.length?`<h4>${e(type.label)}</h4>${group.map(item=>`<p><button class="wiki-link" data-connection-open="${e(item.id)}">${e(item.title)}</button> <button class="quiet" data-connection-remove="${e(item.id)}" aria-label="Remove connection to ${e(item.title)}">Unlink</button></p>`).join('')}`:'';}).join(''):'<p class="muted">No connections yet.</p>'}`;
-      target.querySelector<HTMLButtonElement>('[data-connections-view]')!.onclick=()=>void view(false).catch(error=>env.notice(error.message,true));
-      target.querySelector<HTMLButtonElement>('[data-connections-add]')!.onclick=()=>env.command(':link ');
-      target.querySelectorAll<HTMLButtonElement>('[data-connection-open]').forEach(button=>button.onclick=()=>void env.open(button.dataset.connectionOpen!).catch(error=>env.notice(error.message,true)));
+      toggle.textContent=`Connections · ${result.links.length}${result.more?'+':''}`;
+      itemsHost.innerHTML=items.length?items.map(item=>`<div class="connection-popover-item"><button type="button" class="wiki-link" data-connection-open="${e(item.id)}">${e(label(item.kind))} · ${e(item.title)}</button><button type="button" class="quiet" data-connection-remove="${e(item.id)}" aria-label="Remove connection to ${e(item.title)}">Unlink</button></div>`).join(''):'<p class="muted">No connections yet.</p>';
+      if(result.more)itemsHost.insertAdjacentHTML('beforeend','<p class="muted">Showing the first 100 connections. View map to browse all.</p>');
+      target.querySelectorAll<HTMLButtonElement>('[data-connection-open]').forEach(button=>button.onclick=()=>{close();void env.open(button.dataset.connectionOpen!).catch(error=>env.notice(error.message,true));});
       target.querySelectorAll<HTMLButtonElement>('[data-connection-remove]').forEach(button=>button.onclick=()=>void mutate('unlink',button.dataset.connectionRemove!).catch(error=>env.notice(error.message,true)));
-    }catch(error){if(target.isConnected)target.innerHTML=`<h3>Connections</h3><p role="status">${e((error as Error).message)}</p>`;}
+      position();
+    }catch(error){if(version===headerVersion&&target.isConnected){toggle.textContent='Connections · !';itemsHost.innerHTML=`<p role="status">${e((error as Error).message)}</p>`;position();}}
   }
   async function view(all=false){
     const source=all?'':env.current();if(source===undefined||source?.startsWith('draft-'))throw new CommandError('Save and select an item first, or use :links all.');

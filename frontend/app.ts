@@ -639,6 +639,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   if(toolbarOnly){
     const template=document.createElement('template');template.innerHTML=markup;
     for(const selector of ['.detail-toolbar','.print-only'])panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector)!);
+    void connections.section();
     return;
   }
   if(retainBody){

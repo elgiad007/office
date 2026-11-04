@@ -37,6 +37,7 @@ try{
  await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('#items [data-id="'+source.id+'"]').click();
  const command=async text=>{await page.keyboard.press('Escape');await page.locator('#main').focus();await page.keyboard.press(':');await page.locator('#command-input').fill(text);};
  const run=async text=>{await command(text);await page.keyboard.press('Enter');};
+ const openConnections=async()=>{await page.locator('.connection-count').filter({hasText:/Connections · \d/}).waitFor();await page.locator('.connection-count').click();await page.locator('.connection-popover:popover-open').waitFor();};
  await command(':link event forecast');await page.locator('#connection-suggestions [role="option"]').first().waitFor();
  assert.equal(await page.locator('#connection-suggestions [role="option"]').count(),2);
  const popup=await page.locator('#connection-suggestions').boundingBox();assert.ok(await page.evaluate(({x,y,width,height})=>!!document.elementFromPoint(x+width/2,y+height/2)?.closest('#connection-suggestions'),popup));
@@ -46,14 +47,15 @@ try{
  await page.keyboard.press('Tab');const chosen=(await page.locator('#command-input').inputValue()).slice(6);assert.ok(selected.includes(chosen));await page.keyboard.press('Enter');
  await page.locator('#notice').filter({hasText:'Items linked.'}).waitFor();assert.equal((await api('connections&id='+source.id)).links.length,1);
  await run(':link '+chosen);await page.locator('#notice').filter({hasText:'Items linked.'}).waitFor();assert.equal((await api('connections&id='+source.id)).links.length,1);
- await page.locator('.item-connections [data-connection-open]').click();await page.waitForURL('**/#calendar');await page.locator('.item-connections [data-connection-open="'+source.id+'"]').waitFor();
- await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.waitForURL('**/#tasks');await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor();
+ await openConnections();await page.locator('.item-connections [data-connection-open]').click();await page.waitForURL('**/#calendar');await page.locator('.item-connections [data-connection-open="'+source.id+'"]').waitFor({state:'attached'});
+ await openConnections();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.waitForURL('**/#tasks');await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor({state:'attached'});
  await run(':new linked mail');await page.waitForURL('**/#mail');await page.locator('#save-status').filter({hasText:/^Unsaved draft$/}).waitFor();await page.getByRole('textbox',{name:'Title',exact:true}).fill('Linked draft');
+ assert.equal(await page.locator('.connection-count').isDisabled(),true);assert.equal(await page.locator('[data-connections-add]').isDisabled(),true);
  assert.equal((await api('connections&id='+source.id)).links.length,1);
- await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').waitFor();
+ await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').waitFor({state:'attached'});
  assert.equal((await api('records&kind=mail')).records[0].title,'Linked draft');
  assert.equal((await api('connections&id='+source.id)).links.length,2);
- await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor();
+ await openConnections();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor({state:'attached'});
  await run(':new linked event');await page.waitForURL('**/#calendar');await page.getByRole('button',{name:'Discard Draft',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Discard Draft',exact:true}).click();
  assert.equal((await api('connections&id='+source.id)).links.length,2);
  await run(':links all');await page.locator('.connections-view svg').waitFor();assert.equal(await page.locator('.connections-view [data-open]').count(),4);
@@ -67,8 +69,35 @@ try{
  // Restore full backups through the real API, retaining the older no-connections format.
  for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});
  await api('restore',{backup});assert.equal((await api('backup')).connections.length,2);
- await page.reload();await page.locator('#items [data-id="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open]').first().waitFor();
+ await page.reload();await page.locator('#items [data-id="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open]').first().waitFor({state:'attached'});
  await page.setViewportSize({width:390,height:844});await command(':link forecast');await page.locator('#connection-suggestions').waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:'test-results/connections-mobile.png'});
+ await page.keyboard.press('Escape');await page.keyboard.press('Escape');
+ // Header controls work in every app, including the received-mail header and wiki preview.
+ const examples=[source,first,await save('mail','Received linked message','Message content\n'.repeat(80),{folder:'Inbox',from:'sender@example.test'}),await save('contacts','Header contact'),await save('documents','Header document','<p>Document content</p>'),await save('wiki','header:page','Wiki content'),await save('sheets','Header sheet','',{workbook:{sheets:[{name:'Sheet 1',cells:{A1:'Content'}}]}})];
+ for(const item of examples)if(item.id!==source.id)await api('connection',{id:source.id,target:item.id});
+ for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
+  await page.setViewportSize(viewport);
+  for(const item of examples){
+   await page.locator('[data-app="'+item.kind+'"]').first().click();await page.locator('#items [data-id="'+item.id+'"]').click();
+   if(item.kind==='wiki'&&await page.locator('[data-action="wiki-mode"]').textContent()==='Preview')await page.locator('[data-action="wiki-mode"]').click();
+   const count=page.locator('.connection-count');await count.filter({hasText:/Connections · \d/}).waitFor();
+   assert.equal(await page.locator('#detail > .item-connections').count(),0);
+   assert.equal(await page.locator((item.kind==='mail'?'.mail-reader-header':'.detail-toolbar')+' .item-connections').count(),1);
+   assert.ok((await count.boundingBox()).height<=22);
+   const contentHeight=await page.locator('#detail').evaluate(panel=>panel.scrollHeight);
+   await count.focus();await page.keyboard.press('ArrowDown');await page.locator('.connection-popover:popover-open').waitFor();
+   assert.equal(await page.locator('#detail').evaluate(panel=>panel.scrollHeight),contentHeight);
+   const box=await page.locator('.connection-popover').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=viewport.width+1&&box.y>=0&&box.y+box.height<=viewport.height+1);
+   assert.ok(await page.evaluate(({x,y,width,height})=>!!document.elementFromPoint(x+width/2,y+height/2)?.closest('.connection-popover'),box));
+   await page.keyboard.press('Escape');assert.equal(await count.evaluate(button=>button===document.activeElement),true);assert.equal(await count.getAttribute('aria-expanded'),'false');
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+   if(item.kind==='mail')await page.screenshot({path:`test-results/connections-header-mail-${viewport.width}.png`});
+  }
+ }
+ await openConnections();await page.locator('[data-connections-view]').click();await page.locator('.connections-view [data-open]').first().waitFor();assert.equal(await page.locator('.connections-view [data-open]').count(),2);await page.keyboard.press('Escape');
+ await openConnections();await page.locator('[data-connection-remove]').first().click();await page.locator('#notice').filter({hasText:'Connection removed.'}).waitFor();await page.locator('.connection-count').filter({hasText:'Connections · 0'}).waitFor();
+ await page.locator('#main').click({position:{x:5,y:5}});await page.locator('.connection-count[aria-expanded="false"]').waitFor();
+ await page.locator('[data-connections-add]').click();await page.locator('#command-input').waitFor();assert.equal(await page.locator('#command-input').inputValue(),':link ');await page.keyboard.press('Escape');await page.keyboard.press('Escape');
  assert.deepEqual(errors,[]);console.log('PASS connections: real API, autocomplete arrows/Tab/Escape, linked draft save/discard, navigation, graph, unlink, atomic rollback, backup/restore, persistence and mobile layout.');
 }catch(error){if(page){console.error((await page.locator('body').innerText()).slice(-2500));await page.screenshot({path:'test-results/connections-failure.png'});}throw error;}
 finally{await browser?.close();server.kill();proxy.closeAllConnections();await new Promise(r=>proxy.close(r));}

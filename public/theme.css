@@ -6,10 +6,18 @@
 .connection-suggestions [aria-selected="true"] { background:var(--wash); outline:2px solid var(--accent); outline-offset:-2px; }
 .connection-suggestions strong,.connection-suggestions small,.connection-suggestions span { display:block; overflow-wrap:anywhere; }
 .connection-suggestions small { opacity:.7; }
-.item-connections { margin-top:22px; padding:16px; border-top:1px solid var(--line); overflow-wrap:anywhere; }
-.connection-heading { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
-.connection-heading h3 { margin-right:auto; }
-.item-connections h4 { margin:14px 0 4px; }
+.item-connections { display:inline-flex; align-items:center; gap:5px; flex-shrink:0; font-size:11px; line-height:1.4; }
+.item-connections > button { padding:1px 4px; min-height:0; border:0; background:transparent; color:var(--accent); font-size:11px; line-height:1.4; white-space:nowrap; }
+.item-connections > button:hover, .item-connections > button[aria-expanded="true"] { background:var(--wash); }
+.detail-toolbar .left { flex-wrap:wrap; min-width:0; }
+.connection-popover { position:fixed; inset:auto; margin:0; width:min(360px,calc(100vw - 16px)); max-height:min(440px,70dvh); overflow:auto; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); box-shadow:var(--shadow); font-size:12px; }
+.connection-popover-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.connection-popover-heading button, .connection-popover-item button { padding:3px 5px; font-size:12px; }
+.connection-popover-item { display:flex; align-items:baseline; gap:8px; padding:5px 0; border-top:1px solid var(--line); }
+.connection-popover-item [data-connection-open] { flex:1; min-width:0; text-align:left; justify-content:flex-start; overflow-wrap:anywhere; }
+.connection-popover-item [data-connection-remove] { flex-shrink:0; font-size:11px; }
+.connection-popover p { margin:8px 0 0; }
+@media print { .item-connections { display:none!important; } }
 #dialog:has(.connections-view) { width:min(1100px,94vw); max-height:92dvh; }
 .connections-view { overflow:auto; }
 .connections-view [hidden] { display:none; }
