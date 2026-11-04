@@ -29,6 +29,11 @@ const apps = {
 };
 const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd', undoDelete: 'u', completeTask: 'x' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
+const lastSelectedItems = new Map();
+function rememberSelection() {
+    if (state.current)
+        lastSelectedItems.set(state.app, state.current.id);
+}
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
@@ -434,7 +439,7 @@ async function boot() {
         const [accounts, records] = await Promise.all([api('accounts'), initial]);
         state.accounts = accounts.accounts;
         shell();
-        await load(undefined, {}, records?.records);
+        await load(undefined, { enteringApp: true }, records?.records);
         if (state.accounts.length)
             void syncAccounts(false);
     }
@@ -691,7 +696,7 @@ function captureMailReader() {
     }
     return snapshot;
 }
-async function load(preferId, { selectFirst = true, preserveSelection = false } = {}, initialRecords) {
+async function load(preferId, { selectFirst = true, preserveSelection = false, enteringApp = false } = {}, initialRecords) {
     await waitForAttachments();
     // A background refresh must never replace an in-memory draft.
     if (isUnsavedDraft() || (preserveSelection && state.dirty))
@@ -754,6 +759,10 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
         if (!state.current && selectFirst)
             state.current = navigableRows()[0] || null;
     }
+    if (enteringApp) {
+        const rows = navigableRows();
+        state.current = rows.find(r => r.id === (preferId || lastSelectedItems.get(app))) || rows[0] || null;
+    }
     if (preserveSelection) {
         const rows = filteredRows(), visible = new Set(rows.map(r => r.id));
         for (const id of state.selected)
@@ -782,6 +791,11 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
     restoreMailListViewport(listViewport);
     if (contentFocused && !document.activeElement?.closest('#detail'))
         restorePane('content');
+    if (enteringApp) {
+        setMode('normal');
+        focusList();
+        document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
+    }
 }
 function renderWorkspace(readerSnapshot) {
     const a = apps[state.app];
@@ -1281,6 +1295,7 @@ async function openConnectedRecord(id) {
     const record = (await api(`record&id=${encodeURIComponent(id)}`)).record;
     if (!apps[record.kind])
         throw new CommandError('This item type is not available in this version.');
+    rememberSelection();
     state.app = record.kind;
     state.current = null;
     state.search = '';
@@ -1297,10 +1312,10 @@ async function openConnectedRecord(id) {
         calendar.ensureVisible(record.id, true);
     focusList();
 }
-async function changeApp(name) { await waitForAttachments(); await leaveEditor(); if (name === 'mail' && state.app !== 'mail') {
+async function changeApp(name) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if (name === 'mail' && state.app !== 'mail') {
     state.mailFolder = 'Inbox';
     state.mailScope = null;
-} state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(); }
+} state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(undefined, { enteringApp: true }); }
 function updateMailListItem(id) {
     const row = state.rows.find(r => r.id === id), button = document.querySelector(`#items [data-id="${CSS.escape(id)}"]`);
     if (!row || !button)
