@@ -359,8 +359,27 @@
   .list-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0; }
   .items, .compact .items { min-height: 0; max-height: none; }
   .detail { min-height: 0; overflow: auto; }
+  .detail:not([hidden]) { display: flex; flex-direction: column; }
+  .detail > * { flex-shrink: 0; }
+  .detail, .compact .detail { padding-bottom: 20px; }
+  /* Grow blank editing space into the pane instead of forcing a fixed-height
+     editor below the toolbar and fields. Real content may still overflow. */
+  .detail .detail-form { display: flex; flex-direction: column; flex: 1 0 auto; width: 100%; gap: min(20px, 2vh); }
+  .compact .detail .detail-form { gap: min(10px, 2vh); }
+  .detail-form > label:has(> .body-editor) { display: flex; flex-direction: column; flex: 1 0 auto; }
+  .detail .body-editor { flex: 1 0 auto; min-height: 3lh; }
+  .detail .document-content { display: flex; flex-direction: column; flex: 1 0 auto; }
+  .detail .rich-editor { flex: 1 0 auto; min-height: 1lh; }
+  .detail > .empty, .compact .detail > .empty { min-height: 0; }
+  .detail.mail-reader > .mail-html { flex: 1 0 120px; height: 120px; min-height: 120px; }
   .detail.mail-reader, .compact .detail.mail-reader { padding-bottom: 0; }
   .items, .detail, .application-nav, #main, #mail-folder-navigation { overscroll-behavior: contain; }
+}
+@media screen and (max-height: 750px) {
+  .detail, .compact .detail { padding-bottom: 12px; }
+  .detail .detail-toolbar { margin-bottom: 12px; }
+  .detail .rich-editor { padding: 12px; }
+  .detail.mail-reader, .compact .detail.mail-reader { padding-bottom: 0; }
 }
 @media screen and (max-width: 800px) {
   .work-grid { grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }

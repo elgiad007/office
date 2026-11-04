@@ -12,6 +12,7 @@ import {testAccountSetup} from './account-setup.browser.mjs';
 import {testMailArchive} from './mail-archive.browser.mjs';
 import {testDensity} from './density.browser.mjs';
 import {testScrolling} from './scrolling.browser.mjs';
+import {testPanelSizing} from './panel-sizing.browser.mjs';
 import {testFocusNavigation} from './focus-navigation.browser.mjs';
 import {testListArrows} from './list-arrows.browser.mjs';
 import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
@@ -83,6 +84,7 @@ try{
  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByRole('button',{name:'Save preferences',exact:true}).click();await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');await page.screenshot({path:'test-results/settings-dark.png',fullPage:true});
  await testDensity(page);
  await testScrolling(page,url);
+ await testPanelSizing(page,url);
  await testCalendar(page,url);
  await testListArrows(page,url);
  await testFocusNavigation(page,url);
