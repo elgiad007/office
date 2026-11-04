@@ -28,14 +28,14 @@ try {
     $bridge=<<<'JS'
 (()=>{
   let keys=new Set(['g','G','n','N','Tab']),sequenceTime=0;
+  const scroll=createKeyboardScroller(document.scrollingElement);
   addEventListener('message',event=>{
     if(event.source!==parent)return;
     const data=event.data;
     if(!data||typeof data!=='object'||Array.isArray(data))return;
     if(data.type==='office-mail-config'&&Object.keys(data).length===2&&Array.isArray(data.keys)&&data.keys.length<=64&&data.keys.every(key=>typeof key==='string'&&key.length<=32)){keys=new Set(data.keys);return;}
-    if(data.type!=='office-mail-scroll'||Object.keys(data).length!==2||!['up','down','start','end'].includes(data.direction))return;
-    const root=document.scrollingElement;
-    if(root)scrollTo({top:data.direction==='start'?0:data.direction==='end'?root.scrollHeight:scrollY+(data.direction==='up'?-1:1)*Math.max(40,innerHeight*.15),behavior:'instant'});
+    if(data.type!=='office-mail-scroll'||Object.keys(data).length!==2||!['up','down','page-up','page-down','start','end'].includes(data.direction))return;
+    scroll(data.direction);
   });
   addEventListener('keydown',event=>{
     if(!event.defaultPrevented&&!event.isComposing&&!event.altKey&&!event.shiftKey&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();parent.postMessage({type:'office-mail-save',ctrlKey:event.ctrlKey,metaKey:event.metaKey,repeat:event.repeat},'*');return;}
@@ -55,7 +55,8 @@ try {
   parent.postMessage({type:'office-mail-ready'},'*');
 })();
 JS;
-    echo str_replace('</body>','<script nonce="'.htmlspecialchars($nonce,ENT_QUOTES).'">'.$bridge.'</script></body>',$html);
+    $scrollScript=file_get_contents(__DIR__.'/keyboard-scroll.js');
+    echo str_replace('</body>','<script type="module" nonce="'.htmlspecialchars($nonce,ENT_QUOTES).'">'.$scrollScript."\n".$bridge.'</script></body>',$html);
 } catch (Throwable $error) {
     http_response_code($error instanceof HttpError ? $error->getCode() : 500);
     echo '<p>'.htmlspecialchars($error instanceof HttpError ? $error->getMessage() : 'Email could not be displayed. Choose Text only.',ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8').'</p>';

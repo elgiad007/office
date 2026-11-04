@@ -29,7 +29,7 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
   moreOpening?.disconnect();
   const frame=panel.querySelector<HTMLIFrameElement>('.mail-html');
   if(frame){
-    const allowed=new Set(['g','G','n','N','Tab','Escape',':','ContextMenu','F10',...'1234567',...Object.values(navigation).filter(Boolean)]);
+    const allowed=new Set(['g','G','n','N','Tab','Escape',':','ContextMenu','F10','ArrowUp','ArrowDown','PageUp','PageDown','Home','End',...'1234567',...Object.values(navigation).filter(Boolean)]);
     const configure=()=>frame.contentWindow?.postMessage({type:'office-mail-config',keys:[...allowed]},'*');
     const receive=(event: MessageEvent)=>{
       if(!frame.isConnected||event.source!==frame.contentWindow||event.origin!=='null')return;

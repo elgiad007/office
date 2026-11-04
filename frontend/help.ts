@@ -6,6 +6,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add(k.help,'Open keyboard and command help','Normal mode, including Settings','Remappable in Settings.');
   add(k.down+' / '+k.up,'Next / previous item','Normal mode','Works from the list and nonediting content; scrolls a focused read-only mail body. Use arrows or Tab for spreadsheet cells.');add(k.left+' / '+k.right,'Focus list / selected item');
   add('ArrowDown / ArrowRight; ArrowUp / ArrowLeft','Next / previous item','Item lists','Down or Right moves to the next item; Up or Left moves to the previous item.');
+  add('ArrowDown / ArrowUp; PageDown / PageUp; Home / End','Scroll message; page down / up; top / bottom','Read-only mail body','Uses the same smooth scrolling in HTML and text. Respects reduced-motion preferences.');
   add('gg / G','First / last item','Normal mode','Keeps focus in the current pane; goes to top / bottom in a focused read-only mail body. Press g twice within 900 ms.');
   add('Tab / Shift+Tab','Enter selected content / return to list','Selected list row / content entry','Enters without editing. Standard controls and spreadsheet cells retain native Tab behavior.');
   add('g 1 … g 7','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets. Sequence timeout: 900 ms.');

@@ -1,5 +1,6 @@
 // Generated from frontend/app.ts by pnpm build. Do not edit.
 import { openHelp } from './help.js';
+import { createKeyboardScroller } from './keyboard-scroll.js';
 import { CommandError, resolveCommand } from './commands.js';
 import { asError } from './utils.js';
 import { isPresent } from './utils.js';
@@ -868,6 +869,9 @@ async function hydrateMailBody(record, manual = false) {
 }
 let displayedMailBody;
 function renderDetail(readerSnapshot = captureMailReader()) {
+    const scrollingPanel = document.querySelector('#detail');
+    if (scrollingPanel)
+        keyboardScrollers.get(scrollingPanel)?.cancel();
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
     if (state.app === 'calendar') {
         panel.hidden = !r;
@@ -1970,6 +1974,7 @@ function focusList() {
         entry.focus({ preventScroll: true });
     }
 }
+const keyboardScrollers = new WeakMap();
 function scrollMailBody(target, direction) {
     const frame = target.closest('.mail-html');
     if (frame) {
@@ -1979,7 +1984,12 @@ function scrollMailBody(target, direction) {
     const panel = document.querySelector('#detail');
     if (!panel)
         return;
-    panel.scrollTo({ top: direction === 'start' ? 0 : direction === 'end' ? panel.scrollHeight : panel.scrollTop + (direction === 'up' ? -1 : 1) * Math.max(40, panel.clientHeight * .15), behavior: 'instant' });
+    let scroll = keyboardScrollers.get(panel);
+    if (!scroll) {
+        scroll = createKeyboardScroller(panel);
+        keyboardScrollers.set(panel, scroll);
+    }
+    scroll(direction);
 }
 let lastPane = 'list';
 function activePane() { const node = document.activeElement; if (node?.closest('#detail'))
@@ -2129,6 +2139,12 @@ document.addEventListener('keydown', event => {
     keySequence = '';
     const listArrow = activePane() === 'list' ? (key === 'ArrowUp' || key === 'ArrowLeft' ? 'up' : key === 'ArrowDown' || key === 'ArrowRight' ? 'down' : undefined) : undefined;
     const action = listArrow || Object.keys(k).find(action => k[action] === key);
+    const scrollKey = { ArrowUp: 'up', ArrowDown: 'down', PageUp: 'page-up', PageDown: 'page-down', Home: 'start', End: 'end' };
+    if (mailBody && scrollKey[key]) {
+        event.preventDefault();
+        scrollMailBody(target, scrollKey[key]);
+        return;
+    }
     if (event.repeat && action && !['down', 'up', 'left', 'right'].includes(action)) {
         event.preventDefault();
         return;

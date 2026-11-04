@@ -31,6 +31,7 @@ import {testMailOperationQueue} from './mail-operation-queue.browser.mjs';
 import {testActivity} from './activity.browser.mjs';
 import {testLargeMail} from './large-mail.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
+import {testKeyboardScroll} from './keyboard-scroll.browser.mjs';
 import {testAccountFolders} from './account-folders.browser.mjs';
 import {testQuickMove} from './quick-move.browser.mjs';
 import {testSyncProgress} from './sync-progress.browser.mjs';
@@ -120,6 +121,7 @@ try{
  await testAccountFolders(page,url);
  await testQuickMove(page,url);
  await testMailHtml(page,url);
+ await testKeyboardScroll(page,url);
  await testMailCompact(page,url);
  await testCommands(page,url);await testMessageHeaders(page,url);await testMailReaderSync(page,url);
   await testHtmlReaderSync(page,url);

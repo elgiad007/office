@@ -1,3 +1,4 @@
+import {settleScroll} from './keyboard-scroll-ui.mjs';
 import assert from 'node:assert/strict';
 
 export async function testFocusNavigation(page,url) {
@@ -44,10 +45,10 @@ export async function testFocusNavigation(page,url) {
       assert.equal(await page.locator('#detail').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
       assert.deepEqual(await page.locator('#detail').boundingBox(),box,'Focus ring causes no layout shift');
       if(kind==='mail'){
-        await page.keyboard.press('J');assert.ok(await scrollOffset()>0,'Remapped Mail down scrolls plain text');
-        const down=await scrollOffset();await page.keyboard.press('K');assert.ok(await scrollOffset()<down,'Remapped Mail up scrolls plain text');
-        await page.keyboard.press('G');assert.ok(await scrollOffset()>down,'Mail G reaches bottom');
-        await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await scrollOffset(),0,'Mail gg reaches top');
+        await page.keyboard.press('J');await settleScroll(page.locator('#detail'));assert.ok(await scrollOffset()>0,'Remapped Mail down scrolls plain text');
+        const down=await scrollOffset();await page.keyboard.press('K');await settleScroll(page.locator('#detail'));assert.ok(await scrollOffset()<down,'Remapped Mail up scrolls plain text');
+        await page.keyboard.press('G');await settleScroll(page.locator('#detail'));assert.ok(await scrollOffset()>down,'Mail G reaches bottom');
+        await page.keyboard.press('g');await page.keyboard.press('g');await settleScroll(page.locator('#detail'));assert.equal(await scrollOffset(),0,'Mail gg reaches top');
         assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,'Mail scrolling keeps the message');
         await page.keyboard.press('n');await page.locator('#selected-item[data-id="focus-mail-2"]').waitFor();
         await page.keyboard.press('N');await page.locator('#selected-item[data-id="focus-mail-1"]').waitFor();

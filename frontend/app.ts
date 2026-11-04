@@ -1,4 +1,5 @@
 import {openHelp} from './help.js';
+import {createKeyboardScroller, type ScrollDirection} from './keyboard-scroll.js';
 import {CommandError,resolveCommand} from './commands.js';
 import {asError} from './utils.js';
 import {isPresent} from './utils.js';
@@ -554,6 +555,8 @@ async function hydrateMailBody(record: OfficeRecord,manual=false) {
 }
 let displayedMailBody: string | undefined;
 function renderDetail(readerSnapshot=captureMailReader()) {
+  const scrollingPanel=document.querySelector<HTMLElement>('#detail');
+  if(scrollingPanel)keyboardScrollers.get(scrollingPanel)?.cancel();
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
   if(state.app==='calendar'){panel.hidden=!r;if(!r){panel.innerHTML='';return;}}
   const contentFocused=!!r&&document.activeElement===contentEntry();
@@ -1071,11 +1074,14 @@ function focusList() {
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
-function scrollMailBody(target: HTMLElement,direction: 'up'|'down'|'start'|'end') {
+const keyboardScrollers=new WeakMap<HTMLElement,ReturnType<typeof createKeyboardScroller>>();
+function scrollMailBody(target: HTMLElement,direction: ScrollDirection) {
   const frame=target.closest<HTMLIFrameElement>('.mail-html');
   if(frame){frame.contentWindow?.postMessage({type:'office-mail-scroll',direction},'*');return;}
   const panel=document.querySelector<HTMLElement>('#detail');if(!panel)return;
-  panel.scrollTo({top:direction==='start'?0:direction==='end'?panel.scrollHeight:panel.scrollTop+(direction==='up'?-1:1)*Math.max(40,panel.clientHeight*.15),behavior:'instant'});
+  let scroll=keyboardScrollers.get(panel);
+  if(!scroll){scroll=createKeyboardScroller(panel);keyboardScrollers.set(panel,scroll);}
+  scroll(direction);
 }
 let lastPane: 'content'|'list'='list';
 function activePane(): 'content'|'list' {const node=document.activeElement;if(node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
@@ -1115,6 +1121,8 @@ document.addEventListener('keydown',event=>{
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
   const listArrow=activePane()==='list'?(key==='ArrowUp'||key==='ArrowLeft'?'up':key==='ArrowDown'||key==='ArrowRight'?'down':undefined):undefined;
   const action=listArrow||Object.keys(k).find(action=>k[action]===key);
+  const scrollKey: Record<string,ScrollDirection>={ArrowUp:'up',ArrowDown:'down',PageUp:'page-up',PageDown:'page-down',Home:'start',End:'end'};
+  if(mailBody&&scrollKey[key]){event.preventDefault();scrollMailBody(target,scrollKey[key]);return;}
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}

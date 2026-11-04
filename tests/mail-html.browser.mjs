@@ -1,3 +1,4 @@
+import {settleScroll} from './keyboard-scroll-ui.mjs';
 import assert from 'node:assert/strict';
 import {openMailMore} from './mail-reader-ui.mjs';
 
@@ -39,13 +40,13 @@ export async function testMailHtml(page,url) {
     assert.equal(await page.locator('#detail').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
     const selected=await page.locator('#selected-item').getAttribute('data-id');
     await page.keyboard.press('j');
-    await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    await settleScroll(frame.locator('html'));
     const down=await frame.locator('body').evaluate(()=>scrollY);assert.ok(down>0,'HTML j scrolls down');
-    await page.keyboard.press('k');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    await page.keyboard.press('k');await settleScroll(frame.locator('html'));
     assert.ok(await frame.locator('body').evaluate(()=>scrollY)<down,'HTML k scrolls up');
-    await page.keyboard.press('G');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    await page.keyboard.press('G');await settleScroll(frame.locator('html'));
     assert.ok(await frame.locator('body').evaluate(()=>scrollY)>1000,'HTML G reaches bottom');
-    await page.keyboard.press('g');await page.keyboard.press('g');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    await page.keyboard.press('g');await page.keyboard.press('g');await settleScroll(frame.locator('html'));
     assert.equal(await frame.locator('body').evaluate(()=>scrollY),0,'HTML gg reaches top');
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,'HTML scrolling keeps selected message');
     await page.keyboard.press('n');
@@ -168,9 +169,9 @@ export async function testMailHtml(page,url) {
     await frame.getByText('Styled newsletter',{exact:true}).waitFor();
     await frame.locator('body').evaluate(node=>{const div=document.createElement('div');div.style.height='3000px';node.append(div);node.tabIndex=-1;node.focus();});
     const remappedId=await page.locator('#selected-item').getAttribute('data-id');
-    await page.keyboard.press('J');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    await page.keyboard.press('J');await settleScroll(frame.locator('html'));
     const remappedDown=await frame.locator('body').evaluate(()=>scrollY);assert.ok(remappedDown>0,'HTML remapped down scrolls');
-    await page.keyboard.press('K');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    await page.keyboard.press('K');await settleScroll(frame.locator('html'));
     assert.ok(await frame.locator('body').evaluate(()=>scrollY)<remappedDown,'HTML remapped up scrolls');
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),remappedId,'HTML remapped scrolling keeps message');
 
