@@ -1450,7 +1450,7 @@ function enterEdit(preferTitle = false) {
         state.wikiPreview = false;
         renderDetail();
     }
-    const target = state.app === 'sheets' ? document.querySelector('#formula') : preferTitle ? document.querySelector('.title-input') : state.app === 'documents' ? document.querySelector('#rich-editor') : state.app === 'wiki' ? document.querySelector('[name=body]') : document.querySelector('.title-input');
+    const target = state.app === 'sheets' ? document.querySelector('#formula') : preferTitle ? document.querySelector('.title-input') : state.app === 'documents' ? document.querySelector('#rich-editor') : document.querySelector('#detail [name=body]');
     target?.focus();
     if (target instanceof HTMLInputElement && (preferTitle || target.id === 'formula'))
         target.select();

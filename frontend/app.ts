@@ -855,7 +855,7 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
 function enterEdit(preferTitle=false) {
   if (state.current?.meta.remote) {notice('This synced copy is read-only.');return;}
   if(state.app==='wiki'&&state.wikiPreview){state.wikiPreview=false;renderDetail();}
-  const target=state.app==='sheets'?document.querySelector<HTMLInputElement>('#formula')!:preferTitle?document.querySelector<HTMLInputElement>('.title-input')!:state.app==='documents'?document.querySelector<HTMLElement>('#rich-editor')!:state.app==='wiki'?document.querySelector<HTMLTextAreaElement>('[name=body]')!:document.querySelector<HTMLInputElement>('.title-input')!;
+  const target=state.app==='sheets'?document.querySelector<HTMLInputElement>('#formula')!:preferTitle?document.querySelector<HTMLInputElement>('.title-input')!:state.app==='documents'?document.querySelector<HTMLElement>('#rich-editor')!:document.querySelector<HTMLTextAreaElement>('#detail [name=body]')!;
   target?.focus();if(target instanceof HTMLInputElement&&(preferTitle||target.id==='formula'))target.select();setMode('insert');
 }
 function setMode(mode: string) {state.mode=mode;const m=document.querySelector<HTMLElement>('#mode')!;if(m)m.textContent=mode.toUpperCase();}
