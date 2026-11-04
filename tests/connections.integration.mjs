@@ -78,7 +78,7 @@ try{
  for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
   await page.setViewportSize(viewport);
   for(const item of examples){
-   await page.locator('[data-app="'+item.kind+'"]').first().click();await page.locator('#items [data-id="'+item.id+'"]').click();
+   await page.locator('[data-app="'+item.kind+'"]').first().click();await page.locator('#items [data-id="'+item.id+'"] ').press('Enter');
    if(item.kind==='wiki'&&await page.locator('[data-action="wiki-mode"]').textContent()==='Preview')await page.locator('[data-action="wiki-mode"]').click();
    const count=page.locator('.connection-count');await count.filter({hasText:/Connections · \d/}).waitFor();
    assert.equal(await page.locator('#detail > .item-connections').count(),0);
@@ -98,6 +98,36 @@ try{
  await openConnections();await page.locator('[data-connection-remove]').first().click();await page.locator('#notice').filter({hasText:'Connection removed.'}).waitFor();await page.locator('.connection-count').filter({hasText:'Connections · 0'}).waitFor();
  await page.locator('#main').click({position:{x:5,y:5}});await page.locator('.connection-count[aria-expanded="false"]').waitFor();
  await page.locator('[data-connections-add]').click();await page.locator('#command-input').waitFor();assert.equal(await page.locator('#command-input').inputValue(),':link ');await page.keyboard.press('Escape');await page.keyboard.press('Escape');
- assert.deepEqual(errors,[]);console.log('PASS connections: real API, autocomplete arrows/Tab/Escape, linked draft save/discard, navigation, graph, unlink, atomic rollback, backup/restore, persistence and mobile layout.');
+ // Deletion preserves shared context, with review and cancellation before any write.
+ await page.setViewportSize({width:1440,height:1000});
+ const shared=await save('tasks','Deletion shared source','Private content');
+ await api('connection',{id:shared.id,target:first.id});await api('connection',{id:shared.id,target:second.id});
+ await page.locator('[data-app="tasks"]').first().click();await page.locator('#items [data-id="'+shared.id+'"]').click();
+ const remove=()=>page.locator('#detail [data-action="delete"]').click();
+ await remove();await page.locator('[data-preserve]').waitFor();assert.equal(await page.locator('[data-preserve]').isChecked(),true);
+ await page.setViewportSize({width:390,height:844});
+ assert.ok(await page.locator('.connection-delete-options').evaluate(element=>{const box=element.getBoundingClientRect();return box.x>=0&&box.right<=innerWidth;}));
+ await page.screenshot({path:'test-results/connection-deletion-mobile.png'});await page.setViewportSize({width:1440,height:1000});
+ await page.locator('#cancel').click();assert.equal((await api('connections&id='+shared.id)).links.length,2);
+ await remove();await page.locator('[data-hub-name]').fill('Preserved project context');
+ await page.getByRole('button',{name:'View connections',exact:true}).click();await page.locator('.connections-view [data-open]').first().waitFor();
+ assert.equal(await page.locator('.connections-view [data-open]').count(),4);
+ await page.getByRole('button',{name:'Back to deletion',exact:true}).click();assert.equal(await page.locator('[data-hub-name]').inputValue(),'Preserved project context');
+ await page.locator('#confirm').click();await page.locator('#notice').filter({hasText:'Item deleted.'}).waitFor();
+ const hubs=(await api('records&kind=documents')).records.filter(row=>row.title==='Preserved project context');assert.equal(hubs.length,1);
+ assert.equal((await api('connections&id='+hubs[0].id)).links.length,2);assert.ok(!hubs[0].body.includes('Private content'));
+ // Bulk context-menu deletion shows a separate choice for each connected item.
+ const bulkA=await save('tasks','Hub bulk A'),bulkB=await save('tasks','Hub bulk B');
+ await api('connection',{id:bulkA.id,target:first.id});await api('connection',{id:bulkB.id,target:second.id});
+ await page.reload();await page.locator('#items [data-id="'+bulkA.id+'"]').click();await page.keyboard.press('v');
+ await page.locator('#items [data-id="'+bulkB.id+'"]').click({modifiers:['Control']});
+ await page.locator('#items [data-id="'+bulkA.id+'"]').click({button:'right'});
+ await page.getByRole('menuitem',{name:'Delete 2 items…',exact:true}).click();await page.locator('[data-preserve]').first().waitFor();
+ assert.equal(await page.locator('[data-preserve]').count(),2);
+ await page.locator('[data-preserve]').nth(1).uncheck();await page.locator('#confirm').click();
+ await page.locator('#notice').filter({hasText:'2 items updated.'}).waitFor();
+ const bulkHubs=(await api('records&kind=documents')).records.filter(row=>row.title.startsWith('Hub bulk'));assert.equal(bulkHubs.length,1);
+ assert.equal((await api('connections&id='+bulkHubs[0].id)).links.length,1);
+ assert.deepEqual(errors,[]);console.log('PASS connections: real API, autocomplete, linked drafts, graph, backup/restore, mobile layout, deletion cancellation/review, named hub preservation and bulk preserve/remove choices.');
 }catch(error){if(page){console.error((await page.locator('body').innerText()).slice(-2500));await page.screenshot({path:'test-results/connections-failure.png'});}throw error;}
 finally{await browser?.close();server.kill();proxy.closeAllConnections();await new Promise(r=>proxy.close(r));}

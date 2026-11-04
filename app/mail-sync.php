@@ -149,10 +149,10 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
         $db->commit(); return count($downloads);
     } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
 }
-function recovery_mail_action(array $r,string $action): ?array {
+function recovery_mail_action(array $r,string $action,?string $hubTitle=null): ?array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote']) || !in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('Choose a recovery copy.');
     if ($action==='discard') {
-        db()->prepare('DELETE FROM records WHERE id=?')->execute([$r['id']]); return null;
+        delete_connected_record($r,$hubTitle); return null;
     }
     if ($action!=='keep-local') fail('Unknown recovery action.');
     foreach (['remote','account','source','providerId','serverFolder','uidValidity','accountLabel','recoveryFrom'] as $field) unset($r['meta'][$field]);

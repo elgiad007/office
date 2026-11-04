@@ -124,8 +124,10 @@ try {
     if ($route==='delete' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision']) fail('Item changed elsewhere. Reopen it.',409);
         if (!empty($r['meta']['remote'])) fail('Remote items are read-only. Remove the account to clear its cache.');
-        if($r['kind']==='mail'&&($input['undoable']??false)===true)json_response(delete_local_mail($r));
-        $q=db()->prepare('DELETE FROM records WHERE id=? AND revision=?'); $q->execute([$r['id'],$r['revision']]); if (!$q->rowCount()) fail('Item changed elsewhere.',409); json_response(['ok'=>true]);
+        $hubTitle=$input['connectionHubTitle']??null;
+        if($hubTitle!==null&&!is_string($hubTitle))fail('Invalid connection hub name.');
+        if($r['kind']==='mail'&&($input['undoable']??false)===true)json_response(delete_local_mail($r,$hubTitle));
+        json_response(delete_connected_record($r,$hubTitle));
     }
     if ($route==='history' && $method==='GET') { get_record((string)($_GET['id']??'')); $q=db()->prepare('SELECT revision,snapshot FROM revisions WHERE record_id=? ORDER BY revision DESC LIMIT 50'); $q->execute([$_GET['id']]); json_response(['revisions'=>array_map(static fn($r)=>['revision'=>(int)$r['revision'],'snapshot'=>json_decode($r['snapshot'],true)],$q->fetchAll())]); }
     if ($route==='preferences' && $method==='POST') {
@@ -279,7 +281,7 @@ try {
             $record=$action==='move' && $destination!=='' && $destination!==$accountId
                 ?with_account_mail_mutation($destination,fn()=>transfer_remote_mail($current,account($destination),(string)($input['folder']??'')))
                 :(in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''),$destination!=='')
-                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action):remote_mail_action($current,$action,$undoBefore)));
+                :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action,$input['connectionHubTitle']??null):remote_mail_action($current,$action,$undoBefore)));
             $ids->execute([$accountId]);
             $result=['record'=>$record,'removedIds'=>array_values(array_diff($before,$ids->fetchAll(PDO::FETCH_COLUMN)))];
             if($undoBefore!==null&&($record['meta']['folder']??'')==='Trash'){

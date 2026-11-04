@@ -141,6 +141,8 @@ export interface RequestApi {
 }
 export type Attempt = <T>(fn: () => T | Promise<T>) => Promise<T | undefined>;
 export type Confirmation = (title: string, message: string, action: () => unknown) => void;
+export type ConnectionDeletionChoices = Record<string,{connectionHubTitle?: string}>;
+export type ConfirmDeletion = (rows: OfficeRecord[],title: string,message: string,action: (choices: ConnectionDeletionChoices) => unknown,skipUnconnected?: boolean) => Promise<void>;
 export type DeleteResult = {ok?: boolean; record?: OfficeRecord | null; removedIds?: string[]; undoToken?: string};
 export type DeleteMail = (rows: OfficeRecord[], operation: (row: OfficeRecord) => Promise<DeleteResult>, undoable?: boolean) => Promise<void>;
 export interface FolderEnvironment {
@@ -152,6 +154,7 @@ export interface FolderEnvironment {
   mailDeletionReload?: () => (removedIds: string[]) => Promise<void>;
 }
 export interface MenuEnvironment {
+  confirmDeletion: ConfirmDeletion;
   renderList: () => void;
   state: AppState; e: (value: unknown) => string; commit: () => Promise<void>;
   selectRecord: (id: string, focus?: boolean) => Promise<void>; enterEdit: (preferTitle?: boolean) => void;

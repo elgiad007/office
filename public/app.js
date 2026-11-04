@@ -38,7 +38,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
-const connections = createConnections({ api, current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value) });
+const connections = createConnections({ api, current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
 class DraftCancelled extends Error {
@@ -1782,7 +1782,7 @@ async function handleClick(event) {
             await mailAction('keep-local');
         if (action === 'discard-copy') {
             const record = state.current;
-            confirmation('Discard copy', 'Permanently remove this cached recovery copy from Office? Your server mailbox is unaffected.', () => mailAction('discard', record));
+            await connections.confirmDeletion([record], 'Discard copy', 'Permanently remove this cached recovery copy from Office? Your server mailbox is unaffected.', choices => mailAction('discard', record, choices));
         }
         if (action === 'import')
             await importFile();
@@ -1822,8 +1822,11 @@ async function handleClick(event) {
             }
             if (state.app === 'mail')
                 await deleteSelectedMail();
-            else
-                confirmation('Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async () => { await commit(); const record = state.current, reload = mailDeletionReload(); await api('delete', { id: record.id, revision: record.revision }); await reload([record.id]); notice('Item deleted.'); });
+            else {
+                await commit();
+                const record = state.current;
+                await connections.confirmDeletion([record], 'Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async (choices) => { await commit(); const reload = mailDeletionReload(); await api('delete', { id: record.id, revision: record.revision, ...choices[record.id] }); await reload([record.id]); notice('Item deleted.'); });
+            }
         }
         if (action === 'logout')
             await signOut();
@@ -1942,21 +1945,18 @@ async function deleteSelectedMail() {
     if (rows.some(protectedMail))
         throw Error('The selection includes protected mail. Deselect messages in Trash or recovery copies before deleting.');
     const ids = rows.map(r => r.id), local = rows.filter(r => !r.meta.remote).length;
-    const apply = async () => {
+    const apply = async (choices) => {
         if (state.app !== 'mail')
             throw Error('The application changed. Select the messages again.');
         await commit();
         const current = ids.map(id => state.rows.find(r => r.id === id));
         if (current.some(r => !r || protectedMail(r) || !!r.meta.remote !== !!rows.find(original => original.id === r.id).meta.remote))
             throw Error('The selected messages changed. Select them again.');
-        await deleteMailImmediately(current.filter(isPresent), r => r.meta.remote ? api('mail-action', { id: r.id, revision: r.revision, action: 'trash', undoable: true }) : api('delete', { id: r.id, revision: r.revision, undoable: true }), true);
+        await deleteMailImmediately(current.filter(isPresent), r => r.meta.remote ? api('mail-action', { id: r.id, revision: r.revision, action: 'trash', undoable: true }) : api('delete', { id: r.id, revision: r.revision, undoable: true, ...choices[r.id] }), true);
         notice(rows.length === 1 ? (local ? 'Item deleted.' : 'Moved to Trash.') : `${rows.length} items updated.`);
     };
     const singleDraft = rows.length === 1 && rows[0].meta.folder === 'Drafts';
-    if (local)
-        confirmation(singleDraft ? 'Discard Draft' : rows.length === 1 ? 'Delete item' : 'Delete selected messages', singleDraft ? 'Discard this saved draft? Undo is available for fifteen minutes.' : `Delete ${local} local message(s)? Undo is available for fifteen minutes.${local < rows.length ? ` Also move ${rows.length - local} connected message(s) to Trash.` : ''}`, apply);
-    else
-        await apply();
+    await connections.confirmDeletion(rows, singleDraft ? 'Discard Draft' : local ? (rows.length === 1 ? 'Delete item' : 'Delete selected messages') : 'Move to Trash', singleDraft ? 'Discard this saved draft? Undo is available for fifteen minutes.' : `Delete ${local} local message(s)${local < rows.length ? ` and move ${rows.length - local} provider message(s) to Trash` : ''}? Undo is available for fifteen minutes.`, apply, !local);
 }
 async function archiveLocal() {
     if (state.app !== 'mail')
@@ -2003,12 +2003,12 @@ async function archiveLocal() {
     await reload(ids);
     notice(`Archived ${count} messages.`);
 }
-async function mailAction(action, record = state.current) {
+async function mailAction(action, record = state.current, choices = {}) {
     if (state.app !== 'mail' || !record)
         return;
     await commit();
     if (['trash', 'discard'].includes(action)) {
-        await deleteMailImmediately([record], r => api('mail-action', { id: r.id, revision: r.revision, action, undoable: action === 'trash' }), action === 'trash');
+        await deleteMailImmediately([record], r => api('mail-action', { id: r.id, revision: r.revision, action, undoable: action === 'trash', ...choices[r.id] }), action === 'trash');
         notice(action === 'trash' ? 'Moved to Trash.' : 'Cached copy discarded.');
         return;
     }
@@ -2190,7 +2190,7 @@ function accountDialog() {
             renderSettings();
         } });
 }
-const itemMenus = installItemMenus({ state, e, commit: leaveEditor, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, setMailRead, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
+const itemMenus = installItemMenus({ confirmDeletion: connections.confirmDeletion, state, e, commit: leaveEditor, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, setMailRead, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
 function contentEntry() {
     const panel = document.querySelector('#detail');
     return panel?.querySelector('.mail-html, .mail-body, .sheet-wrap') || panel;

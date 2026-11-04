@@ -1,11 +1,40 @@
 import {connectionQuery,CommandError} from './commands.js';
 import {itemTypes, type ItemKind} from './item-types.js';
 import {escapeHtml as e} from './formats.js';
-import type {ConnectionItem,ConnectionList,RequestApi} from './types.js';
+import type {ConnectionItem,ConnectionList,RequestApi,ConfirmDeletion,ConnectionDeletionChoices} from './types.js';
 
 const label=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const detail=(item:ConnectionItem)=>Object.entries(item.meta).filter(([key])=>itemTypes[item.kind as ItemKind]?.fields.some(field=>field===key)).map(([,value])=>value).join(' · ');
-export function createConnections(env:{api:RequestApi;current:()=>string|undefined;open:(id:string)=>Promise<void>;modal:(title:string,body:string)=>void;dialog:HTMLDialogElement;notice:(message:string,error?:boolean)=>void;command:(value:string)=>void}) {
+export function createConnections(env:{api:RequestApi;current:()=>string|undefined;open:(id:string)=>Promise<void>;modal:(title:string,body:string)=>void;dialog:HTMLDialogElement;notice:(message:string,error?:boolean)=>void;command:(value:string)=>void;confirmation:(title:string,message:string,action:()=>unknown)=>void;attempt:(action:()=>unknown)=>unknown}) {
+  let checkingDeletion=false;
+  const confirmDeletion: ConfirmDeletion=async(rows,title,message,action,skipUnconnected=false)=>{
+    if(checkingDeletion)return;
+    const linked:{row:Parameters<ConfirmDeletion>[0][number];result:ConnectionList}[]=[];
+    checkingDeletion=true;
+    try{for(const row of rows){const result=await env.api(`connections&id=${encodeURIComponent(row.id)}`);if(result.links.length)linked.push({row,result});}}
+    finally{checkingDeletion=false;}
+    if(!linked.length){if(skipUnconnected)await action({});else env.confirmation(title,message,()=>action({}));return;}
+    const choices:ConnectionDeletionChoices={},names=new Map(linked.map(({row})=>[row.id,row.title]));
+    const removable=(row:typeof rows[number])=>!row.meta.remote||['Recovery copies','Not in Inbox'].includes(row.meta.folder||'');
+    const render=()=>{
+      env.modal(title,`<p>${e(message)}</p><p>These items have connections. Review them and choose how to keep their shared context.</p>${linked.map(({row,result},index)=>`<fieldset class="connection-delete-options"><legend>${e(row.title)} · ${result.links.length}${result.more?'+':''} connections</legend><button type="button" data-review-connections="${index}">View connections</button>${removable(row)?`<label class="check-label"><input type="checkbox" data-preserve="${index}" ${choices[row.id]?.connectionHubTitle===undefined&&row.id in choices?'':'checked'}> Preserve connections as a hub in Documents</label><label>Hub name<input data-hub-name="${index}" value="${e(names.get(row.id))}" required maxlength="500"></label><p class="muted">Keeps the name and links only. Uncheck to remove the links.</p>`:'<p>Connections stay with this message in Trash.</p>'}</fieldset>`).join('')}<div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`);
+      const dialog=env.dialog;
+      const collect=()=>{for(const {row} of linked)if(removable(row))choices[row.id]={};dialog.querySelectorAll<HTMLInputElement>('[data-hub-name]').forEach(input=>{const index=Number(input.dataset.hubName),row=linked[index].row;names.set(row.id,input.value);if(dialog.querySelector<HTMLInputElement>(`[data-preserve="${index}"]`)!.checked)choices[row.id]={connectionHubTitle:input.value};});};
+      dialog.querySelectorAll<HTMLButtonElement>('[data-review-connections]').forEach(button=>button.onclick=()=>{
+        collect();void view(false,linked[Number(button.dataset.reviewConnections)].row.id).then(()=>{
+          if(!dialog.querySelector('.connections-view'))return;
+          const back=document.createElement('button');back.textContent='Back to deletion';back.onclick=render;dialog.querySelector('.connections-view')!.prepend(back);back.focus();
+        }).catch(error=>env.notice(error.message,true));
+      });
+      dialog.querySelector<HTMLButtonElement>('#cancel')!.onclick=()=>dialog.close();
+      dialog.querySelector<HTMLButtonElement>('#confirm')!.onclick=()=>{
+        collect();for(const input of dialog.querySelectorAll<HTMLInputElement>('[data-hub-name]')){const row=linked[Number(input.dataset.hubName)].row;if(choices[row.id]?.connectionHubTitle!==undefined&&!input.reportValidity())return;}
+        dialog.close();env.attempt(()=>action(choices));
+      };
+      dialog.querySelector<HTMLButtonElement>('#cancel')!.focus();
+    };
+    render();
+  };
   async function search(value:string) {
     const query=connectionQuery(value);if(!query)return [];
     const id=env.current();if(!id||id.startsWith('draft-'))return [];
@@ -101,8 +130,8 @@ export function createConnections(env:{api:RequestApi;current:()=>string|undefin
       position();
     }catch(error){if(version===headerVersion&&target.isConnected){toggle.textContent='Connections · !';itemsHost.innerHTML=`<p role="status">${e((error as Error).message)}</p>`;position();}}
   }
-  async function view(all=false){
-    const source=all?'':env.current();if(source===undefined||source?.startsWith('draft-'))throw new CommandError('Save and select an item first, or use :links all.');
+  async function view(all=false,sourceId?:string){
+    const source=all?'':sourceId??env.current();if(source===undefined||source?.startsWith('draft-'))throw new CommandError('Save and select an item first, or use :links all.');
     env.modal(all?'All connections':'Item connections','<div class="connections-view"><label>Search connections<input data-connection-filter type="search"></label><p class="muted">Select a node to focus its connections. Open an item from the list.</p><div data-connection-graph></div><div data-connection-list></div><button data-connection-more hidden>Load more connections</button><p role="status" data-connection-status></p></div>');
     const dialog=env.dialog,filter=dialog.querySelector<HTMLInputElement>('[data-connection-filter]')!,more=dialog.querySelector<HTMLButtonElement>('[data-connection-more]')!;
     let data:ConnectionList={items:[],links:[],more:false},request=0,focus=source||'';
@@ -127,5 +156,5 @@ export function createConnections(env:{api:RequestApi;current:()=>string|undefin
     }
     filter.oninput=()=>void fetchPage(true);more.onclick=()=>void fetchPage(false);await fetchPage(true);filter.focus();
   }
-  return {autocomplete,mutate,section,view};
+  return {autocomplete,mutate,section,view,confirmDeletion};
 }

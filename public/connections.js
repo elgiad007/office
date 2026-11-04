@@ -5,6 +5,65 @@ import { escapeHtml as e } from './formats.js';
 const label = (kind) => itemTypes[kind]?.label || kind;
 const detail = (item) => Object.entries(item.meta).filter(([key]) => itemTypes[item.kind]?.fields.some(field => field === key)).map(([, value]) => value).join(' · ');
 export function createConnections(env) {
+    let checkingDeletion = false;
+    const confirmDeletion = async (rows, title, message, action, skipUnconnected = false) => {
+        if (checkingDeletion)
+            return;
+        const linked = [];
+        checkingDeletion = true;
+        try {
+            for (const row of rows) {
+                const result = await env.api(`connections&id=${encodeURIComponent(row.id)}`);
+                if (result.links.length)
+                    linked.push({ row, result });
+            }
+        }
+        finally {
+            checkingDeletion = false;
+        }
+        if (!linked.length) {
+            if (skipUnconnected)
+                await action({});
+            else
+                env.confirmation(title, message, () => action({}));
+            return;
+        }
+        const choices = {}, names = new Map(linked.map(({ row }) => [row.id, row.title]));
+        const removable = (row) => !row.meta.remote || ['Recovery copies', 'Not in Inbox'].includes(row.meta.folder || '');
+        const render = () => {
+            env.modal(title, `<p>${e(message)}</p><p>These items have connections. Review them and choose how to keep their shared context.</p>${linked.map(({ row, result }, index) => `<fieldset class="connection-delete-options"><legend>${e(row.title)} · ${result.links.length}${result.more ? '+' : ''} connections</legend><button type="button" data-review-connections="${index}">View connections</button>${removable(row) ? `<label class="check-label"><input type="checkbox" data-preserve="${index}" ${choices[row.id]?.connectionHubTitle === undefined && row.id in choices ? '' : 'checked'}> Preserve connections as a hub in Documents</label><label>Hub name<input data-hub-name="${index}" value="${e(names.get(row.id))}" required maxlength="500"></label><p class="muted">Keeps the name and links only. Uncheck to remove the links.</p>` : '<p>Connections stay with this message in Trash.</p>'}</fieldset>`).join('')}<div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`);
+            const dialog = env.dialog;
+            const collect = () => { for (const { row } of linked)
+                if (removable(row))
+                    choices[row.id] = {}; dialog.querySelectorAll('[data-hub-name]').forEach(input => { const index = Number(input.dataset.hubName), row = linked[index].row; names.set(row.id, input.value); if (dialog.querySelector(`[data-preserve="${index}"]`).checked)
+                choices[row.id] = { connectionHubTitle: input.value }; }); };
+            dialog.querySelectorAll('[data-review-connections]').forEach(button => button.onclick = () => {
+                collect();
+                void view(false, linked[Number(button.dataset.reviewConnections)].row.id).then(() => {
+                    if (!dialog.querySelector('.connections-view'))
+                        return;
+                    const back = document.createElement('button');
+                    back.textContent = 'Back to deletion';
+                    back.onclick = render;
+                    dialog.querySelector('.connections-view').prepend(back);
+                    back.focus();
+                }).catch(error => env.notice(error.message, true));
+            });
+            dialog.querySelector('#cancel').onclick = () => dialog.close();
+            dialog.querySelector('#confirm').onclick = () => {
+                collect();
+                for (const input of dialog.querySelectorAll('[data-hub-name]')) {
+                    const row = linked[Number(input.dataset.hubName)].row;
+                    if (choices[row.id]?.connectionHubTitle !== undefined && !input.reportValidity())
+                        return;
+                }
+                dialog.close();
+                env.attempt(() => action(choices));
+            };
+            dialog.querySelector('#cancel').focus();
+        };
+        render();
+    };
     async function search(value) {
         const query = connectionQuery(value);
         if (!query)
@@ -199,8 +258,8 @@ export function createConnections(env) {
             }
         }
     }
-    async function view(all = false) {
-        const source = all ? '' : env.current();
+    async function view(all = false, sourceId) {
+        const source = all ? '' : sourceId ?? env.current();
         if (source === undefined || source?.startsWith('draft-'))
             throw new CommandError('Save and select an item first, or use :links all.');
         env.modal(all ? 'All connections' : 'Item connections', '<div class="connections-view"><label>Search connections<input data-connection-filter type="search"></label><p class="muted">Select a node to focus its connections. Open an item from the list.</p><div data-connection-graph></div><div data-connection-list></div><button data-connection-more hidden>Load more connections</button><p role="status" data-connection-status></p></div>');
@@ -247,5 +306,5 @@ export function createConnections(env) {
         await fetchPage(true);
         filter.focus();
     }
-    return { autocomplete, mutate, section, view };
+    return { autocomplete, mutate, section, view, confirmDeletion };
 }

@@ -11,6 +11,23 @@ function connection_add(string $a,string $b): void {
 function connection_rows(string $id): array {
     $q=db()->prepare('SELECT a,b,created FROM connections WHERE a=? OR b=?');$q->execute([$id,$id]);return $q->fetchAll();
 }
+/** Called inside the deletion transaction. Keep only a name and relationships. */
+function connection_preserve_hub(array $record,?string $title): ?array {
+    if($title===null||!connection_rows($record['id']))return null;
+    $hub=save_record(['kind'=>'documents','title'=>$title,'body'=>'<p>Original item deleted. Connections preserved.</p>','meta'=>['connectionHub'=>true]]);
+    connection_retarget($record['id'],$hub['id']);
+    return $hub;
+}
+function delete_connected_record(array $record,?string $hubTitle=null): array {
+    $db=db();$db->beginTransaction();
+    try{
+        $current=get_record($record['id']);
+        if($current['revision']!==$record['revision'])fail('Item changed elsewhere. Reopen it.',409);
+        $hub=connection_preserve_hub($current,$hubTitle);
+        $db->prepare('DELETE FROM records WHERE id=?')->execute([$current['id']]);
+        $db->commit();return ['ok'=>true,'hub'=>$hub];
+    }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
+}
 function connection_restore(array $links): void {
     $exists=db()->prepare('SELECT 1 FROM records WHERE id=?');
     foreach($links as $link){

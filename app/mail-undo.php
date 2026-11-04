@@ -37,7 +37,7 @@ function mail_undo_receipt(array $payload,string $state='ready'): string {
         if($ownTransaction)$db->commit();return $token;
     }catch(Throwable $e){if($ownTransaction&&$db->inTransaction())$db->rollBack();throw $e;}
 }
-function delete_local_mail(array $r): array {
+function delete_local_mail(array $r,?string $hubTitle=null): array {
     if($r['kind']!=='mail'||!empty($r['meta']['remote']))fail('Choose local mail.');
     $db=db();$db->beginTransaction();
     try {
@@ -45,7 +45,9 @@ function delete_local_mail(array $r): array {
         if(!$raw)fail('Item changed elsewhere.',409);
         $q=$db->prepare('SELECT * FROM revisions WHERE record_id=?');$q->execute([$r['id']]);$history=$q->fetchAll();
         $q=$db->prepare('SELECT * FROM mail_files WHERE record_id=?');$q->execute([$r['id']]);$files=$q->fetchAll();
-        $token=mail_undo_receipt(['local'=>$raw,'history'=>$history,'files'=>$files,'connections'=>connection_rows($r['id'])]);
+        $links=connection_rows($r['id']);
+        $hub=connection_preserve_hub($r,$hubTitle);
+        $token=mail_undo_receipt(['local'=>$raw,'history'=>$history,'files'=>$files,'connections'=>$links,'hubId'=>$hub['id']??null]);
         $db->prepare('DELETE FROM records WHERE id=?')->execute([$r['id']]);$db->commit();return ['ok'=>true,'undoToken'=>$token];
     }catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
 }
@@ -68,6 +70,13 @@ function undo_mail_delete(string $token,?callable $googleRequest=null,?callable 
                 $q=$db->prepare('INSERT INTO revisions(record_id,revision,snapshot) VALUES(?,?,?)');foreach($p['history'] as $h)$q->execute(array_values($h));
                 $q=$db->prepare('INSERT INTO mail_files(record_id,part,name,type,size,data) VALUES(?,?,?,?,?,?)');foreach($p['files'] as $f)$q->execute(array_values($f));
                 connection_restore($p['connections']??[]);
+                if(!empty($p['hubId'])){
+                    $q=$db->prepare('SELECT revision FROM records WHERE id=?');$q->execute([$p['hubId']]);$hubRevision=$q->fetchColumn();
+                    if($hubRevision!==false){
+                        if((int)$hubRevision===1){connection_retarget($p['hubId'],$r['id']);$db->prepare('DELETE FROM records WHERE id=?')->execute([$p['hubId']]);}
+                        else connection_add($p['hubId'],$r['id']); // Keep a hub the user has edited.
+                    }
+                }
                 // A selected batch may delete both ends of an edge. Its snapshot
                 // can live in the first receipt, so revisit it when either end returns.
                 $receipts=$db->prepare("SELECT payload FROM mail_undo WHERE expires>=? AND state IN ('ready','done')");$receipts->execute([time()]);

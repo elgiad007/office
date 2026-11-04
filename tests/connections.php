@@ -34,3 +34,24 @@ check(count(connection_list('','Renamed')['links'])===1,'workspace connection fi
 $m1=save_record(['kind'=>'mail','title'=>'Batch one','body'=>'','meta'=>['folder'=>'Local mail']]);$m2=save_record(['kind'=>'mail','title'=>'Batch two','body'=>'','meta'=>['folder'=>'Local mail']]);
 connection_add($m1['id'],$m2['id']);$u1=delete_local_mail($m1);$u2=delete_local_mail($m2);undo_mail_delete($u1['undoToken']);undo_mail_delete($u2['undoToken']);
 check(count(connection_rows($m1['id']))===1,'batch undo restores links between two deleted endpoints');
+$source=save_record(['kind'=>'tasks','title'=>'Shared context','body'=>'Private source content','meta'=>[]]);
+connection_add($source['id'],$a['id']);connection_add($source['id'],$b['id']);
+$result=delete_connected_record($source,'Project context');$hub=$result['hub'];
+check($hub['kind']==='documents'&&$hub['title']==='Project context'&&count(connection_rows($hub['id']))===2,'deletion replaces shared source with a named editable document hub');
+check(!str_contains($hub['body'],'Private source')&&$hub['meta']===['connectionHub'=>true],'hub excludes original content and metadata');
+$source=save_record(['kind'=>'tasks','title'=>'Rollback source','body'=>'','meta'=>[]]);connection_add($source['id'],$a['id']);
+try{delete_connected_record($source,'');throw new RuntimeException('invalid hub accepted');}catch(HttpError){check(count(connection_rows($source['id']))===1&&get_record($source['id'])['title']==='Rollback source','invalid hub creation rolls back deletion and connections');}
+$updated=$source;$updated['title']='Changed';save_record($updated);
+try{delete_connected_record($source,'Stale hub');throw new RuntimeException('stale deletion accepted');}catch(HttpError){check(count(connection_rows($source['id']))===1,'stale deletion does not transfer connections');}
+$mail=save_record(['kind'=>'mail','title'=>'Undo hub','body'=>'Message body','meta'=>['folder'=>'Local mail']]);connection_add($mail['id'],$a['id']);
+$deleted=delete_local_mail($mail,'Undo context');$hubId=mail_undo_payload($deleted['undoToken'])['hubId'];
+check(count(connection_rows($hubId))===1,'local mail deletion preserves hub inside undo transaction');
+undo_mail_delete($deleted['undoToken']);
+check(count(connection_rows($mail['id']))===1&&connection_rows($hubId)===[],'undo restores connections from the replacement hub');
+$mail=save_record(['kind'=>'mail','title'=>'Edited undo hub','body'=>'','meta'=>['folder'=>'Local mail']]);connection_add($mail['id'],$a['id']);
+$deleted=delete_local_mail($mail,'Edited context');$hubId=mail_undo_payload($deleted['undoToken'])['hubId'];$hub=get_record($hubId);$hub['body']='<p>User explanation</p>';save_record($hub);
+undo_mail_delete($deleted['undoToken']);check(get_record($hubId)['body']==='<p>User explanation</p>'&&count(connection_rows($hubId))===2,'undo preserves an edited hub and links it to the restored item');
+$recovery=save_record(['kind'=>'mail','title'=>'Recovery context','body'=>'Private recovery content','meta'=>['remote'=>true,'folder'=>'Recovery copies']]);connection_add($recovery['id'],$b['id']);
+recovery_mail_action($recovery,'discard','Recovered relationships');
+$hubs=connection_search('Recovered relationships','documents','');check(count($hubs)===1&&count(connection_rows($hubs[0]['id']))===1,'discarding recovery copies preserves a named hub');
+$count=count(connection_rows($a['id']));$result=delete_connected_record(get_record($a['id']),'Large context');check($count>100&&count(connection_rows($result['hub']['id']))===$count,'hub preservation transfers every edge beyond the first preview page');
