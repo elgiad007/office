@@ -631,7 +631,11 @@ function bindTaskViewControls() {
     ['sort','Sort tasks by',{'due-asc':'Due date · earliest first','due-desc':'Due date · latest first','priority-desc':'Priority · high first','priority-asc':'Priority · low first','title-asc':'Title · A–Z','title-desc':'Title · Z–A','updated-desc':'Updated · newest first','updated-asc':'Updated · oldest first'},p.sort],
   ].map(([key,label,values,selected])=>`<label>${label}<select data-task-pref="${key}" aria-label="${label}">${options(values as Record<string,string>,selected as string)}</select></label>`).join('')}<div><button type="button" data-task-expand>Expand all</button><button type="button" data-task-collapse>Collapse all</button></div></div></details>`);
   const menu=document.querySelector<HTMLDetailsElement>('#task-list-view')!;
-  menu.querySelectorAll<HTMLSelectElement>('[data-task-pref]').forEach(select=>select.onchange=()=>setTaskView({...taskViewPreferences(state.prefs.taskView),[select.dataset.taskPref!]:select.value}));
+  menu.querySelectorAll<HTMLSelectElement>('[data-task-pref]').forEach(select=>select.onchange=()=>{
+    menu.open=false;
+    menu.querySelector('summary')!.focus();
+    setTaskView({...taskViewPreferences(state.prefs.taskView),[select.dataset.taskPref!]:select.value});
+  });
   menu.querySelector<HTMLButtonElement>('[data-task-expand]')!.onclick=()=>{const p=taskViewPreferences(state.prefs.taskView);setTaskView({...p,collapsed:p.collapsed.filter(k=>!k.startsWith(p.group+':'))});};
   menu.querySelector<HTMLButtonElement>('[data-task-collapse]')!.onclick=()=>{const p=taskViewPreferences(state.prefs.taskView);if(p.group!=='none')setTaskView({...p,collapsed:[...p.collapsed.filter(k=>!k.startsWith(p.group+':')),p.group+':*']});};
   menu.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();menu.open=false;menu.querySelector('summary')!.focus();}});

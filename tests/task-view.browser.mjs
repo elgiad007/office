@@ -25,7 +25,11 @@ export async function testTaskView(page,url) {
   const selected=id=>page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id===id,id);
   const open=async()=>{if(!await page.locator('#task-list-view').evaluate(n=>n.open))await page.locator('#task-list-view > summary').click();};
   const save=async action=>{const before=writes;const response=page.waitForResponse(r=>r.url().includes('r=preferences'));await action();await(await response).finished();assert.ok(writes>before);};
-  const choose=async(label,value)=>{await open();await save(()=>page.getByLabel(label,{exact:true}).selectOption(value));await page.locator('#task-list-view > summary').click();};
+  const choose=async(label,value)=>{
+    await open();await save(()=>page.getByLabel(label,{exact:true}).selectOption(value));
+    assert.equal(await page.locator('#task-list-view').evaluate(n=>n.open),false);
+    assert.equal(await page.locator('#task-list-view > summary').evaluate(n=>n===document.activeElement),true);
+  };
   try{
     await page.goto(url+'#tasks');await selected('overdue');
     assert.deepEqual(await order(),['overdue','today','later','custom','undated']);
