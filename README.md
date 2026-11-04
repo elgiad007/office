@@ -99,6 +99,8 @@ Large-message text retrieval is limited to 1.4 MB of text parts; it does not rec
 
 Calendar imports retain raw event sources for original download when available. The calendar does not expand CalDAV/local recurring series or handle invitation replies, exceptions, alarms or remote writes. Google expanded instances are read from its API. Use your existing calendar client for those workflows. Local task recurrence/contact synchronization are also deferred.
 
+Wiki pages open in Read view. Press the insert-mode shortcut (`i` by default) or choose **Edit source** to edit Markdown; choose **View page** to return to the rendered page. New pages open in insert mode.
+
 New items open as unsaved drafts held only in memory. Choose **Save** (or Ctrl/Cmd+S, or `s` in normal mode) to create the first saved copy; edits then auto-save. **Discard Draft** removes an unsaved draft without storing it. Leaving an unsaved draft offers **Save**, **Discard Draft**, and **Cancel**. Refreshing or closing the tab warns about unsaved work. Preview, export, and sync never perform the first save. Save a mail draft before sending or adding attachments. Saved mail drafts also use **Discard Draft**; other saved items use **Delete**. Sending or discarding an email draft returns to its previous mail folder, including account-specific folders, with its search restored. Saving a draft keeps the composer open.
 
 ## Keyboard operation

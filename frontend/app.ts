@@ -36,7 +36,7 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
 };
 const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x'};
-const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiPreview:true,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
+const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const lastSelectedItems=new Map<AppName,string>();
 function rememberSelection() {
   if(state.current)lastSelectedItems.set(state.app,state.current.id);
@@ -504,7 +504,9 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   state.rows=records.filter(r=>!pendingMailDeletes.has(r.id));
   if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
-  state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null;
+  const previousId=state.current?.id;
+  state.current=state.rows.find(r=>r.id===(preferId||previousId))||null;
+  if(state.app==='wiki'&&(enteringApp||state.current?.id!==previousId))state.wikiEditing=false;
   if(state.app==='mail'&&revealMail&&state.current){
     // Use the freshly loaded location: a connection's earlier record can move during navigation.
     const record=state.current;
@@ -718,7 +720,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const bodyKey=viewingMail?JSON.stringify([r.id,r.body,r.bodyHash,mailBody(r,state.prefs)]):undefined;
   const retainBody=viewingMail&&!newlyOpened&&bodyKey===displayedMailBody&&!!panel.querySelector('.mail-reader-header');
   displayedMailBody=bodyKey;
-  const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':isUnsavedDraft()?'Unsaved draft':state.dirty?'Unsaved changes':'Saved'}</span>${!isUnsavedDraft()&&['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiPreview?'Edit':'Preview'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?`<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete selected item'}">${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete'}</button>`:''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+  const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':isUnsavedDraft()?'Unsaved draft':state.dirty?'Unsaved changes':'Saved'}</span>${!isUnsavedDraft()&&['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiEditing?'View page':'Edit source'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?`<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete selected item'}">${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete'}</button>`:''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
   if(toolbarOnly){
     const template=document.createElement('template');template.innerHTML=markup;
     for(const selector of ['.detail-toolbar','.print-only'])panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector)!);
@@ -777,7 +779,7 @@ function detailContent(r: OfficeRecord) {
     const provenance=m.remote?`<p class="muted">Downloaded copy from ${e(mailLocation(r))}. Mail actions update the provider; Sync now refreshes its location.${m.headerOnly?' Only headers are cached.':''}</p>`:'';
     return `<header class="mail-reader-header"><div class="mail-subject-row"><h1>${e(r.title)}</h1><div class="mail-header-badges">${m.folder?`<span class="badge">${e(mailLocation(r))}</span>`:''}${m.remote?'<span class="badge">Cached</span>':''}</div></div><div class="mail-envelope-row"><span class="mail-correspondents" title="${e((m.from||'Unknown')+' → '+(m.to||''))}">${e(m.from||'Unknown')} <span aria-hidden="true">→</span><span class="file-input">to</span> ${e(m.to||'Unspecified recipient')}</span><span class="mail-compact-date" title="${e(date)}">${timestampLabel(date,compactDate)}</span><details data-mail-disclosure="metadata" class="mail-metadata"><summary>Details</summary><div class="mail-reader-popover mail-metadata-popover"><dl>${metadata.map(([label,value])=>`<div><dt>${e(label)}</dt><dd>${label==='Date'||label==='Local time'?timestampLabel(date,value||''):e(value)}</dd></div>`).join('')}</dl>${provenance}<button data-action="message-headers">View message headers</button></div></details></div>${recovery?'<p class="recurrence-note" role="status">This copy is absent from its synchronized folders. It may have moved elsewhere or been deleted. Save locally keeps an independent copy; Discard copy removes only this cached copy.</p>':''}<div class="head-actions mail-reader-actions">${m.from?'<button data-action="reply">Reply</button>':''}<button data-action="forward">Forward</button>${actions}${attachmentSection(r)}<details data-mail-disclosure="more" class="mail-reader-more"><summary>More</summary><div class="mail-reader-popover mail-more-popover">${!recovery&&m.remote?'<button data-action="file-mail">Move / Labels</button>':''}${!recovery?`<button data-action="read">Mark ${m.read?'unread':'read'}</button>`:''}<button data-action="export">Export</button>${(m.rawBase64||m.raw||r.hasOriginal)?'<button data-action="eml">Download original EML</button>':''}${mailDisplayControls(r,state.prefs)}</div></details></div></header>${mailBody(r,state.prefs)}`;
   }
-  if (state.app==='wiki' && state.wikiPreview) return `<span class="eyebrow">${e(r.title.split(':').slice(0,-1).join(' / ')||'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x=>x.id!==r.id && x.body.includes('[['+r.title+']]')).map(x=>`<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('')||'<p class="muted">No pages link here yet.</p>'}</div>`;
+  if (state.app==='wiki' && !state.wikiEditing) return `<span class="eyebrow">${e(r.title.split(':').slice(0,-1).join(' / ')||'Root namespace')}</span><h1>${e(r.title.split(':').at(-1))}</h1><article class="article">${markdown(r.body)}</article><div class="wiki-layout"><span class="eyebrow">Backlinks</span>${state.rows.filter(x=>x.id!==r.id && x.body.includes('[['+r.title+']]')).map(x=>`<p><button class="wiki-link" data-wiki="${e(x.title)}">${e(x.title)}</button></p>`).join('')||'<p class="muted">No pages link here yet.</p>'}</div>`;
   let content=`<form id="record-form" class="detail-form"><label><span class="file-input">${state.app==='wiki'?'Page ID (namespace:page)':'Title'}</span><input class="title-input" name="title" value="${e(r.title)}" required ${disabled} aria-label="Title"></label>`;
   if (state.app==='tasks') content+=`<div class="task-detail-badges">${taskBadges(r)}</div><div class="fields">${field('Due date','due',m.due,'date')}<label>Priority<select name="priority" aria-label="Priority" ${disabled}>${[...new Set(['High','Normal','Low',taskPriority(r)])].map(value=>`<option value="${e(value)}" ${value===taskPriority(r)?'selected':''}>${e(value)}</option>`).join('')}</select></label><label class="check-label"><input type="checkbox" name="done" ${m.done?'checked':''} ${disabled}> Completed</label></div>`;
   if (state.app==='contacts') content+=`<div class="fields">${field('Email','email',m.email,'email')}${field('Phone','phone',m.phone,'tel')}${field('Company','company',m.company)}${field('Group','group',m.group)}</div>`;
@@ -905,7 +907,7 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus=false) { const pane=activePane(); await waitForAttachments(); await leaveEditor(); const previous=state.current?.id,origin=mailDraftOrigin(false);state.current=state.rows.find(r=>r.id===id)||null;if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin); state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
+async function selectRecord(id: string,focus=false) { const pane=activePane(); await waitForAttachments(); await leaveEditor(); const previous=state.current?.id,origin=mailDraftOrigin(false);state.current=state.rows.find(r=>r.id===id)||null;if(state.app==='wiki'){state.wikiEditing=false;setMode('normal');}if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin); state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
   const selected=document.querySelector<HTMLElement>('#selected-item');
   selected?.focus({preventScroll:true});
   selected?.scrollIntoView({block:'nearest',inline:'nearest'});
@@ -944,7 +946,7 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
     const now=new Date().toISOString();
     state.current={...record,id:'draft-'+crypto.randomUUID(),revision:0,created:now,updated:now};unsavedDraft=state.current;
     if(origin)mailDraftOrigins.set(state.current.id,origin);
-    state.dirty=true;state.wikiPreview=false;state.sheet=0;state.cell='A1';
+    state.dirty=true;state.wikiEditing=true;state.sheet=0;state.cell='A1';
     state.selected.clear();selectionAnchor=null;keyboardSelection=false;
     renderWorkspace();
     if(kind==='mail'&&focusBody){
@@ -956,7 +958,7 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
 }
 function enterEdit(preferTitle=false) {
   if (state.current?.meta.remote) {notice('This synced copy is read-only.');return;}
-  if(state.app==='wiki'&&state.wikiPreview){state.wikiPreview=false;renderDetail();}
+  if(state.app==='wiki'&&!state.wikiEditing){state.wikiEditing=true;renderDetail();}
   const target=state.app==='sheets'?document.querySelector<HTMLInputElement>('#formula')!:preferTitle?document.querySelector<HTMLInputElement>('.title-input')!:state.app==='documents'?document.querySelector<HTMLElement>('#rich-editor')!:document.querySelector<HTMLTextAreaElement>('#detail [name=body]')!;
   target?.focus();if(target instanceof HTMLInputElement&&(preferTitle||target.id==='formula'))target.select();setMode('insert');
 }
@@ -1064,7 +1066,7 @@ async function handleClick(event: MouseEvent) {
   await attempt(async()=>{
     if(button.dataset.app!){await changeApp(button.dataset.app! as AppName);return;}
     if(button.dataset.id!){await clickRecord(button.dataset.id!,event);return;}
-    if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){state.wikiPreview=true;await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
+    if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet!);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action!;
@@ -1087,7 +1089,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='image')insertImage();
     if(action==='link')insertLink();
     if(action==='text'){await commit();const html=safeDocument(state.current!.body).replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi,'\n').replace(/<br\s*\/?\s*>/gi,'\n');const doc=new DOMParser().parseFromString(html,'text/html');download(state.current!.title+'.txt',doc.body.textContent);}
-    if(action==='wiki-mode'){await commit();state.wikiPreview=!state.wikiPreview;renderDetail();if(!state.wikiPreview)enterEdit();}
+    if(action==='wiki-mode'){await commit();state.wikiEditing=!state.wikiEditing;renderDetail();if(state.wikiEditing)enterEdit();else setMode('normal');}
     if(action==='history')await history();
     if(action==='delete'){
       if(state.savePromise)await state.savePromise;

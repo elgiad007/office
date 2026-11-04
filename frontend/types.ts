@@ -88,7 +88,7 @@ export interface AppState {
   app: AppName; rows: OfficeRecord[]; current: OfficeRecord | null;
   csrf: string; accounts: Account[]; prefs: Preferences; search: string;
   mode: string; dirty: boolean; selected: Set<string>; sheet: number; cell: string;
-  wikiPreview: boolean; lastActivity: number; syncing: boolean;
+  wikiEditing: boolean; lastActivity: number; syncing: boolean;
   savePromise: Promise<void> | null; mailFolder: string; mailScope: MailScope | null;
   folderOpen: Set<string>;
 }
