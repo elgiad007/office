@@ -16,6 +16,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('Escape','Leave edit mode; clear selection otherwise','Outside dialogs','Saves existing items. New drafts stay unsaved until Save. In formula input, return focus to selected cell.');
   add(k.delete,'Delete selected mail or current item','Normal mode','Local deletion requires confirmation. Connected mail moves to Trash; mail already in Trash and synced read-only items are protected.');
   add(k.undoDelete,'Undo last mail deletion','Mail, normal mode','Includes batches; available for 15 minutes in this page.');
+  add(k.completeTask||'x','Mark current task complete','Tasks, normal mode','Already completed tasks stay complete. New drafts remain unsaved until Save.');
   add(k.archive,'Archive messages','Mail, normal mode');add(k.move,'Quick Move to folder','Mail, normal mode','Selected messages, or current message.');add(k.reply,'Reply to message','Mail, normal mode');
   add('Ctrl+Enter','Send current local draft','Mail, normal or insert mode','Save a new draft first. Confirmation enabled by default; change in Settings → Mail.');
   add(':','Open command line','Normal mode, including Settings','Enter executes once. Escape dismisses suggestions while keeping command mode and text; with suggestions closed, Escape exits and restores focus.');

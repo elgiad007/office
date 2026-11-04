@@ -27,7 +27,7 @@ const apps = {
     wiki: { name: 'Wiki', singular: 'page', empty: 'No pages yet.', hint: 'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].', icon: 'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3' },
     sheets: { name: 'Sheets', singular: 'workbook', empty: 'No workbooks yet.', hint: 'Create a workbook or import a CSV file.', icon: 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18' },
 };
-const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd', undoDelete: 'u' };
+const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd', undoDelete: 'u', completeTask: 'x' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
@@ -1161,6 +1161,19 @@ function collect() {
 function markDirty() { collect(); state.dirty = true; const s = document.querySelector('#save-status'); if (s)
     s.textContent = isUnsavedDraft() ? 'Unsaved draft' : 'Unsaved changes'; clearTimeout(saveTimer); if (!isUnsavedDraft())
     saveTimer = setTimeout(() => void attempt(() => commit()), 800); }
+async function completeTask() {
+    if (state.app !== 'tasks' || !state.current || state.current.meta.remote)
+        return;
+    const checkbox = document.querySelector('#record-form input[name="done"]');
+    if (!checkbox || checkbox.checked)
+        return;
+    const id = state.current.id, pane = activePane();
+    checkbox.checked = true;
+    markDirty();
+    await commit();
+    if (state.app === 'tasks' && state.current?.id === id)
+        restorePane(pane);
+}
 async function requireSaved() {
     if (isUnsavedDraft())
         throw Error('Save this draft first.');
@@ -2373,6 +2386,11 @@ document.addEventListener('keydown', event => {
     if (action === 'new') {
         event.preventDefault();
         void attempt(createRecord);
+        return;
+    }
+    if (action === 'completeTask' && state.app === 'tasks' && !event.shiftKey) {
+        event.preventDefault();
+        void attempt(completeTask);
         return;
     }
     if (action === 'edit' || (state.app === 'sheets' && key === 'Enter')) {
