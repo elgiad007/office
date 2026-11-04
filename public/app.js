@@ -1962,6 +1962,14 @@ function focusContent() {
         entry.focus({ preventScroll: true });
     }
 }
+function focusList() {
+    const entry = document.querySelector('#selected-item') || document.querySelector('#items') || document.querySelector('#main');
+    if (entry) {
+        if (entry.id !== 'selected-item')
+            entry.tabIndex = -1;
+        entry.focus({ preventScroll: true });
+    }
+}
 function scrollMailBody(target, direction) {
     const frame = target.closest('.mail-html');
     if (frame) {
@@ -1994,7 +2002,7 @@ function restorePane(pane) {
         }
     }
     else
-        (document.querySelector('#selected-item') || document.querySelector('#main'))?.focus({ preventScroll: true });
+        focusList();
 }
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented)
@@ -2067,7 +2075,7 @@ document.addEventListener('keydown', event => {
     if (event.target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input') && ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key))
         return;
     const target = event.target;
-    if (event.key === 'Tab' && !event.shiftKey && target.matches('#selected-item')) {
+    if (event.key === 'Tab' && !event.shiftKey && (target.matches('#selected-item') || state.current && target.id === 'items')) {
         event.preventDefault();
         keySequence = '';
         focusContent();
@@ -2076,7 +2084,7 @@ document.addEventListener('keydown', event => {
     if (event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
         event.preventDefault();
         keySequence = '';
-        document.querySelector('#selected-item')?.focus({ preventScroll: true });
+        focusList();
         return;
     }
     if (event.key === ':' && !event.isComposing && state.mode === 'normal') {
@@ -2220,7 +2228,7 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'left') {
         event.preventDefault();
-        document.querySelector('#selected-item')?.focus();
+        focusList();
         return;
     }
     if (action === 'right') {

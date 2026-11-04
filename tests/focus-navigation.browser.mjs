@@ -24,6 +24,23 @@ export async function testFocusNavigation(page,url) {
       const box=await page.locator('#detail').boundingBox();
       await page.keyboard.press('Tab');
       assert.equal(await page.locator(entry).evaluate(node=>node===document.activeElement),true,kind+' enters nonediting content');
+      if(['mail','tasks','calendar'].includes(kind)){
+        await page.locator('#search').fill('no matching focus records');
+        assert.equal(await page.locator('#items [data-id]').count(),0,kind+' filter hides selected row');
+        assert.equal(await page.locator('#detail').textContent().then(text=>text.includes(`Focus ${kind} 1`)),true,kind+' filter retains content');
+        await page.locator(entry).focus();
+        for(const key of ['h','ArrowLeft','Shift+Tab']){
+          await page.keyboard.press(key);
+          assert.equal(await page.locator('#items').evaluate(node=>node===document.activeElement),true,kind+' '+key+' focuses empty list');
+          await page.keyboard.press('Escape');
+          assert.equal(await page.locator('#items').evaluate(node=>node===document.activeElement),true,kind+' empty-list restoration keeps focus');
+          await page.keyboard.press('Tab');
+          assert.equal(await page.locator(entry).evaluate(node=>node===document.activeElement),true,kind+' empty list Tab returns to retained content');
+        }
+        await page.locator('#search').fill('');
+        await page.locator('#selected-item').focus();
+        await page.keyboard.press('Tab');
+      }
       assert.equal(await page.locator('#detail').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
       assert.deepEqual(await page.locator('#detail').boundingBox(),box,'Focus ring causes no layout shift');
       if(kind==='mail'){
@@ -71,6 +88,12 @@ export async function testFocusNavigation(page,url) {
           }else{
             await page.waitForFunction(()=>!document.querySelector('#selected-item'));
             assert.equal(await page.locator(kind==='calendar'?'#items':'#detail').evaluate(node=>node===document.activeElement),true,kind+' empty workspace keeps focus');
+            await page.keyboard.press('h');
+            assert.equal(await page.locator('#items').evaluate(node=>node===document.activeElement),true,kind+' empty workspace focuses list');
+            await page.keyboard.press('Escape');
+            assert.equal(await page.locator('#items').evaluate(node=>node===document.activeElement),true,kind+' empty workspace restores list');
+            await page.keyboard.press('Tab');
+            assert.equal(await page.locator('#items').evaluate(node=>node===document.activeElement),false,kind+' empty workspace Tab is not trapped');
           }
         }
       }
