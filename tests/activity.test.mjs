@@ -3,7 +3,7 @@ import test from 'node:test';
 import {createActivity} from '../public/activity.js';
 
 test('activity opens with the requested level and reuses an open dialog',async t=>{
-  const controls=new Map(['#activity-level','#activity-account','#activity-close','#activity-copy','#activity-clear','#activity-entries','#activity-count','#activity-feedback'].map(id=>[id,{value:'',innerHTML:''}]));
+  const controls=new Map(['#activity-level','#activity-account','#activity-close','#activity-copy','#activity-clear','#activity-entries','#activity-count','#activity-feedback'].map(id=>[id,{value:'',innerHTML:'',querySelectorAll:()=>[],querySelector:()=>null,setAttribute(){},removeAttribute(){},focus(){}}]));
   let shows=0;
   const dialog={open:false,innerHTML:'',querySelector:id=>controls.get(id),querySelectorAll:()=>[controls.get('#activity-level'),controls.get('#activity-account')],addEventListener(){},showModal(){assert.equal(this.open,false);this.open=true;shows++;},close(){this.open=false;}};
   const elements=new Map(['#activity-status','#notice','#view-activity'].map(id=>[id,{dataset:{},setAttribute(){}}]));

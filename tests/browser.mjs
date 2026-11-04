@@ -30,7 +30,7 @@ import {testMailRead} from './mail-read.browser.mjs';
 import {testMailCache} from './mail-cache.browser.mjs';
 import {testMailHeaders} from './mail-headers.browser.mjs';
 import {testMailOperationQueue} from './mail-operation-queue.browser.mjs';
-import {testActivity} from './activity.browser.mjs';
+import {testActivity,testActivityKeyboard} from './activity.browser.mjs';
 import {testLargeMail} from './large-mail.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 import {testKeyboardScroll} from './keyboard-scroll.browser.mjs';
@@ -119,6 +119,7 @@ try{
  await testMailCache(page,url);
  await testMailHeaders(page,url);
  await testMailOperationQueue(page,url);
+ await testActivityKeyboard(page,url);
  await testActivity(page,url);
  await testSyncProgress(page,url);
  await testSyncScheduling(page,url);

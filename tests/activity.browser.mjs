@@ -1,5 +1,59 @@
 import assert from 'node:assert/strict';
 
+export async function testActivityKeyboard(page,url) {
+  let preferences={},entries=Array.from({length:40},(_,index)=>({id:index+1,time:new Date().toISOString(),level:index%2?'info':'warning',account:'Fixture',operation:'Keyboard fixture',message:'Event '+(index+1),duration_ms:null,phase:'diagnostic'}));
+  const routes=target=>target.pathname.endsWith('/api.php');
+  await page.route(routes,route=>{
+    const action=new URL(route.request().url()).searchParams.get('r');
+    if(action==='status')return route.fulfill({json:{authenticated:true,activity:true,csrf:'fixture',preferences}});
+    if(action==='records')return route.fulfill({json:{records:[]}});
+    if(action==='accounts')return route.fulfill({json:{accounts:[]}});
+    if(action==='activity'){
+      if(route.request().method()==='POST'){entries=[];return route.fulfill({json:{ok:true}});}
+      return route.fulfill({json:{entries:entries.filter(entry=>entry.id>Number(new URL(route.request().url()).searchParams.get('after')||0))}});
+    }
+    throw Error('Unexpected activity keyboard route '+action);
+  });
+  const list=page.locator('#activity-entries'),selected=list.locator('[aria-selected=true]');
+  const expectSelected=async id=>{assert.equal(await selected.getAttribute('data-entry-id'),String(id));assert.equal(await list.getAttribute('aria-activedescendant'),'activity-entry-'+id);};
+  const focused=()=>list.evaluate(node=>node===document.activeElement);
+  try {
+    await page.goto(url+'?activity-keyboard#mail');
+    await page.getByRole('button',{name:/View activity \(/}).click();
+    assert.equal(await focused(),true);await expectSelected(40);
+    for(const [key,id] of [['ArrowDown',39],['ArrowRight',38],['ArrowLeft',39],['ArrowUp',40],['j',39],['k',40],['n',39],['N',40],['G',1],['Home',40],['End',1]]){
+      await page.keyboard.press(key);await expectSelected(id);
+    }
+    assert.ok(await list.evaluate(node=>node.scrollTop>0),'Last event scrolls into view');
+    await page.keyboard.press('g');await page.keyboard.press('g');await expectSelected(40);
+    await page.keyboard.press('G');
+    const selectedBounds=await selected.boundingBox(),listBounds=await list.boundingBox();
+    assert.ok(selectedBounds.y>=listBounds.y&&selectedBounds.y+selectedBounds.height<=listBounds.y+listBounds.height+1);
+    entries.push({...entries[0],id:41,message:'New event'});
+    await list.locator('[data-entry-id="41"]').waitFor();
+    await expectSelected(1);assert.equal(await focused(),true);
+    await page.keyboard.press('Shift+Tab');assert.equal(await page.locator('#activity-clear').evaluate(node=>node===document.activeElement),true);
+    await page.keyboard.press('Tab');assert.equal(await focused(),true);
+    await page.locator('#activity-level').focus();await page.locator('#activity-level').selectOption('info');
+    await expectSelected(40);
+    assert.equal(await page.locator('#activity-level').evaluate(node=>node===document.activeElement),true,'Filtering keeps control focus');
+    await list.focus();await page.keyboard.press('j');await expectSelected(38);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#view-activity').evaluate(node=>node===document.activeElement),true);
+    preferences={keys:{down:'z',up:'q'}};
+    await page.reload();await page.getByRole('button',{name:/View activity \(/}).click();
+    await expectSelected(41);await page.keyboard.press('z');await expectSelected(40);await page.keyboard.press('q');await expectSelected(41);
+    await page.keyboard.press('j');await expectSelected(41);
+    await page.getByRole('button',{name:'Clear log',exact:true}).click();
+    await list.getByText('No recent activity matches these filters.',{exact:true}).waitFor();
+    await list.focus();await page.keyboard.press('j');await page.keyboard.press('G');
+    assert.equal(await list.getAttribute('aria-activedescendant'),null);
+    await page.keyboard.press('Escape');await page.getByRole('button',{name:'View activity',exact:true}).click();assert.equal(await focused(),true);
+    await page.keyboard.press('Escape');
+    console.log('PASS activity initial focus, arrows, bindings, n/N, gg/G, scrolling, polling, filters, Tab, Escape and empty log.');
+  } finally {await page.unroute(routes);}
+}
+
 export async function testActivity(page,url) {
   let streamingAccount=false;
   let syncHold=null,releaseSync;
