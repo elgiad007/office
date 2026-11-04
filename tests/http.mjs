@@ -93,7 +93,7 @@ try{
  await a.call('import',{format:'ics',text:ics});assert.equal((await a.call('records&kind=calendar')).records[0].meta.rawIcs,ics);
  const account=await a.call('account-save',{type:'imap',label:'Fixture account',host:'imap.example.com',smtp:'smtp.example.com',email:'test@example.com',username:'test@example.com',password:'a-secret-never-exported'});
  // Seed an isolated account cache, then exercise the authenticated HTTP routes.
- const seed="require getcwd().'/app/bootstrap.php';require getcwd().'/app/connectors.php';$a=account($argv[1]);foreach(['one','two'] as $id)cache_remote($a,'fixture:'.$id,'mail','Recovery '.$id,'Cached body',['folder'=>'Recovery copies','providerId'=>$id,'rawBase64'=>base64_encode('Original EML')]);";
+ const seed="require getcwd().'/app/bootstrap.php';require getcwd().'/app/connectors.php';$a=account($argv[1]);foreach(['one','two'] as $id)cache_remote($a,'fixture:'.$id,'mail','Recovery '.$id,'Cached body',['folder'=>'Recovery copies','providerId'=>$id,'hasAttachments'=>false,'rawBase64'=>base64_encode('Original EML')]);attachment_store(remote_id($a['id'],'fixture:one'),['part'=>'2','name'=>'cached.txt','type'=>'text/plain'],'Cached file');";
  execFileSync(php,[...(extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite','-d','extension=openssl','-d','extension=curl']:[]),'-r',seed,'--',account.id],{env:{...process.env,OFFICE_DATA_DIR:a.dir},windowsHide:true});
  const recoveries=(await a.call('records&kind=mail')).records.filter(r=>r.meta.remote);
  const recovery=recoveries[0],other=recoveries[1];
@@ -101,6 +101,10 @@ try{
  const summary=summaries.find(r=>r.id===recovery.id);
  assert.equal(summary.hasOriginal,true);assert.equal(summary.summary,true);assert.equal(summary.body,'Cached body');
  assert.ok(!('rawBase64' in summary.meta));assert.equal(summary.contentHash,recovery.contentHash);
+ const cachedSummary=summaries.find(r=>r.meta.attachments?.length);
+ assert.equal(cachedSummary.meta.hasAttachments,true,'Cached files override stale attachment-free metadata');
+ assert.equal(cachedSummary.meta.attachments[0].name,'cached.txt');
+ assert.deepEqual(cachedSummary.meta.attachments,(await a.call('record&id='+cachedSummary.id)).record.meta.attachments);
  assert.equal((await a.call('record&id='+recovery.id)).record.meta.rawBase64,recovery.meta.rawBase64);
  await a.call('mail-action',{id:recovery.id,revision:recovery.revision,action:'discard'},403,'bad-token');
  const revisionConflict=await a.call('mail-action',{id:recovery.id,revision:0,action:'discard'},409);

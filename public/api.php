@@ -67,10 +67,14 @@ try {
     if ($route==='logout' && $method==='POST') { $_SESSION=[]; session_destroy(); json_response(['ok'=>true]); }
     if ($route==='records' && $method==='GET') {
         $kind=$_GET['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
-        $q=db()->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC'); $q->execute([$kind]);
-        $records=array_map('record_row',$q->fetchAll());
-        if($kind==='mail' && ($_GET['summaries']??'')==='1') $records=array_map('mail_list_record',$records);
-        session_write_close();json_response(['records'=>$records]);
+        session_write_close();
+        $db=db();$q=$db->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC');$q->execute([$kind]);
+        if($kind==='mail' && ($_GET['summaries']??'')==='1'){
+            $cached=[];$files=$db->query('SELECT record_id,part,name,type,size FROM mail_files ORDER BY rowid');
+            foreach($files as $file){$id=$file['record_id'];unset($file['record_id']);$cached[$id][]=$file+['available'=>true];}
+            $records=[];foreach($q as $row)$records[]=mail_list_record(record_row($row,$cached[$row['id']]??[]));
+        }else $records=array_map('record_row',$q->fetchAll());
+        json_response(['records'=>$records]);
     }
     if ($route==='record' && $method==='GET') {session_write_close();json_response(['record'=>get_record((string)($_GET['id']??''))]);}
     if($route==='mail-files' && $method==='POST'){
@@ -169,6 +173,7 @@ try {
         save_google_settings($input); json_response(['ok'=>true]);
     }
     if ($route==='accounts' && $method==='GET') {
+        session_write_close();
         $rows=db()->query('SELECT id,label,type,last_sync,error FROM accounts ORDER BY label')->fetchAll();
         foreach ($rows as &$row) $row['folders']=setting('mail-folders:'.$row['id'],[]);
         unset($row); json_response(['accounts'=>$rows]);

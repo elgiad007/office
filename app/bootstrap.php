@@ -91,7 +91,7 @@ function decrypt_secret(string $value): array {
     $plain=openssl_decrypt(substr($bytes,28),'aes-256-gcm',$key,OPENSSL_RAW_DATA,substr($bytes,0,12),substr($bytes,12,16));
     if ($plain===false) fail('Cannot unlock account. Reconnect it.'); return json_decode($plain,true,512,JSON_THROW_ON_ERROR);
 }
-function record_row(array $row): array {
+function record_row(array $row,?array $cachedFiles=null): array {
     $row['meta']=json_decode($row['meta'],true,64,JSON_THROW_ON_ERROR);
     if ($row['kind']==='mail' && ($row['meta']['folder']??'')!=='Drafts' && !isset($row['meta']['hasHtml'])) {
         $raw=isset($row['meta']['rawBase64']) && is_string($row['meta']['rawBase64']) && strlen($row['meta']['rawBase64'])<=1866668 ? base64_decode($row['meta']['rawBase64'],true) : ($row['meta']['raw']??'');
@@ -120,7 +120,10 @@ function record_row(array $row): array {
     if($row['kind']==='mail' && !empty($row['meta']['remote']))$row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
     if($row['kind']==='mail'){
         unset($row['meta']['attachments']);
-        try{$files=attachment_manifest($row);}catch(HttpError){$files=attachment_cached($row['id']);}
+        // The list supplies cached file metadata in one query. A confirmed empty
+        // message has no MIME manifest to build, but cached files still win.
+        if($cachedFiles!==null && ($row['meta']['hasAttachments']??null)===false && empty($row['meta']['mimeParts']) && empty($row['meta']['filePartsLocal']))$files=$cachedFiles;
+        else try{$files=attachment_manifest($row,$cachedFiles);}catch(HttpError){$files=$cachedFiles??attachment_cached($row['id']);}
         if($files){$row['meta']['attachments']=$files;$row['meta']['hasAttachments']=true;}
     }
     $row['revision']=(int)$row['revision']; return $row;
@@ -128,8 +131,9 @@ function record_row(array $row): array {
 /** Keep originals on the server during normal browsing. Bodies remain available
  * for instant text reading, replies and full-body search. */
 function mail_list_record(array $row): array {
-    $row['contentHash']=hash('sha256',$row['meta']['rawBase64']??$row['meta']['raw']??'');
-    $row['bodyHash']=hash('sha256',$row['meta']['bodyRawBase64']??$row['meta']['rawBase64']??$row['meta']['raw']??'');
+    $original=$row['meta']['rawBase64']??$row['meta']['raw']??'';
+    $row['contentHash']=$row['contentHash']??hash('sha256',$original);
+    $row['bodyHash']=isset($row['meta']['bodyRawBase64'])?hash('sha256',$row['meta']['bodyRawBase64']):$row['contentHash'];
     $row['hasOriginal']=isset($row['meta']['rawBase64']) || isset($row['meta']['raw']);
     $row['summary']=true;
     unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts']);

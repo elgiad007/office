@@ -230,8 +230,11 @@ function authView(status: Status) {
 async function boot() {
   lastMailDelete=undefined;
   try { const status=await api('status'); state.csrf=status.csrf;activity.configure(!!status.authenticated&&!!status.activity); if (!status.authenticated) { authView(status); return; }
-    state.prefs=status.preferences||{}; applyTheme(); state.accounts=(await api('accounts')).accounts;
-    const hash=location.hash.slice(1); state.app=apps[hash]||hash==='settings'?hash as AppName:'mail'; shell(); await load();
+    state.prefs=status.preferences||{}; applyTheme();
+    const hash=location.hash.slice(1); state.app=apps[hash]||hash==='settings'?hash as AppName:'mail';
+    const initial=state.app==='settings'?null:api(`records&kind=${state.app}${state.app==='mail'?'&summaries=1':''}`);
+    const [accounts,records]=await Promise.all([api('accounts'),initial]);state.accounts=accounts.accounts;
+    shell(); await load(undefined,{},records?.records);
     if (state.accounts.length) void syncAccounts(false);
   } catch(cause) { const error=asError(cause); root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector<HTMLElement>('#retry')!.onclick=boot; }
 }
@@ -397,7 +400,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   }
   return snapshot;
 }
-async function load(preferId?: string,{selectFirst=true,preserveSelection=false}={}) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false}={},initialRecords?: OfficeRecord[]) {
   await waitForAttachments();
   if(state.app!=='mail')displayedMailId=null;
   itemMenus.close();
@@ -414,7 +417,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
   if (state.app==='settings') { state.current=null; renderSettings(); return; }
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
-  do{version=mailDeleteVersion+mailReadVersion;records=(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
+  do{version=mailDeleteVersion+mailReadVersion;records=initialRecords??(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;initialRecords=undefined;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
   const contentFocused=preserveSelection&&activePane()==='content'&&!editable(document.activeElement as HTMLElement);
   const listViewport=preserveSelection?captureMailListViewport():undefined;

@@ -358,11 +358,13 @@ async function boot() {
         }
         state.prefs = status.preferences || {};
         applyTheme();
-        state.accounts = (await api('accounts')).accounts;
         const hash = location.hash.slice(1);
         state.app = apps[hash] || hash === 'settings' ? hash : 'mail';
+        const initial = state.app === 'settings' ? null : api(`records&kind=${state.app}${state.app === 'mail' ? '&summaries=1' : ''}`);
+        const [accounts, records] = await Promise.all([api('accounts'), initial]);
+        state.accounts = accounts.accounts;
         shell();
-        await load();
+        await load(undefined, {}, records?.records);
         if (state.accounts.length)
             void syncAccounts(false);
     }
@@ -609,7 +611,7 @@ function captureMailReader() {
     }
     return snapshot;
 }
-async function load(preferId, { selectFirst = true, preserveSelection = false } = {}) {
+async function load(preferId, { selectFirst = true, preserveSelection = false } = {}, initialRecords) {
     await waitForAttachments();
     if (state.app !== 'mail')
         displayedMailId = null;
@@ -643,7 +645,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
     let records, version;
     do {
         version = mailDeleteVersion + mailReadVersion;
-        records = (await api(`records&kind=${app}${app === 'mail' ? '&summaries=1' : ''}`)).records;
+        records = initialRecords ?? (await api(`records&kind=${app}${app === 'mail' ? '&summaries=1' : ''}`)).records;
+        initialRecords = undefined;
         if (state.app !== app)
             return;
     } while (app === 'mail' && version !== mailDeleteVersion + mailReadVersion);

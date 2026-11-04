@@ -80,11 +80,11 @@ function attachment_raw(array $r): ?string {
     $raw=isset($r['meta']['rawBase64'])?base64_decode($r['meta']['rawBase64'],true):($r['meta']['raw']??null);
     return is_string($raw)?$raw:null;
 }
-function attachment_manifest(array $r): array {
-    if(!empty($r['meta']['filePartsLocal']))return isset($r['id'])?attachment_cached($r['id']):[];
+function attachment_manifest(array $r,?array $cachedFiles=null): array {
+    if(!empty($r['meta']['filePartsLocal']))return $cachedFiles??(isset($r['id'])?attachment_cached($r['id']):[]);
     $parts=$r['meta']['mimeParts']??null;
     if($parts===null && ($raw=attachment_raw($r))!==null)$parts=attachment_mime_parts($raw);
-    $cached=isset($r['id'])?attachment_cached($r['id']):[];$map=array_column($cached,null,'part');$result=[];
+    $cached=$cachedFiles??(isset($r['id'])?attachment_cached($r['id']):[]);$map=array_column($cached,null,'part');$result=[];
     foreach($parts??[] as $p)if($p['attachment']){
         $a=array_intersect_key($p,array_flip(['part','name','type','size','encodedSize']));$a['available']=isset($map[$p['part']]) || isset($p['bytes']);
         if(isset($p['bytes'])){try{$a['size']=strlen(attachment_decode($p['bytes'],$p['encoding']));}catch(HttpError){$a['available']=false;}}
