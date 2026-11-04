@@ -1,4 +1,3 @@
 # To Do List
 
-- [ ] Remove requirement to save email draft before sending.
-- [ ] 
+- Remove requirement to save email draft before sending.
