@@ -1,5 +1,5 @@
 // Generated from frontend/mail-sort.ts by pnpm build. Do not edit.
-function messageTime(record) {
+export function messageTime(record) {
     for (const value of [record.meta?.date, record.meta?.sentAt]) {
         if (typeof value !== 'string' || !value.trim())
             continue;

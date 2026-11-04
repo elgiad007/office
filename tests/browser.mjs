@@ -17,6 +17,7 @@ import {testMailUndo} from './mail-undo.browser.mjs';
 import {testMailDeleteSelection} from './mail-delete-selection.browser.mjs';
 import {testMailSelectionSync} from './mail-selection-sync.browser.mjs';
 import {testMailSort} from './mail-sort.browser.mjs';
+import {testMailView} from './mail-view.browser.mjs';
 import {testMailReply} from './mail-reply.browser.mjs';
 import {testMailSend} from './mail-send.browser.mjs';
 import {testMailSender} from './mail-sender.browser.mjs';
@@ -100,6 +101,7 @@ try{
  await testMailDeleteSelection(page,url);
  await testMailSelectionSync(page,url);
  await testMailSort(page,url);
+ await testMailView(page,url);
  await testMailReply(page,url);
  await testMailSend(page,url);
  await testMailArchive(page,url);

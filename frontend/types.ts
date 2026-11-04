@@ -63,12 +63,14 @@ export interface Account {
 }
 export interface Preferences {
   mailList?: MailListLayout;
+  mailView?: MailViewPreferences;
   theme?: string; density?: string; accent?: string;
   keys?: Record<string, string>;
   mailDisplay?: string; defaultMailAccount?: string;
   keepRecoveryCopies?: boolean; confirmBeforeSend?: boolean;
   mailOffline?: boolean;
 }
+export interface MailViewPreferences {group: 'date' | 'sender' | 'none'; sort: 'date-desc' | 'date-asc' | 'sender-asc' | 'sender-desc' | 'subject-asc' | 'subject-desc'; collapsed: string[]}
 export type MailListField = 'none' | 'sender' | 'date' | 'subject' | 'attachment' | 'preview';
 export interface MailListSlot {field: MailListField; size: 'small' | 'normal' | 'large'}
 export interface MailListLayout {sender: 'both' | 'name' | 'email'; rows: {left: MailListSlot; right: MailListSlot}[]}

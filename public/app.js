@@ -12,6 +12,7 @@ import { messageHeaders, setupHeaderViewer } from './mail-headers.js';
 import { attachmentSection, bindAttachments, waitForAttachments } from './mail-attachments.js';
 import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
+import { mailView, mailViewPreferences } from './mail-view.js';
 import { renderMailListCopy, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
 import { createCalendar, dateOnly } from './calendar.js';
@@ -397,10 +398,12 @@ function searchableText(record) {
     const { rawBase64, raw, headersBase64, ...meta } = record.meta;
     return (record.title + ' ' + record.body + ' ' + JSON.stringify(meta)).toLocaleLowerCase();
 }
-function filteredRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'calendar' || calendar.isVisible(r)) && (state.app !== 'mail' || (state.mailScope ? matchesMailScope(r, state.mailScope, state.accounts) : state.mailFolder === 'all' ? !['Recovery copies', 'Not in Inbox', 'Trash'].includes(r.meta.folder || '') : state.mailFolder === 'Recovery copies' ? ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '') : (r.meta.folder || 'Archive') === state.mailFolder)) && (!q || searchableText(r).includes(q))); }
+function matchingRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'calendar' || calendar.isVisible(r)) && (state.app !== 'mail' || (state.mailScope ? matchesMailScope(r, state.mailScope, state.accounts) : state.mailFolder === 'all' ? !['Recovery copies', 'Not in Inbox', 'Trash'].includes(r.meta.folder || '') : state.mailFolder === 'Recovery copies' ? ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '') : (r.meta.folder || 'Archive') === state.mailFolder)) && (!q || searchableText(r).includes(q))); }
+function filteredRows() { const rows = matchingRows(); return state.app === 'mail' ? mailView(rows, state.prefs.mailView).rows : rows; }
+function navigableRows() { return state.app === 'mail' ? mailView(matchingRows(), state.prefs.mailView).visible : filteredRows(); }
 async function deleteMailImmediately(rows, operation, undoable = false) {
     const pane = activePane();
-    const ids = new Set(rows.map(r => r.id)), visible = filteredRows().map(r => r.id), currentId = state.current?.id;
+    const ids = new Set(rows.map(r => r.id)), visible = navigableRows().map(r => r.id), currentId = state.current?.id;
     const context = JSON.stringify([state.mailFolder, state.mailScope, state.search]);
     let gesture;
     if (undoable) {
@@ -461,7 +464,7 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
                 for (const id of reconciled)
                     state.selected.delete(id);
                 if (reconciled.has(state.current?.id)) {
-                    const visibleIds = new Set(filteredRows().map(r => r.id));
+                    const visibleIds = new Set(navigableRows().map(r => r.id));
                     const next = [...visible.slice(index + 1), ...visible.slice(0, index).reverse()].find(id => !ids.has(id) && !reconciled.has(id) && visibleIds.has(id));
                     state.current = state.rows.find(r => r.id === next) || null;
                     renderList();
@@ -491,7 +494,7 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
                     state.rows.push(structuredClone(latestMail(row.id) || row));
             state.rows.sort(compareMail);
             if (!state.current && context === JSON.stringify([state.mailFolder, state.mailScope, state.search])) {
-                state.current = filteredRows()[0] || null;
+                state.current = navigableRows()[0] || null;
                 renderDetail();
             }
         }
@@ -547,7 +550,7 @@ async function undoMailDelete() {
     }
 }
 function mailDeletionReload() {
-    const currentId = state.current?.id, ids = filteredRows().map(r => r.id);
+    const currentId = state.current?.id, ids = navigableRows().map(r => r.id);
     const context = () => JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]);
     const originalContext = context(), pane = activePane();
     return async (removedIds) => {
@@ -561,7 +564,7 @@ function mailDeletionReload() {
             restorePane(pane);
             return;
         }
-        const visible = new Set(filteredRows().map(r => r.id)), removed = new Set(removedIds), index = ids.indexOf(currentId);
+        const visible = new Set(navigableRows().map(r => r.id)), removed = new Set(removedIds), index = ids.indexOf(currentId);
         const nextId = [...ids.slice(index + 1), ...ids.slice(0, index).reverse()].find(id => !removed.has(id) && visible.has(id));
         state.current = state.rows.find(r => r.id === nextId) || null;
         renderList();
@@ -671,7 +674,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
         if (state.mailScope && state.current && !editingDraft && !matchesMailScope(state.current, state.mailScope, state.accounts))
             state.current = null;
         if (!state.current && selectFirst)
-            state.current = filteredRows()[0] || null;
+            state.current = navigableRows()[0] || null;
     }
     if (preserveSelection) {
         const rows = filteredRows(), visible = new Set(rows.map(r => r.id));
@@ -684,7 +687,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
             const bottommostSurvivor = [...listViewport.visible].reverse().find(row => visible.has(row.id));
             // Keep a viewport of rows after the anchor so the restored offset does not clamp at the paging cutoff.
             if (bottommostSurvivor)
-                mailListLimit = Math.max(mailListLimit, rows.findIndex(row => row.id === bottommostSurvivor.id) + 1 + listViewport.visible.length);
+                mailListLimit = Math.max(mailListLimit, navigableRows().findIndex(row => row.id === bottommostSurvivor.id) + 1 + listViewport.visible.length);
         }
     }
     const reuseWorkspace = preserveSelection && state.app === 'mail' && !!readerSnapshot && !!document.querySelector('#detail.mail-reader');
@@ -715,8 +718,9 @@ function renderWorkspace(readerSnapshot) {
     }
     const header = state.app === 'mail' ? '<h1 class="file-input">Mail</h1>' : `<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ New ${a.singular}</button></div></section>`;
     document.querySelector('#main').innerHTML = `${header}<div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
-    document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
+    document.querySelector('#search').oninput = event => { state.search = event.target.value; mailListLimit = 100; renderList(); };
     if (state.app === 'mail') {
+        bindMailViewControls();
         const folderNavigation = document.querySelector('#mail-folder-navigation');
         folderNavigation.innerHTML = '<div class="mail-folder-panel-head"><strong>Mail folders</strong><button data-action="close-mail-folders" aria-label="Close mail folders">✕</button></div>';
         folderNavigation.insertAdjacentHTML('beforeend', `<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox', 'Drafts', 'Sent', 'Archive', 'Trash', 'Local mail', 'Recovery copies', 'Sending', 'Delivery uncertain'].map(folder => `<option ${state.mailFolder === folder ? 'selected' : ''}>${folder}</option>`).join('')}</select>`);
@@ -727,7 +731,8 @@ function renderWorkspace(readerSnapshot) {
                 await commit();
                 state.mailFolder = folder;
                 state.mailScope = null;
-                state.current = filteredRows()[0] || null;
+                mailListLimit = 100;
+                state.current = navigableRows()[0] || null;
                 state.selected.clear();
                 selectionAnchor = null;
                 keyboardSelection = false;
@@ -752,31 +757,78 @@ function renderWorkspace(readerSnapshot) {
     renderDetail(readerSnapshot);
 }
 let mailListLimit = 100;
+let mailViewSave = Promise.resolve();
+function setMailView(value) {
+    state.prefs = { ...state.prefs, mailView: mailViewPreferences(value) };
+    mailListLimit = 100;
+    renderList();
+    // Serialize rapid menu/header changes so an older request cannot overwrite the latest view.
+    mailViewSave = mailViewSave.catch(() => { }).then(() => api('preferences', { preferences: state.prefs }));
+    void attempt(() => mailViewSave);
+}
+function bindMailViewControls() {
+    const prefs = mailViewPreferences(state.prefs.mailView);
+    const options = (values, selected) => Object.entries(values).map(([key, label]) => `<option value="${key}" ${key === selected ? 'selected' : ''}>${label}</option>`).join('');
+    document.querySelector('.list-summary').insertAdjacentHTML('beforeend', `<details id="mail-list-view"><summary>List view</summary><div class="mail-view-menu"><label>Group by<select aria-label="Group mail by" data-mail-group>${options({ date: 'Date', sender: 'Sender', none: 'None' }, prefs.group)}</select></label><label>Sort by<select aria-label="Sort mail by" data-mail-sort>${options({ 'date-desc': 'Date · newest first', 'date-asc': 'Date · oldest first', 'sender-asc': 'Sender · A–Z', 'sender-desc': 'Sender · Z–A', 'subject-asc': 'Subject · A–Z', 'subject-desc': 'Subject · Z–A' }, prefs.sort)}</select></label><div><button type="button" data-mail-expand>Expand all</button><button type="button" data-mail-collapse>Collapse all</button></div></div></details>`);
+    const menu = document.querySelector('#mail-list-view');
+    menu.querySelector('[data-mail-group]').onchange = event => setMailView({ ...mailViewPreferences(state.prefs.mailView), group: event.target.value });
+    menu.querySelector('[data-mail-sort]').onchange = event => setMailView({ ...mailViewPreferences(state.prefs.mailView), sort: event.target.value });
+    menu.querySelector('[data-mail-expand]').onclick = () => { const p = mailViewPreferences(state.prefs.mailView); setMailView({ ...p, collapsed: p.collapsed.filter(key => !key.startsWith(p.group + ':')) }); };
+    menu.querySelector('[data-mail-collapse]').onclick = () => { const p = mailViewPreferences(state.prefs.mailView); if (p.group !== 'none')
+        setMailView({ ...p, collapsed: [...p.collapsed.filter(key => !key.startsWith(p.group + ':')), p.group + ':*'] }); };
+    menu.addEventListener('keydown', event => { event.stopPropagation(); if (event.key === 'Escape') {
+        event.preventDefault();
+        menu.open = false;
+        menu.querySelector('summary').focus();
+    } });
+    document.addEventListener('pointerdown', event => { if (menu.isConnected && !menu.contains(event.target))
+        menu.open = false; }, { signal: mailViewControlSignal() });
+}
+let mailViewControlAbort;
+function mailViewControlSignal() { mailViewControlAbort?.abort(); mailViewControlAbort = new AbortController(); return mailViewControlAbort.signal; }
 function renderList() {
     if (state.app === 'calendar') {
         calendar.render();
         return;
     }
-    const rows = filteredRows(), count = document.querySelector('#list-count');
+    const model = state.app === 'mail' ? mailView(matchingRows(), state.prefs.mailView) : undefined;
+    const rows = model?.rows || filteredRows(), count = document.querySelector('#list-count');
     count.textContent = state.app === 'mail' ? `${rows.length} cached ${rows.length === 1 ? 'message' : 'messages'}` : `${rows.length} ${rows.length === 1 ? apps[state.app].singular : 'items'}`;
     count.title = state.app === 'mail' ? 'Messages stored in Office for this view. This count can grow as older mail downloads.' : '';
     document.querySelector('#selection-count').textContent = state.selected.size ? `${state.selected.size} selected` : '';
+    const expanded = model?.visible || rows;
     if (state.app === 'mail')
-        mailListLimit = Math.max(mailListLimit, rows.findIndex(r => r.id === state.current?.id) + 1);
-    const visible = state.app === 'mail' ? rows.slice(0, mailListLimit) : rows;
-    document.querySelector('#items').innerHTML = rows.length ? visible.map(r => {
+        mailListLimit = Math.max(mailListLimit, expanded.findIndex(r => r.id === state.current?.id) + 1);
+    const visible = state.app === 'mail' ? expanded.slice(0, mailListLimit) : rows;
+    const item = (r) => {
         const hint = state.app === 'mail' ? (r.meta.from || r.meta.to || r.meta.folder || 'Local archive') : state.app === 'calendar' ? (r.meta.start ? dateLabel(r.meta.start) + ' · ' : '') + (r.meta.location || '') : state.app === 'tasks' ? (r.meta.done ? 'Completed' : r.meta.due ? 'Due ' + dateLabel(r.meta.due) : 'No due date') : state.app === 'contacts' ? (r.meta.email || r.meta.company || '') : state.app === 'wiki' ? (r.title.includes(':') ? r.title.split(':').slice(0, -1).join(':') : 'Root namespace') : 'Edited ' + dateLabel(r.updated);
         const selected = state.current?.id === r.id;
         const readState = state.app === 'mail' ? (r.meta.read ? 'read' : 'unread') : '';
         const readStatus = readState ? `<span class="mail-read-status"><span class="file-input">${readState === 'unread' ? 'Unread' : 'Read'}</span></span>` : '';
         const badges = state.app === 'mail' ? '' : `<span>${r.meta.folder ? `<span class="badge">${e(r.meta.folder)}</span>` : ''}${r.meta.remote ? '<span class="badge">Synced</span>' : ''}</span>`;
         return `<button class="item ${readState ? 'mail-' + readState : ''} ${selected ? 'selected' : ''} ${state.selected.has(r.id) ? 'multi-selected' : ''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id) || selected}" aria-haspopup="menu" ${selected ? 'id="selected-item"' : ''}>${readStatus}<span class="item-icon">${state.selected.has(r.id) ? '✓' : icon(state.app)}</span>${state.app === 'mail' ? renderMailListCopy(r, state.prefs.mailList, failedMailActions.get(r.id)) : `<span class="item-copy"><strong>${e(r.title)}</strong><small>${e(hint)}</small></span>`}${badges}</button>`;
-    }).join('') : `<div class="list-empty">${state.search ? 'No matching items. Try a different search.' : 'No items yet.'}</div>`;
-    if (visible.length < rows.length) {
+    };
+    const list = document.querySelector('#items'), focusedGroup = document.activeElement?.closest('[data-mail-group-key]')?.dataset.mailGroupKey;
+    const included = new Set(visible.map(row => row.id));
+    list.innerHTML = rows.length ? (model && mailViewPreferences(state.prefs.mailView).group !== 'none' ? model.groups.map(group => {
+        const rendered = group.rows.filter(row => included.has(row.id));
+        if (!group.collapsed && !rendered.length)
+            return '';
+        return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed ? '▸' : '▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}</span></button>${rendered.map(item).join('')}`;
+    }).join('') : visible.map(item).join('')) : `<div class="list-empty">${state.search ? 'No matching items. Try a different search.' : 'No items yet.'}</div>`;
+    list.querySelectorAll('[data-mail-group-key]').forEach(button => button.onclick = () => {
+        const p = mailViewPreferences(state.prefs.mailView), key = button.dataset.mailGroupKey;
+        const collapsed = button.getAttribute('aria-expanded') === 'false', all = p.collapsed.includes(p.group + ':*'), exception = p.group + ':!' + key;
+        const retained = p.collapsed.filter(value => value !== key && value !== exception);
+        setMailView({ ...p, collapsed: collapsed ? (all ? [...retained, exception] : retained) : (all ? retained : [...retained, key]) });
+    });
+    if (focusedGroup)
+        list.querySelector(`[data-mail-group-key="${CSS.escape(focusedGroup)}"]`)?.focus({ preventScroll: true });
+    if (visible.length < expanded.length) {
         const button = document.createElement('button');
         button.textContent = 'Show next 100 messages';
         button.onclick = () => { mailListLimit += 100; renderList(); };
-        document.querySelector('#items').append(button);
+        list.append(button);
     }
 }
 const bodyDownloads = new Set(), bodyFailures = new Set();
@@ -1114,7 +1166,7 @@ async function clickRecord(id, event) {
     await commit();
     if (event.shiftKey) {
         keyboardSelection = false;
-        const rows = filteredRows(), to = rows.findIndex(r => r.id === id), anchor = rows.findIndex(r => r.id === (selectionAnchor || state.current?.id)), from = anchor < 0 ? to : anchor;
+        const rows = navigableRows(), to = rows.findIndex(r => r.id === id), anchor = rows.findIndex(r => r.id === (selectionAnchor || state.current?.id)), from = anchor < 0 ? to : anchor;
         if (!event.ctrlKey && !event.metaKey)
             state.selected.clear();
         for (const r of rows.slice(Math.max(0, Math.min(from, to)), Math.max(from, to) + 1))
@@ -2056,7 +2108,7 @@ document.addEventListener('keydown', event => {
             scrollMailBody(target, 'start');
             return;
         }
-        const row = filteredRows()[0];
+        const row = navigableRows()[0];
         if (row)
             void attempt(() => selectRecord(row.id, true));
         return;
@@ -2181,7 +2233,7 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G') {
         event.preventDefault();
-        const rows = filteredRows();
+        const rows = navigableRows();
         const index = rows.findIndex(r => r.id === state.current?.id);
         const next = key === 'G' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (action === 'up' || key === 'N' ? -1 : 1)));
         if (rows[next])
@@ -2197,6 +2249,16 @@ window.addEventListener('beforeunload', event => { if (state.dirty || state.save
     event.returnValue = '';
 } });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+let mailCalendarDay = new Date().toDateString();
+function refreshMailCalendarDay() { const day = new Date().toDateString(); if (day !== mailCalendarDay) {
+    mailCalendarDay = day;
+    if (state.app === 'mail' && document.querySelector('#items'))
+        renderList();
+} }
+setInterval(refreshMailCalendarDay, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden)
+    refreshMailCalendarDay(); });
+window.addEventListener('focus', refreshMailCalendarDay);
 setInterval(() => { if (document.querySelector('.shell'))
     void attempt(() => syncAccounts(false)); }, 120000);
 void boot();

@@ -1,5 +1,5 @@
 import type {OfficeRecord} from './types.js';
-function messageTime(record: OfficeRecord) {
+export function messageTime(record: OfficeRecord) {
   for(const value of [record.meta?.date,record.meta?.sentAt]){
     if(typeof value!=='string'||!value.trim())continue;
     const time=Date.parse(value);
