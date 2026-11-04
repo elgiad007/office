@@ -3,6 +3,28 @@ import { escapeHtml as e } from './formats.js';
 import { messageTime } from './mail-sort.js';
 import { timestampLabel } from './time-labels.js';
 const fields = { none: 'Hidden', sender: 'Sender', date: 'Sent date', subject: 'Subject', attachment: 'Attachment', preview: 'Body preview' };
+export function senderDomain(from) {
+    const address = from.match(/<([^<>]+)>/)?.[1] || from.trim();
+    const domain = address.match(/^[^\s@<>]+@([a-z0-9.-]+)$/i)?.[1].toLowerCase();
+    return domain && domain.length <= 253 && domain.includes('.') && domain.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label)) ? domain : undefined;
+}
+export function renderMailListIcon(record, selected, fallback) {
+    const domain = senderDomain(record.meta.from || '');
+    const count = record.connectionCount || 0;
+    return `<span class="item-icon mail-list-icons"><span class="mail-sender-icon" aria-hidden="true">${selected ? '✓' : `${fallback}${domain ? `<img class="mail-sender-favicon" src="sender-favicon.php?domain=${encodeURIComponent(domain)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}`}</span><span class="mail-list-connections" ${count ? '' : 'hidden'} title="${count} ${count === 1 ? 'connection' : 'connections'}" aria-label="${count} ${count === 1 ? 'connection' : 'connections'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2"/></svg><span>${count}</span></span></span>`;
+}
+export function bindMailFavicons(container) {
+    container.querySelectorAll('.mail-sender-favicon').forEach(img => {
+        const update = () => { if (img.naturalWidth)
+            img.classList.add('loaded');
+        else
+            img.remove(); };
+        img.onload = update;
+        img.onerror = () => img.remove();
+        if (img.complete)
+            update();
+    });
+}
 export const defaultMailList = () => ({ sender: 'both', rows: [
         { left: { field: 'sender', size: 'normal' }, right: { field: 'date', size: 'small' } },
         { left: { field: 'subject', size: 'small' }, right: { field: 'attachment', size: 'small' } },

@@ -6,7 +6,7 @@ import {asError} from './utils.js';
 import {isPresent} from './utils.js';
 import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, ConnectionDeletionChoices, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
 
-interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; removedIds?: string[]; error?: string; code?: string}
+interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; removedIds?: string[]; error?: string; code?: string; connectionCounts?: Record<string,number>}
 interface RequestPayload {id?: string; revision?: number; action?: string; account?: string; summary?: boolean}
 type MailSnapshot = Pick<OfficeRecord, 'id' | 'kind' | 'contentHash' | 'meta'>;
 
@@ -21,7 +21,7 @@ import {installItemMenus} from './item-menus.js';
 import {compareMail} from './mail-sort.js';
 import {mailView,mailViewPreferences,revealMailGroup} from './mail-view.js';
 import {taskView,taskViewPreferences,taskPriority,taskDue} from './task-view.js';
-import {renderMailListCopy, bindMailListSettings} from './mail-list.js';
+import {renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings} from './mail-list.js';
 import {createActivity} from './activity.js';
 import {createCalendar,dateOnly} from './calendar.js';
 import {timestampLabel, configureTimeLabels, refreshTimeLabels} from './time-labels.js';
@@ -230,6 +230,14 @@ async function requestApi(route: ApiRoute, data?: ApiData): Promise<WireResult> 
   }
   for(const record of result.records||[])rememberMail(record);
   rememberMail(result.record);
+  if(result.connectionCounts){
+    for(const row of [...state.rows,...(state.current?[state.current]:[])])if(row.id in result.connectionCounts)row.connectionCount=result.connectionCounts[row.id];
+    document.querySelectorAll<HTMLElement>('#items .item[data-id]').forEach(item=>{
+      const count=result.connectionCounts![item.dataset.id!],badge=item.querySelector<HTMLElement>('.mail-list-connections');
+      if(count===undefined||!badge)return;
+      badge.hidden=count===0;badge.title=`${count} ${count===1?'connection':'connections'}`;badge.setAttribute('aria-label',badge.title);badge.querySelector('span')!.textContent=String(count);
+    });
+  }
   if(route==='mail-action'&&payload?.action==='trash'&&result.record?.meta?.folder==='Trash'){
     for(const id of result.removedIds||[])trashedMailCopies.set(id,result.record);
   }
@@ -673,7 +681,8 @@ function renderList() {
     const readState=state.app==='mail'?(r.meta.read?'read':'unread'):'';
     const readStatus=readState?`<span class="mail-read-status"><span class="file-input">${readState==='unread'?'Unread':'Read'}</span></span>`:'';
     const badges=state.app==='mail'?'':`<span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span>`;
-    return `<button class="item ${state.app==='tasks'&&r.meta.done?'task-completed':''} ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app==='tasks'?taskBadges(r):''}</span>`}${badges}</button>`;
+    const itemIcon=state.app==='mail'?renderMailListIcon(r,state.selected.has(r.id),icon('mail')):`<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>`;
+    return `<button class="item ${state.app==='tasks'&&r.meta.done?'task-completed':''} ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}${itemIcon}${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app==='tasks'?taskBadges(r):''}</span>`}${badges}</button>`;
   };
   const list=document.querySelector<HTMLElement>('#items')!,focusedGroup=(document.activeElement as HTMLElement)?.closest<HTMLElement>('[data-mail-group-key]')?.dataset.mailGroupKey;
   const included=new Set(visible.map(row=>row.id));
@@ -682,6 +691,7 @@ function renderList() {
     if(!group.collapsed&&!rendered.length)return '';
     return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed?'▸':'▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}</span></button>${rendered.map(item).join('')}`;
   }).join(''):visible.map(item).join('')):`<div class="list-empty">${state.app==='tasks'?'No tasks match this view. Adjust List view filters or add a task.':state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
+  if(state.app==='mail')bindMailFavicons(list);
   list.querySelectorAll<HTMLButtonElement>('[data-mail-group-key]').forEach(button=>button.onclick=()=>{
     const p=state.app==='tasks'?taskViewPreferences(state.prefs.taskView):mailViewPreferences(state.prefs.mailView),key=button.dataset.mailGroupKey!;
     const collapsed=button.getAttribute('aria-expanded')==='false',all=p.collapsed.includes(p.group+':*'),exception=p.group+':!'+key;

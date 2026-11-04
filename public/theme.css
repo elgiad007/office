@@ -1,4 +1,13 @@
 :root[data-accent="blue"] { --accent: #365d8a; --wash: #e7eef7; }
+/* Sender identity and relationships share the existing mail icon column. */
+.item .item-icon.mail-list-icons { display:flex; flex-direction:column; align-items:center; align-self:stretch; justify-content:flex-start; gap:7px; width:32px; min-width:32px; padding-top:1px; }
+.mail-sender-icon { display:grid; place-items:center; position:relative; width:24px; height:24px; }
+.mail-sender-favicon { position:absolute; width:20px; height:20px; object-fit:contain; visibility:hidden; }
+.mail-sender-favicon.loaded { visibility:visible; background:var(--surface); }
+.mail-sender-icon:has(.mail-sender-favicon.loaded) > svg { visibility:hidden; }
+.mail-list-connections { display:flex; align-items:center; justify-content:center; gap:3px; color:var(--accent); font-size:10px; line-height:14px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.mail-list-connections[hidden] { display:none; }
+.mail-list-connections svg { width:12px; height:12px; }
 /* Shared record connections and command completion */
 #activity-status:has(#command-input) { overflow:visible; }
 .connection-suggestions { position:absolute; bottom:100%; left:0; width:min(760px,90vw); max-height:45vh; overflow:auto; z-index:100; background:var(--surface); color:var(--text); border:1px solid var(--line); box-shadow:0 8px 30px #0003; border-radius:8px; }

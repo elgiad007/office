@@ -142,7 +142,7 @@ function mail_list_record(array $row): array {
     return $row;
 }
 function get_record(string $id): array {
-    $q=db()->prepare('SELECT * FROM records WHERE id=?'); $q->execute([$id]); $r=$q->fetch();
+    $q=db()->prepare('SELECT *, (SELECT COUNT(*) FROM connections WHERE a=records.id OR b=records.id) AS connectionCount FROM records WHERE id=?'); $q->execute([$id]); $r=$q->fetch();
     if (!$r) fail('Item not found.',404); return record_row($r);
 }
 function validate_record(array $input): array {

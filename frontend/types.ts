@@ -46,6 +46,7 @@ export interface ItemMeta {
 }
 export interface ItemInput { kind: ItemKind; title: string; body: string; meta: ItemMeta }
 export interface OfficeRecord extends ItemInput {
+  connectionCount?: number;
   id: string;
   revision: number;
   created: string;

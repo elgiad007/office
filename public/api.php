@@ -56,7 +56,7 @@ try {
         if(($input['action']??'add')==='add')connection_add($a,$b);
         elseif($input['action']==='remove'){get_record($a);get_record($b);db()->prepare('DELETE FROM connections WHERE (a=? AND b=?) OR (a=? AND b=?)')->execute([$a,$b,$b,$a]);}
         else fail('Unknown connection action.');
-        json_response(['ok'=>true]);
+        json_response(['ok'=>true,'connectionCounts'=>(object)connection_counts([$a,$b])]);
     }
     if($route==='activity' && $method==='GET') { session_write_close();json_response(['entries'=>activity_rows((int)($_GET['after']??0))]); }
     if($route==='activity' && $method==='POST') {
@@ -83,6 +83,9 @@ try {
             foreach($files as $file){$id=$file['record_id'];unset($file['record_id']);$cached[$id][]=$file+['available'=>true];}
             $records=[];foreach($q as $row)$records[]=mail_list_record(record_row($row,$cached[$row['id']]??[]));
         }else $records=array_map('record_row',$q->fetchAll());
+        if($kind==='mail'){
+            $counts=connection_counts();foreach($records as &$record)$record['connectionCount']=(int)($counts[$record['id']]??0);unset($record);
+        }
         json_response(['records'=>$records]);
     }
     if ($route==='record' && $method==='GET') {session_write_close();json_response(['record'=>get_record((string)($_GET['id']??''))]);}
@@ -109,7 +112,8 @@ try {
             $db=db();$db->beginTransaction();
             try{get_record($linkedTo);$record=save_record($input);connection_add($linkedTo,$record['id']);$db->commit();}
             catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
-            json_response(['record'=>$record]);
+            $record['connectionCount']=(int)get_record($record['id'])['connectionCount'];
+            json_response(['record'=>$record,'connectionCounts'=>(object)connection_counts([$linkedTo,$record['id']])]);
         }
         json_response(['record'=>save_record($input)]);
     }

@@ -2,6 +2,14 @@
 declare(strict_types=1);
 
 /** Undirected record relationships. Never mutate provider content to create a link. */
+function connection_counts(?array $ids=null): array {
+    if($ids!==null){
+        if(!$ids)return [];
+        $q=db()->prepare('SELECT id, (SELECT COUNT(*) FROM connections WHERE a=records.id OR b=records.id) AS total FROM records WHERE kind=\'mail\' AND id IN ('.implode(',',array_fill(0,count($ids),'?')).')');
+        $q->execute($ids);return $q->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+    return db()->query('SELECT id, COUNT(peer) AS total FROM records LEFT JOIN (SELECT a AS source,b AS peer FROM connections UNION ALL SELECT b,a FROM connections) links ON links.source=records.id WHERE kind=\'mail\' GROUP BY id')->fetchAll(PDO::FETCH_KEY_PAIR);
+}
 function connection_add(string $a,string $b): void {
     if($a===$b)fail('An item cannot link to itself.');
     get_record($a);get_record($b);
