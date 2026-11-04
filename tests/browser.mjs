@@ -1,3 +1,4 @@
+import {testCalendar} from './calendar.browser.mjs';
 import {testCommands} from './commands.browser.mjs';
 import {testMessageHeaders} from './message-headers.browser.mjs';
 import {createRequire} from 'node:module';
@@ -77,6 +78,7 @@ try{
  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByRole('button',{name:'Save preferences',exact:true}).click();await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');await page.screenshot({path:'test-results/settings-dark.png',fullPage:true});
  await testDensity(page);
  await testScrolling(page,url);
+ await testCalendar(page,url);
  await testFocusNavigation(page,url);
  await testAccountSetup(page,url);
  const status=await(await page.request.get(url+'api.php?r=status')).json();

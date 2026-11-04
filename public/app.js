@@ -14,6 +14,7 @@ import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
 import { renderMailListCopy, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
+import { createCalendar, dateOnly } from './calendar.js';
 const apps = {
     mail: { name: 'Mail', singular: 'message', empty: 'No messages yet.', hint: 'Connect an account in Settings, import an EML file, or compose your first message.', icon: 'M3 5h18v14H3z M3 5l9 7 9-7' },
     calendar: { name: 'Calendar', singular: 'event', empty: 'No events yet.', hint: 'Add an event, import a calendar, or connect Google Calendar or CalDAV.', icon: 'M4 5h16v16H4z M8 3v4 M16 3v4 M4 10h16' },
@@ -27,6 +28,7 @@ const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new:
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf });
+const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: commit, error: action => { void attempt(action); } });
 let saveTimer, keySequence = '', sequenceTime = 0;
 let selectionAnchor = null, keyboardSelection = false;
 let sendingMail = false;
@@ -395,7 +397,7 @@ function searchableText(record) {
     const { rawBase64, raw, headersBase64, ...meta } = record.meta;
     return (record.title + ' ' + record.body + ' ' + JSON.stringify(meta)).toLocaleLowerCase();
 }
-function filteredRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'mail' || (state.mailScope ? matchesMailScope(r, state.mailScope, state.accounts) : state.mailFolder === 'all' ? !['Recovery copies', 'Not in Inbox', 'Trash'].includes(r.meta.folder || '') : state.mailFolder === 'Recovery copies' ? ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '') : (r.meta.folder || 'Archive') === state.mailFolder)) && (!q || searchableText(r).includes(q))); }
+function filteredRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'calendar' || calendar.isVisible(r)) && (state.app !== 'mail' || (state.mailScope ? matchesMailScope(r, state.mailScope, state.accounts) : state.mailFolder === 'all' ? !['Recovery copies', 'Not in Inbox', 'Trash'].includes(r.meta.folder || '') : state.mailFolder === 'Recovery copies' ? ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '') : (r.meta.folder || 'Archive') === state.mailFolder)) && (!q || searchableText(r).includes(q))); }
 async function deleteMailImmediately(rows, operation, undoable = false) {
     const pane = activePane();
     const ids = new Set(rows.map(r => r.id)), visible = filteredRows().map(r => r.id), currentId = state.current?.id;
@@ -563,6 +565,8 @@ function mailDeletionReload() {
         const nextId = [...ids.slice(index + 1), ...ids.slice(0, index).reverse()].find(id => !removed.has(id) && visible.has(id));
         state.current = state.rows.find(r => r.id === nextId) || null;
         renderList();
+        if (state.app === 'calendar' && nextId)
+            calendar.ensureVisible(nextId);
         renderDetail();
         restorePane(pane);
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
@@ -700,6 +704,15 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
 }
 function renderWorkspace(readerSnapshot) {
     const a = apps[state.app];
+    if (state.app === 'calendar') {
+        document.querySelector('#main').innerHTML = `<section class="view-head"><h1>Calendar</h1><div class="head-actions"><input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}"><button data-action="import">Import</button><button data-action="export-all">Export</button><button class="primary" data-action="new">+ New event</button></div></section><div class="calendar-workspace"><section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
+        document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
+        calendar.render();
+        if (state.current)
+            calendar.ensureVisible(state.current.id);
+        renderDetail();
+        return;
+    }
     const header = state.app === 'mail' ? '<h1 class="file-input">Mail</h1>' : `<section class="view-head"><div><h1>${a.name}</h1></div><div class="head-actions"><button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ New ${a.singular}</button></div></section>`;
     document.querySelector('#main').innerHTML = `${header}<div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
     document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
@@ -740,6 +753,10 @@ function renderWorkspace(readerSnapshot) {
 }
 let mailListLimit = 100;
 function renderList() {
+    if (state.app === 'calendar') {
+        calendar.render();
+        return;
+    }
     const rows = filteredRows(), count = document.querySelector('#list-count');
     count.textContent = state.app === 'mail' ? `${rows.length} cached ${rows.length === 1 ? 'message' : 'messages'}` : `${rows.length} ${rows.length === 1 ? apps[state.app].singular : 'items'}`;
     count.title = state.app === 'mail' ? 'Messages stored in Office for this view. This count can grow as older mail downloads.' : '';
@@ -800,6 +817,13 @@ async function hydrateMailBody(record, manual = false) {
 let displayedMailBody;
 function renderDetail(readerSnapshot = captureMailReader()) {
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
+    if (state.app === 'calendar') {
+        panel.hidden = !r;
+        if (!r) {
+            panel.innerHTML = '';
+            return;
+        }
+    }
     const contentFocused = !!r && document.activeElement === contentEntry();
     const openedMail = state.app === 'mail' && r ? r.id : null, newlyOpened = openedMail !== displayedMailId;
     const restore = readerSnapshot?.id === openedMail ? readerSnapshot : undefined;
@@ -871,6 +895,21 @@ function renderDetail(readerSnapshot = captureMailReader()) {
         form.oninput = () => markDirty();
         form.onsubmit = async (ev) => { ev.preventDefault(); await attempt(() => commit()); };
     }
+    if (state.app === 'calendar') {
+        const close = document.createElement('button');
+        close.textContent = 'Close event';
+        close.className = 'calendar-close';
+        close.onclick = () => void attempt(async () => { await commit(); state.current = null; renderDetail(); renderList(); document.querySelector('#items button')?.focus(); });
+        panel.prepend(close);
+        const allDay = form?.querySelector('[name="allDay"]');
+        if (allDay)
+            allDay.onchange = () => { for (const name of ['start', 'end']) {
+                const input = form.querySelector(`[name="${name}"]`);
+                const value = input.value;
+                input.type = allDay.checked ? 'date' : 'datetime-local';
+                input.value = allDay.checked ? value.slice(0, 10) : value + 'T00:00';
+            } markDirty(); };
+    }
     if (fillSender)
         markDirty();
     panel.querySelectorAll('[data-format]').forEach(button => {
@@ -912,7 +951,7 @@ function detailContent(r) {
     if (state.app === 'contacts')
         content += `<div class="fields">${field('Email', 'email', m.email, 'email')}${field('Phone', 'phone', m.phone, 'tel')}${field('Company', 'company', m.company)}${field('Group', 'group', m.group)}</div>`;
     if (state.app === 'calendar')
-        content += `<div class="fields">${field('Start (local time)', 'start', localInput(m.start), 'datetime-local', disabled)}${field('End (local time)', 'end', localInput(m.end), 'datetime-local', disabled)}${field('Location', 'location', m.location, 'text', disabled)}</div>${m.rawIcs || m.raw ? '<button type="button" data-action="original-ics">Download original ICS</button>' : ''}${m.recurrence ? `<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. This version displays the master event only; exceptions and generated occurrences are not expanded. Export the original ICS for full fidelity.</p>` : ''}`;
+        content += `<label class="check-label"><input type="checkbox" name="allDay" ${dateOnly(m.start) ? 'checked' : ''} ${disabled}> All day</label><div class="fields">${field('Start (local time)', 'start', dateOnly(m.start) ? m.start : localInput(m.start), dateOnly(m.start) ? 'date' : 'datetime-local', disabled)}${field(dateOnly(m.start) ? 'End (exclusive date)' : 'End (local time)', 'end', dateOnly(m.start) ? m.end : localInput(m.end), dateOnly(m.start) ? 'date' : 'datetime-local', disabled)}${field('Location', 'location', m.location, 'text', disabled)}</div>${m.rawIcs || m.raw ? '<button type="button" data-action="original-ics">Download original ICS</button>' : ''}${m.recurrence ? `<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>` : ''}`;
     if (state.app === 'mail')
         content += `<div class="fields">${field('To (one recipient)', 'to', m.to, 'email', 'required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount && !mailAccounts().some(a => a.id === m.sendAccount) ? `<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>` : ''}${mailAccounts().map(a => `<option value="${a.id}" ${m.sendAccount === a.id ? 'selected' : ''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
     if (state.app === 'documents')
@@ -967,7 +1006,7 @@ function collect() {
             m[key] = values[key];
     for (const key of ['start', 'end'])
         if (key in values)
-            m[key] = values[key] ? new Date(values[key]).toISOString() : '';
+            m[key] = values[key] ? (dateOnly(values[key]) ? values[key] : new Date(values[key]).toISOString()) : '';
     if (state.app === 'tasks')
         m.done = values.done === 'on';
     if (state.app === 'documents')
@@ -1058,6 +1097,8 @@ async function selectRecord(id, focus = false) {
     }
     else
         renderList();
+    if (state.app === 'calendar')
+        calendar.ensureVisible(id);
     renderDetail();
     if (focus && pane === 'content') {
         focusContent();
@@ -1114,7 +1155,7 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
     const record = { kind: kind, title: initial.title || 'Untitled ' + apps[kind].singular, body: initial.body || '', meta: { ...(kind === 'mail' ? { folder: 'Drafts' } : {}), ...initial.meta } };
     if (kind === 'mail' && !record.meta.sendAccount)
         record.meta.sendAccount = draftAccount(previous);
-    if (kind === 'calendar') {
+    if (kind === 'calendar' && !record.meta.start) {
         const start = new Date();
         start.setMinutes(0, 0, 0);
         record.meta.start = start.toISOString();
@@ -1831,7 +1872,7 @@ function insertLink() {
 }
 function renderSettings() {
     const p = state.prefs;
-    document.querySelector('#main').innerHTML = `<section class="view-head"><div><h1>Settings</h1><p>Preferences, connected accounts, and backups.</p></div></section><div class="settings"><div class="settings-grid"><section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences"><label>Theme<select name="theme" aria-label="Theme">${['system', 'light', 'dark'].map(x => `<option ${p.theme === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Accent<select name="accent" aria-label="Accent">${['green', 'blue', 'plum'].map(x => `<option ${p.accent === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Density<select name="density" aria-label="Density"><option value="comfortable">Comfortable</option><option value="compact" ${p.density === 'compact' ? 'selected' : ''}>Compact</option></select></label><button class="primary">Save preferences</button></form></section><section class="card"><h2>Data and backups</h2><p>Your database and content live inside this application folder. Backups include local records, cached messages, revisions and preferences. Account credentials and your password are excluded.</p><button id="backup">↓ Download full backup</button><p>Restore into an empty installation. Synced copies become local archives; reconnect providers separately. Never copy a live SQLite file as a backup.</p><button id="restore">↑ Restore backup</button><p>Documents: basic formatting and HTML/text. Calendar: agenda, no local recurrence expansion or invitations. Sheets: simple formulas. See README for version limits.</p></section><section class="card full"><h2>Mail</h2><form id="mail-preferences"><label>Default email display<select name="mailDisplay" aria-label="Default email display"><option value="html" ${p.mailDisplay !== 'text' ? 'selected' : ''}>HTML</option><option value="text" ${p.mailDisplay === 'text' ? 'selected' : ''}>Text only</option></select></label><label class="check-label"><input type="checkbox" name="mailOffline" ${p.mailOffline === true ? 'checked' : ''}> Download message contents during sync for offline use</label><label>Default mail account<select name="defaultMailAccount" aria-label="Default mail account"><option value="">Automatic (only account, when available)</option>${mailAccounts().map(a => `<option value="${e(a.id)}" ${p.defaultMailAccount === a.id ? 'selected' : ''}>${e(a.label)}</option>`).join('')}</select></label><p>New drafts use the selected message’s account first, then this default. Saved drafts keep their chosen account.</p><button class="primary">Save mail preferences</button></form></section><section class="card full" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section><section class="card full"><h2>Connected accounts</h2><p>Only checked while this page is visible and you have used it within two minutes. Automatic checks every two minutes; Sync now is always available. Inbox, Archive and Trash: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync ? 'Last checked ' + e(new Date(a.last_sync).toLocaleString()) : 'Not checked yet'}${a.error ? ' · ' + e(a.error) : ''}</small></div><div class="actions">${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button><label class="check-label"><input id="keep-recovery" type="checkbox" ${p.keepRecoveryCopies !== false ? 'checked' : ''}> Keep recovery copies of messages absent from synchronized folders</label><p>Recovery copies are excluded from All cached mail. Save them in Local mail or discard them. Turning this off removes absent cached copies on the next successful sync; local mail is kept.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, configure Google integration once above.</p></section><section class="card full"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action, key]) => field(action, 'key_' + action, keys()[action], 'text', 'required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section></div></div>`;
+    document.querySelector('#main').innerHTML = `<section class="view-head"><div><h1>Settings</h1><p>Preferences, connected accounts, and backups.</p></div></section><div class="settings"><div class="settings-grid"><section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences"><label>Theme<select name="theme" aria-label="Theme">${['system', 'light', 'dark'].map(x => `<option ${p.theme === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Accent<select name="accent" aria-label="Accent">${['green', 'blue', 'plum'].map(x => `<option ${p.accent === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Density<select name="density" aria-label="Density"><option value="comfortable">Comfortable</option><option value="compact" ${p.density === 'compact' ? 'selected' : ''}>Compact</option></select></label><button class="primary">Save preferences</button></form></section><section class="card"><h2>Data and backups</h2><p>Your database and content live inside this application folder. Backups include local records, cached messages, revisions and preferences. Account credentials and your password are excluded.</p><button id="backup">↓ Download full backup</button><p>Restore into an empty installation. Synced copies become local archives; reconnect providers separately. Never copy a live SQLite file as a backup.</p><button id="restore">↑ Restore backup</button><p>Documents: basic formatting and HTML/text. Calendar: Month, Week, Day and Agenda views; no local recurrence expansion or invitations. Sheets: simple formulas. See README for version limits.</p></section><section class="card full"><h2>Mail</h2><form id="mail-preferences"><label>Default email display<select name="mailDisplay" aria-label="Default email display"><option value="html" ${p.mailDisplay !== 'text' ? 'selected' : ''}>HTML</option><option value="text" ${p.mailDisplay === 'text' ? 'selected' : ''}>Text only</option></select></label><label class="check-label"><input type="checkbox" name="mailOffline" ${p.mailOffline === true ? 'checked' : ''}> Download message contents during sync for offline use</label><label>Default mail account<select name="defaultMailAccount" aria-label="Default mail account"><option value="">Automatic (only account, when available)</option>${mailAccounts().map(a => `<option value="${e(a.id)}" ${p.defaultMailAccount === a.id ? 'selected' : ''}>${e(a.label)}</option>`).join('')}</select></label><p>New drafts use the selected message’s account first, then this default. Saved drafts keep their chosen account.</p><button class="primary">Save mail preferences</button></form></section><section class="card full" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section><section class="card full"><h2>Connected accounts</h2><p>Only checked while this page is visible and you have used it within two minutes. Automatic checks every two minutes; Sync now is always available. Inbox, Archive and Trash: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync ? 'Last checked ' + e(new Date(a.last_sync).toLocaleString()) : 'Not checked yet'}${a.error ? ' · ' + e(a.error) : ''}</small></div><div class="actions">${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button><label class="check-label"><input id="keep-recovery" type="checkbox" ${p.keepRecoveryCopies !== false ? 'checked' : ''}> Keep recovery copies of messages absent from synchronized folders</label><p>Recovery copies are excluded from All cached mail. Save them in Local mail or discard them. Turning this off removes absent cached copies on the next successful sync; local mail is kept.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, configure Google integration once above.</p></section><section class="card full"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action, key]) => field(action, 'key_' + action, keys()[action], 'text', 'required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section></div></div>`;
     document.querySelector('#mail-preferences').closest('section').insertAdjacentHTML('afterend', '<section class="card full" id="mail-list-settings"></section>');
     bindMailListSettings(document.querySelector('#mail-list-settings'), p.mailList, async (layout) => { await attempt(async () => { const preferences = { ...state.prefs, mailList: layout }; await api('preferences', { preferences }); state.prefs = preferences; notice('List appearance saved.'); }); });
     document.querySelector('#mail-preferences button').insertAdjacentHTML('beforebegin', `<label class="check-label"><input type="checkbox" name="confirmBeforeSend" ${p.confirmBeforeSend !== false ? 'checked' : ''}> Confirm before sending</label>`);
@@ -1893,7 +1934,7 @@ function restorePane(pane) {
         if (state.current)
             focusContent();
         else {
-            const panel = document.querySelector('#detail');
+            const panel = document.querySelector(state.app === 'calendar' ? '#items' : '#detail');
             if (panel) {
                 panel.tabIndex = -1;
                 panel.focus({ preventScroll: true });

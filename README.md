@@ -33,7 +33,7 @@ Shared-host filesystem locking, outbound connections, PHP extensions and request
 
 - One-owner login, token-protected setup, CSRF-protected writes, idle session expiry, local encrypted provider credentials.
 - Tasks with due dates, priority and completion; contacts with email, phone, company and group.
-- Local calendar agenda with start/end/location; ICS import/export. Local-time input is stored with an absolute timestamp. Imported date-only events remain date-only until edited.
+- Calendar Month, Week, Day and Agenda views with source visibility controls, local event editing and ICS import/export. Select a date or time slot to create an event. Timed input uses local time and is stored as an absolute timestamp; all-day dates and exclusive end dates remain date-only through editing and export. Views show cached events, including connected calendars as read-only copies.
 - Basic word processing: headings, lists, bold/italic, tables, links, embedded images (PNG/JPEG/GIF/WebP under 900 KB), undo/redo, safe HTML and text import, HTML export, browser print/PDF. HTML is sanitized before displaying or editing; external/unsupported images are replaced by their alt text rather than fetched.
 - Wiki: namespace-style page names, Markdown subset, `[[namespace:page]]` links, backlinks, source/preview and revision history. Supported Markdown includes headings, paragraphs, simple bullets, bold, inline/fenced code, HTTP/mailto links and blockquotes. This is not DokuWiki plugin/syntax compatibility or a complete CommonMark implementation.
 - Workbooks with multiple sheets; visible grid A1:L30, imported data retained through Z100; arithmetic and SUM/AVERAGE/MIN/MAX/COUNT, references and ranges, cycle/error detection. CSV import/export and JSON export for full workbooks. CSV exports preserve formula source; JSON retains every sheet. Cross-sheet references and Excel file formats are unsupported.
@@ -93,7 +93,7 @@ Attachments appear above received message content, with filename, type, size and
 
 Large-message text retrieval is limited to 1.4 MB of text parts; it does not reconstruct the original EML or fetch all inline images. Attachments can still download separately. Signed/encrypted MIME, cloud attachment links, attachment-content search, and launching desktop apps directly from the browser remain outside this workflow. For hosted installations, allow at least 16 MB JSON requests (128 MB for restoring larger backups), 256 MB PHP memory and suitable web-server request limits; the bundled PHP configuration supplies these settings.
 
-Calendar imports retain raw event sources for original download when available. The agenda does not expand CalDAV/local recurring series or handle invitation replies, exceptions, alarms or remote writes. Google expanded instances are read from its API. Use your existing calendar client for those workflows. Local task recurrence/contact synchronization are also deferred.
+Calendar imports retain raw event sources for original download when available. The calendar does not expand CalDAV/local recurring series or handle invitation replies, exceptions, alarms or remote writes. Google expanded instances are read from its API. Use your existing calendar client for those workflows. Local task recurrence/contact synchronization are also deferred.
 
 ## Keyboard operation
 

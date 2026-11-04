@@ -70,7 +70,7 @@ export async function testFocusNavigation(page,url) {
             assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,kind+' deletion keeps content focus');
           }else{
             await page.waitForFunction(()=>!document.querySelector('#selected-item'));
-            assert.equal(await page.locator('#detail').evaluate(node=>node===document.activeElement),true,kind+' empty detail keeps focus');
+            assert.equal(await page.locator(kind==='calendar'?'#items':'#detail').evaluate(node=>node===document.activeElement),true,kind+' empty workspace keeps focus');
           }
         }
       }
