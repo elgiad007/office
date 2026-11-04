@@ -39,7 +39,7 @@ export async function testMailDeleteSelection(page,url) {
     assert.equal(await item('gmail-all').count(),0);
     await page.reload();assert.equal(await item('gmail-all').count(),0);
     await reset(['prior','current','alias','next']);
-    await item('current').click();await page.keyboard.press('Tab');reconcileIds=['alias'];await page.keyboard.press('d');await selected('next');
+    await item('current').click();await page.keyboard.press('Tab');reconcileIds=['alias'];await page.keyboard.press('D');await selected('next');
     assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'Reconciled aliases skip forward without jumping to earlier rows');
 
     await reset(['a','b','c']);await item('a').click();await item('b').click({modifiers:['Control']});
@@ -50,14 +50,14 @@ export async function testMailDeleteSelection(page,url) {
     // Separate rapid deletions may target two cached appearances of one Gmail message.
     await reset(['a','b','c']);hold('a');await item('a').click();
     await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await selected('b');
-    await page.keyboard.press('d');await selected('c');reconcileIds=['b'];release('a');
+    await page.keyboard.press('D');await selected('c');reconcileIds=['b'];release('a');
     await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
     await page.reload();assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
 
-    await reset(['a','b','c']);await item('b').click();await page.keyboard.press('Tab');await page.keyboard.press('d');await selected('c');
+    await reset(['a','b','c']);await item('b').click();await page.keyboard.press('Tab');await page.keyboard.press('D');await selected('c');
     assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'Deletion retains content focus');
     // Repeated keyboard processing works directly from the newly focused row.
-    await page.keyboard.press('d');await selected('a');await page.keyboard.press('d');
+    await page.keyboard.press('D');await selected('a');await page.keyboard.press('D');
     await page.getByRole('heading',{name:'No messages in this folder.',exact:true}).waitFor();
     assert.equal(await page.locator('#selected-item').count(),0);
 
@@ -75,7 +75,7 @@ export async function testMailDeleteSelection(page,url) {
     // The delete shortcut uses explicit selection, even when the reader is elsewhere.
     await reset(['a','b','c','d']);await item('a').click();await page.keyboard.press('v');
     await page.keyboard.press('j');await page.keyboard.press('v');await page.keyboard.press('j');
-    await page.keyboard.press('d');await selected('c');
+    await page.keyboard.press('D');await selected('c');
     assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
 
     await reset(['a','b','c','d']);await item('a').click();await item('b').click({modifiers:['Shift']});
@@ -83,22 +83,22 @@ export async function testMailDeleteSelection(page,url) {
     assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
 
     await reset(['a','b','c'],false);await item('a').click();await page.keyboard.press('v');
-    await page.keyboard.press('j');await page.keyboard.press('v');await page.keyboard.press('d');
+    await page.keyboard.press('j');await page.keyboard.press('v');await page.keyboard.press('D');
     await page.locator('#cancel').click();assert.equal(await page.locator('.multi-selected').count(),2);
-    await page.keyboard.press('d');await page.locator('#confirm').click();await selected('c');
+    await page.keyboard.press('D');await page.locator('#confirm').click();await selected('c');
     assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
 
     await reset(['a','b','c']);await item('a').click();await item('b').click({modifiers:['Control']});rejectId='b';
-    await page.keyboard.press('d');await page.locator('#notice').filter({hasText:'1 of 2 items updated.'}).waitFor();
+    await page.keyboard.press('D');await page.locator('#notice').filter({hasText:'1 of 2 items updated.'}).waitFor();
     await selected('c');assert.equal(await item('b').count(),1);
 
     // Mixed selections keep confirmation for local deletion and trash connected mail.
     await reset(['a','b','c']);messages[0]=fixture('a',false);await page.reload();
-    await item('a').click();await item('b').click({modifiers:['Control']});await page.keyboard.press('d');
+    await item('a').click();await item('b').click({modifiers:['Control']});await page.keyboard.press('D');
     await page.locator('#cancel').click();assert.equal(messages.length,3);assert.equal(messages[1].meta.folder,'Inbox');
-    await page.keyboard.press('d');await page.locator('#confirm').click();await selected('c');
+    await page.keyboard.press('D');await page.locator('#confirm').click();await selected('c');
     assert.equal(messages.some(r=>r.id==='a'),false);assert.equal(messages.find(r=>r.id==='b').meta.folder,'Trash');
-    await page.locator('#mail-folder').selectOption('Trash');await item('b').click();await page.keyboard.press('v');await page.keyboard.press('d');
+    await page.locator('#mail-folder').selectOption('Trash');await item('b').click();await page.keyboard.press('v');await page.keyboard.press('D');
     await page.locator('#notice').filter({hasText:'The selection includes protected mail.'}).waitFor();
     assert.equal(await item('b').count(),1);assert.equal(messages.find(r=>r.id==='b').meta.folder,'Trash');
     // A partial failure restores the rejected mail without interrupting the next selection.
@@ -108,7 +108,7 @@ export async function testMailDeleteSelection(page,url) {
     // Requests remain blocked while the UI advances through consecutive deletions.
     await reset(['a','b','c','d']);hold('b');hold('c');await item('b').click();
     await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await selected('c');assert.equal(await item('b').count(),0);
-    await page.keyboard.press('d');await selected('d');assert.equal(await item('c').count(),0);
+    await page.keyboard.press('D');await selected('d');assert.equal(await item('c').count(),0);
     // A refresh while requests are pending must keep both messages hidden.
     await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.getByRole('button',{name:'Mail',exact:true}).click();
     assert.equal(await item('b').count(),0);assert.equal(await item('c').count(),0);
@@ -124,7 +124,7 @@ export async function testMailDeleteSelection(page,url) {
     await reset(['a','b','c'],false);await item('b').click();
     await page.getByRole('button',{name:'Delete',exact:true}).click();await page.locator('#cancel').click();
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'b');
-    await page.keyboard.press('d');await page.locator('#confirm').click();await selected('c');
+    await page.keyboard.press('D');await page.locator('#confirm').click();await selected('c');
     await item('c').click({button:'right'});await page.getByRole('menuitem',{name:'Delete…',exact:true}).click();await page.locator('#confirm').click();await selected('a');
     console.log('PASS mail deletion selection: next, previous, empty list, focus, repeated shortcut, search, bulk, partial failure, rejection, local deletion and cancellation.');
   } finally {for(const gate of held.values())gate.release();for(let i=0;active&&i<100;i++)await new Promise(resolve=>setTimeout(resolve,20));await page.unroute(routes);await page.reload();}

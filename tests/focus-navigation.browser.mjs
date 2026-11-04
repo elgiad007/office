@@ -82,7 +82,7 @@ export async function testFocusNavigation(page,url) {
         await page.locator('#items [data-id="focus-'+kind+'-1"]').click();
         await page.keyboard.press('Tab');
         for(const next of ['2','0',null]){
-          await page.keyboard.press('d');await page.locator('#confirm').click();
+          await page.keyboard.press('D');await page.locator('#confirm').click();
           if(next!==null){
             await page.locator('#selected-item[data-id="focus-'+kind+'-'+next+'"]').waitFor();
             assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,kind+' deletion keeps content focus');

@@ -74,7 +74,7 @@ export async function testMailOperationQueue(page,url) {
     // Opening the next unread message must not compete with two quick deletions.
     readGate=gate();await reset({unread:true});
     await page.getByRole('button',{name:'Move to Trash',exact:true}).click();
-    await item('2').waitFor();await page.keyboard.press('d');await item('3').waitFor();
+    await item('2').waitFor();await page.keyboard.press('D');await item('3').waitFor();
     assert.equal(await item('1').count(),0);assert.equal(await item('2').count(),0);
     readGate.release();readGate=null;
     await page.waitForFunction(()=>document.querySelectorAll('#items .item').length===1);
@@ -85,7 +85,7 @@ export async function testMailOperationQueue(page,url) {
     // Interactive deletes complete while a background scan is still held.
     syncGate=gate();await reset({sync:true});
     for(let i=0;!syncStarted&&i<100;i++)await new Promise(resolve=>setTimeout(resolve,20));assert.equal(syncStarted,true);
-    await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await item('2').waitFor();await page.keyboard.press('d');
+    await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await item('2').waitFor();await page.keyboard.press('D');
     for(let i=0;records.filter(r=>r.meta.folder==='Trash').length<2&&i<100;i++)await new Promise(resolve=>setTimeout(resolve,20));
     assert.equal(records.filter(r=>r.meta.folder==='Trash').length,2,'Deletes do not wait for a held sync');assert.equal(maxActive,2);
     assert.equal(calls.filter(c=>c.action==='trash'&&c.id==='1').length,1);
@@ -97,7 +97,7 @@ export async function testMailOperationQueue(page,url) {
     await reset({headers:true,unread:true});
     bodyGate=gate();await page.getByRole('button',{name:'Download message body',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('[data-body-status]')?.textContent.includes('Downloading'));
-    await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await item('2').waitFor();await page.keyboard.press('d');await item('3').waitFor();
+    await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await item('2').waitFor();await page.keyboard.press('D');await item('3').waitFor();
     bodyGate.release();bodyGate=null;
     for(let i=0;records.filter(r=>r.meta.folder==='Trash').length<2&&i<100;i++)await new Promise(resolve=>setTimeout(resolve,20));
     assert.equal(records.filter(r=>r.meta.folder==='Trash').length,2,'Both rapid deletes survive body hydration and read updates');

@@ -8,6 +8,8 @@ export async function testKeyboardScroll(page,url) {
   const raw=['Subject: Smooth keyboard fixture','Content-Type: multipart/alternative; boundary=scroll','','--scroll','Content-Type: text/plain; charset=UTF-8','',text,'--scroll','Content-Type: text/html; charset=UTF-8','',`<html><body><pre>${text}</pre></body></html>`,'--scroll--',''].join('\r\n');
   const imported=await page.request.post(url+'api.php?r=import',{headers:{'X-CSRF-Token':status.csrf},data:{format:'eml',base64:Buffer.from(raw).toString('base64')}});
   assert.equal(imported.status(),200);
+  const legacy=await page.request.post(url+'api.php?r=preferences',{headers:{'X-CSRF-Token':status.csrf},data:{preferences:{...status.preferences,keys:{...status.preferences?.keys,delete:'d',undoDelete:'u'}}}});
+  assert.equal(legacy.status(),200);
   await page.goto(url+'#mail');await page.reload();
   await page.locator('#mail-folder').selectOption('all');
   await page.locator('.item').filter({hasText:'Smooth keyboard fixture'}).click();
@@ -25,6 +27,9 @@ export async function testKeyboardScroll(page,url) {
       const press=async key=>{await page.keyboard.press(key);await settleScroll(owner);};
       await press('Home');assert.equal(await top(),0);
       const height=await owner.evaluate(node=>node.clientHeight);
+      await press('d');assert.ok(Math.abs(await top()-height*.5)<=1,mode+' plain d half page down with legacy delete binding');
+      await press('u');assert.ok(await top()<=1,mode+' plain u half page up with legacy undo binding');
+      await press('Home');
       await press('Control+d');assert.ok(Math.abs(await top()-height*.5)<=1,mode+' half page down');
       await press('Control+u');assert.equal(await top(),0,mode+' half page up');
       await press('Control+f');assert.ok(Math.abs(await top()-Math.max(56,height*.85))<=1,mode+' page down');
@@ -66,11 +71,11 @@ export async function testKeyboardScroll(page,url) {
     await list.evaluate(node=>{node.scrollTop=0;});
     await page.locator('#selected-item').focus();
     const listHeight=await list.evaluate(node=>node.clientHeight);
-    for(const [key,distance] of [['Control+d',listHeight*.5],['Control+f',Math.max(56,listHeight*.85)]]){
+    for(const [key,distance] of [['d',listHeight*.5],['Control+d',listHeight*.5],['Control+f',Math.max(56,listHeight*.85)]]){
       await list.evaluate(node=>{node.scrollTop=0;});
       await page.keyboard.press(key);await settleScroll(list);
       assert.ok(Math.abs(await list.evaluate(node=>node.scrollTop)-distance)<=1,key+' scrolls focused list');
-      await page.keyboard.press(key==='Control+d'?'Control+u':'Control+b');await settleScroll(list);
+      await page.keyboard.press(key==='d'?'u':key==='Control+d'?'Control+u':'Control+b');await settleScroll(list);
       assert.ok(await list.evaluate(node=>node.scrollTop)<=1,'reverse returns to top within pixel rounding');
     }
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selectedTask);
@@ -79,5 +84,8 @@ export async function testKeyboardScroll(page,url) {
       await field.focus();
       for(const key of ['f','b','d','u'])assert.equal(await field.evaluate((node,key)=>node.dispatchEvent(new KeyboardEvent('keydown',{key,ctrlKey:true,bubbles:true,cancelable:true})),key),true,'typing keeps Ctrl+'+key);
     }
-  } finally {await page.emulateMedia({reducedMotion:'no-preference'});}
+  } finally {
+    await page.emulateMedia({reducedMotion:'no-preference'});
+    await page.request.post(url+'api.php?r=preferences',{headers:{'X-CSRF-Token':status.csrf},data:{preferences:status.preferences}});
+  }
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {helpEntries,searchHelp} from '../public/help.js';
 import {commandRegistry,creationTypes,resolveCommand} from '../public/commands.js';
-const keys={down:'j',up:'k',left:'h',right:'l',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'d',undoDelete:'u'};
+const keys={down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U'};
 test('help follows current bindings including help and Sheets movement',()=>{
  const rows=helpEntries({...keys,help:'!',left:'H',down:'J',up:'K',right:'L',edit:'I'});
  assert.equal(rows.find(r=>r.action==='Open keyboard and command help').shortcut,'!');

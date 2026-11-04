@@ -56,7 +56,7 @@ export async function testMailView(page,url) {
     await header('Today').focus();await save(()=>page.keyboard.press('Enter'));assert.deepEqual(await order(),['a','b']);
     await open();await save(()=>page.getByRole('button',{name:'Expand all',exact:true}).click());assert.equal((await order()).length,4);
     await item('a').click();await save(()=>header('Today').click());
-    await item('c').click();await page.keyboard.press('d');await selected('u');
+    await item('c').click();await page.keyboard.press('D');await selected('u');
     assert.deepEqual(await order(),['u'],'Delete advances within the expanded order');
     await page.locator('#mail-folder').selectOption('Trash');assert.equal(await page.getByLabel('Group mail by').inputValue(),'date');
     await page.locator('#mail-folder').selectOption('Inbox');assert.equal(await header('Today').getAttribute('aria-expanded'),'false');

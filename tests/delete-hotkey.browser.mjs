@@ -13,6 +13,8 @@ export async function testDeleteHotkey(page,url) {
     await page.locator('#search').fill('d');
     await page.keyboard.press('d');
     assert.equal(await page.locator('#search').inputValue(),'dd');
+    await page.keyboard.press('Shift+D');
+    assert.equal(await page.locator('#search').inputValue(),'ddD');
     assert.equal(await page.locator('#dialog[open]').count(),0);
     await page.locator('#search').fill('');
     await page.locator('#main').focus();
@@ -20,12 +22,14 @@ export async function testDeleteHotkey(page,url) {
     assert.equal(await page.locator('#dialog[open]').count(),0);
     await page.locator('#main').focus();
     await page.keyboard.press('d');
+    assert.equal(await page.locator('#dialog[open]').count(),0,'lowercase d never deletes');
+    await page.keyboard.press('Shift+D');
     await page.getByRole('heading',{name:'Delete item',exact:true}).waitFor();
-    await page.keyboard.press('d');
+    await page.keyboard.press('D');
     assert.equal(await page.locator('#dialog[open]').count(),1);
     await page.locator('#cancel').click();
     assert.equal(await page.locator('.item').filter({hasText:title}).count(),1);
-    await page.locator('#main').focus();await page.keyboard.press('d');
+    await page.locator('#main').focus();await page.keyboard.press('D');
     await page.locator('#confirm').click();
     await page.locator('.item').filter({hasText:title}).waitFor({state:'detached'});
     await page.locator('#notice').filter({hasText:'Item deleted.'}).waitFor();

@@ -51,12 +51,12 @@ export async function testMailArchive(page, url) {
     assert.equal(await page.locator('#mail-folder').inputValue(),'Archive');
     await select(message.title);
     assert.deepEqual(await page.locator('#detail .badge').allTextContents(),['Archive','Cached']);
-    await page.locator('#main').focus();await page.keyboard.press('d');
+    await page.locator('#main').focus();await page.keyboard.press('D');
     await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
     assert.equal(await page.locator('.item').count(),0);
     await folder('Trash');await select(message.title);
     const writesInTrash=providerWrites;
-    await page.locator('#main').focus();await page.keyboard.press('d');
+    await page.locator('#main').focus();await page.keyboard.press('D');
     assert.equal(providerWrites,writesInTrash);
     assert.equal(await page.locator('#dialog[open]').count(),0);
     await page.getByRole('button',{name:'Restore to Inbox',exact:true}).click();

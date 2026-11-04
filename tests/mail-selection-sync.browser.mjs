@@ -45,13 +45,13 @@ export async function testMailSelectionSync(page,url) {
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'b');
     assert.equal(await page.locator('#selected-item').evaluate(n=>n===document.activeElement),true);
     await page.keyboard.press('j');await page.keyboard.press('v');await selection(['a','b','c']);
-    await page.keyboard.press('d');await item('a').waitFor({state:'detached'});await item('b').waitFor({state:'detached'});await item('c').waitFor({state:'detached'});
+    await page.keyboard.press('D');await item('a').waitFor({state:'detached'});await item('b').waitFor({state:'detached'});await item('c').waitFor({state:'detached'});
     await page.locator('#notice').filter({hasText:'3 items updated.'}).waitFor();
 
     await reset();await item('a').click();await item('c').click({modifiers:['Control']});await sync();await selection(['a','c']);
     await item('d').click({modifiers:['Shift']});await selection(['c','d']);
     removeId='c';await sync();await selection(['d']);
-    await page.keyboard.press('d');await item('d').waitFor({state:'detached'});
+    await page.keyboard.press('D');await item('d').waitFor({state:'detached'});
 
     // Selection changes made while a refresh is pending must take precedence.
     await reset();await item('a').click();await page.keyboard.press('v');holdRecords=true;

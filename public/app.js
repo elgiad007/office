@@ -28,7 +28,7 @@ const apps = {
     wiki: { name: 'Wiki', singular: 'page', empty: 'No pages yet.', hint: 'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].', icon: 'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3' },
     sheets: { name: 'Sheets', singular: 'workbook', empty: 'No workbooks yet.', hint: 'Create a workbook or import a CSV file.', icon: 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18' },
 };
-const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'd', undoDelete: 'u', completeTask: 'x' };
+const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', pageDown: 'd', pageUp: 'u', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'D', undoDelete: 'U', completeTask: 'x' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiPreview: true, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const lastSelectedItems = new Map();
 function rememberSelection() {
@@ -75,7 +75,13 @@ const pendingMailReads = new Map();
 const mailAccountQueue = new Map(), mailSnapshots = new Map(), mailLatest = new Map(), trashedMailCopies = new Map();
 let mailReadVersion = 0, displayedMailId = null;
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
-const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => [action, state.prefs.keys?.[action] || defaultKeys[action]]));
+const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => {
+    const saved = state.prefs.keys?.[action];
+    // Upgrade the former defaults when reading older saved bindings. Settings
+    // displays these effective values and persists them on the next save.
+    const legacy = action === 'delete' && saved === 'd' || action === 'undoDelete' && saved === 'u';
+    return [action, legacy ? defaultKeys[action] : saved || defaultKeys[action]];
+}));
 const editable = (node) => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName);
 const dateLabel = (value) => { const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? value + 'T00:00:00' : value); return timestampLabel(value, Number.isNaN(+date) ? value : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })); };
 setInterval(() => { if (!document.hidden)
@@ -2411,6 +2417,11 @@ document.addEventListener('keydown', event => {
     keySequence = '';
     const listArrow = activePane() === 'list' ? (key === 'ArrowUp' || key === 'ArrowLeft' ? 'up' : key === 'ArrowDown' || key === 'ArrowRight' ? 'down' : undefined) : undefined;
     const action = listArrow || Object.keys(k).find(action => k[action] === key);
+    if (action === 'pageDown' || action === 'pageUp') {
+        if (scrollFocusedPane(target, action === 'pageDown' ? 'half-page-down' : 'half-page-up') !== false)
+            event.preventDefault();
+        return;
+    }
     const scrollKey = { ArrowUp: 'up', ArrowDown: 'down', PageUp: 'page-up', PageDown: 'page-down', Home: 'start', End: 'end' };
     if (mailBody && scrollKey[key]) {
         event.preventDefault();

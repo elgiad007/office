@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {testKeyboardScroll} from './keyboard-scroll.browser.mjs';
 import {testListArrows} from './list-arrows.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
+import {testDeleteHotkey} from './delete-hotkey.browser.mjs';
+import {testMailUndo} from './mail-undo.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
 const browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
@@ -23,4 +25,8 @@ try {
   await testListArrows(page,url);
   assert.deepEqual(errors,[]);
   console.log('PASS list arrow navigation across all seven apps.');
+  await testDeleteHotkey(page,url);
+  await testMailUndo(page,url);
+  assert.deepEqual(errors,[]);
+  console.log('PASS capital D deletion, capital U undo, saved bindings, and custom undo mapping.');
 } finally {await browser.close();}
