@@ -4,11 +4,11 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   const rows: HelpEntry[]=[];
   const add=(shortcut: string,action: string,context='Normal mode',options='')=>rows.push({shortcut,action,context,options});
   add(k.help,'Open keyboard and command help','Normal mode, including Settings','Remappable in Settings.');
-  add(k.down+' / '+k.up,'Next / previous item or scroll content','Normal mode','Acts on the focused pane; focused spreadsheet cells move between cells.');add(k.left+' / '+k.right,'Focus list / selected item');
-  add('gg / G','First / last item or content beginning / end','Normal mode','Acts on the focused pane. Press g twice within 900 ms.');
+  add(k.down+' / '+k.up,'Next / previous item','Normal mode','Works from the list and nonediting content; scrolls a focused read-only mail body. Use arrows or Tab for spreadsheet cells.');add(k.left+' / '+k.right,'Focus list / selected item');
+  add('gg / G','First / last item','Normal mode','Keeps focus in the current pane; goes to top / bottom in a focused read-only mail body. Press g twice within 900 ms.');
   add('Tab / Shift+Tab','Enter selected content / return to list','Selected list row / content entry','Enters without editing. Standard controls and spreadsheet cells retain native Tab behavior.');
   add('g 1 … g 7','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets. Sequence timeout: 900 ms.');
-  add(k.search,'Search current application');add('n / N','Next / previous item in search results or scroll content','Normal mode','Acts on the focused pane.');
+  add(k.search,'Search current application');add('n / N','Next / previous item in search results','Normal mode','Keeps focus in the current pane, including mail bodies.');
   add(k.new,'Create an item / compose');add(k.edit,'Enter edit mode');add(k.select,'Toggle current item selection');add(k.save,'Save changes');
   add('Ctrl+S / Cmd+S','Save changes','Normal or insert mode, outside dialogs');
   add('Escape','Leave editor and save; clear selection otherwise','Outside dialogs','In formula input, return focus to selected cell.');
@@ -18,11 +18,11 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('Ctrl+Enter','Send current local draft','Mail, normal or insert mode','Confirmation enabled by default; change in Settings → Mail.');
   add(':','Open command line','Normal mode, including Settings','Enter executes once; Escape cancels and restores focus.');
   for(const [name,entry] of Object.entries(commandRegistry))add(':'+name,entry.action,entry.context,entry.options+('aliases' in entry?' Aliases: '+entry.aliases.map(alias=>':'+alias).join(', ')+'.':''));
-  add(k.left+' / '+k.down+' / '+k.up+' / '+k.right+' / Arrow keys','Move between cells','Sheets, focused cell','Uses current navigation bindings; 30 rows × 12 columns.');
+  add('Arrow keys','Move between cells','Sheets, focused cell','30 rows × 12 columns; item shortcuts still navigate records.');
   add(k.edit+' / Enter','Edit selected cell','Sheets, normal mode');add('Tab / Shift+Tab','Next / previous cell','Sheets, focused cell');
   add('/','Focus header search','Message headers, outside search field');add('n / p','Next / previous header match','Message headers, outside search field');add('Enter / Shift+Enter','Next / previous header match','Message headers search field');
   add('ArrowDown / ArrowUp','Choose matching folder','Quick Move search');add('Enter','Move to chosen folder','Quick Move');add('Escape','Cancel Quick Move','Quick Move','Cannot dismiss while a move is running.');
-  add('Shift+F10 / Menu key','Open item action menu','Focused item in list');add('ArrowDown / ArrowUp / Home / End','Focus next / previous / first / last action','Item action menu');add('Enter / Space','Run focused action','Item action menu');add('Escape / Tab','Close menu and return focus','Item action menu');
+  add('Shift+F10 / Menu key','Open item action menu','List or nonediting content');add('ArrowDown / ArrowUp / Home / End','Focus next / previous / first / last action','Item action menu');add('Enter / Space','Run focused action','Item action menu');add('Escape / Tab','Close menu and return focus','Item action menu');
   add('Escape','Close mail disclosure, actions menu or narrow-screen folders','Mail','Returns focus to the relevant toggle.');
   add('Tab / Shift+Tab','Move focus forward / backward','Standard controls','Native buttons and disclosures use Enter / Space. Editors retain browser editing keys.');
   add('Escape','Close help or other dismissible dialog','Dialogs','Help returns focus to its opener.');

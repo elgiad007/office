@@ -395,6 +395,7 @@ function searchableText(record) {
 }
 function filteredRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'mail' || (state.mailScope ? matchesMailScope(r, state.mailScope, state.accounts) : state.mailFolder === 'all' ? !['Recovery copies', 'Not in Inbox', 'Trash'].includes(r.meta.folder || '') : state.mailFolder === 'Recovery copies' ? ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '') : (r.meta.folder || 'Archive') === state.mailFolder)) && (!q || searchableText(r).includes(q))); }
 async function deleteMailImmediately(rows, operation, undoable = false) {
+    const pane = activePane();
     const ids = new Set(rows.map(r => r.id)), visible = filteredRows().map(r => r.id), currentId = state.current?.id;
     const context = JSON.stringify([state.mailFolder, state.mailScope, state.search]);
     let gesture;
@@ -424,7 +425,7 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
     renderList();
     if (advance)
         renderDetail();
-    (document.querySelector('#selected-item') || document.querySelector('#main'))?.focus({ preventScroll: true });
+    restorePane(pane);
     document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     let count = 0;
     const reconciled = new Set();
@@ -456,10 +457,12 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
                 for (const id of reconciled)
                     state.selected.delete(id);
                 if (reconciled.has(state.current?.id)) {
-                    state.current = filteredRows()[0] || null;
+                    const visibleIds = new Set(filteredRows().map(r => r.id));
+                    const next = [...visible.slice(index + 1), ...visible.slice(0, index).reverse()].find(id => !ids.has(id) && !reconciled.has(id) && visibleIds.has(id));
+                    state.current = state.rows.find(r => r.id === next) || null;
                     renderList();
                     renderDetail();
-                    (document.querySelector('#selected-item') || document.querySelector('#main'))?.focus({ preventScroll: true });
+                    restorePane(pane);
                 }
             }
             // Keep confirmed moves available when switching folders.
@@ -498,6 +501,7 @@ async function deleteMailImmediately(rows, operation, undoable = false) {
 async function undoMailDelete() {
     if (state.app !== 'mail' || undoingMailDelete)
         return;
+    const pane = activePane();
     const gesture = lastMailDelete;
     if (!gesture) {
         notice('No mail deletion to undo.');
@@ -526,7 +530,7 @@ async function undoMailDelete() {
             const sameContext = gesture.context === JSON.stringify([state.mailFolder, state.mailScope, state.search]) && selectedAtUndo === gesture.nextId && state.current?.id === selectedAtUndo;
             await load(sameContext && restored.includes(gesture.currentId) ? gesture.currentId : undefined, { preserveSelection: true, selectFirst: false });
             if (sameContext)
-                document.querySelector('#selected-item')?.focus({ preventScroll: true });
+                restorePane(pane);
         }
         if (!gesture.receipts.length && lastMailDelete === gesture)
             lastMailDelete = undefined;
@@ -541,19 +545,24 @@ async function undoMailDelete() {
 function mailDeletionReload() {
     const currentId = state.current?.id, ids = filteredRows().map(r => r.id);
     const context = () => JSON.stringify([state.app, state.mailFolder, state.mailScope, state.search]);
-    const originalContext = context(), mail = state.app === 'mail';
+    const originalContext = context(), pane = activePane();
     return async (removedIds) => {
-        const advance = mail && ids.includes(currentId) && removedIds.includes(currentId) && state.current?.id === currentId && context() === originalContext;
-        await load(undefined, { selectFirst: false });
-        if (!advance || context() !== originalContext || (state.current && state.current.id !== currentId))
+        const advance = ids.includes(currentId) && removedIds.includes(currentId) && state.current?.id === currentId && context() === originalContext;
+        if (state.current?.id !== currentId)
             return;
+        await load(undefined, { selectFirst: false });
+        if (context() !== originalContext || (state.current && state.current.id !== currentId))
+            return;
+        if (!advance) {
+            restorePane(pane);
+            return;
+        }
         const visible = new Set(filteredRows().map(r => r.id)), removed = new Set(removedIds), index = ids.indexOf(currentId);
         const nextId = [...ids.slice(index + 1), ...ids.slice(0, index).reverse()].find(id => !removed.has(id) && visible.has(id));
         state.current = state.rows.find(r => r.id === nextId) || null;
         renderList();
         renderDetail();
-        const target = document.querySelector('#selected-item') || document.querySelector('#main');
-        target?.focus({ preventScroll: true });
+        restorePane(pane);
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     };
 }
@@ -601,6 +610,7 @@ function captureMailReader() {
     return snapshot;
 }
 async function load(preferId, { selectFirst = true, preserveSelection = false } = {}) {
+    const contentFocused = preserveSelection && activePane() === 'content' && !editable(document.activeElement);
     await waitForAttachments();
     if (state.app !== 'mail')
         displayedMailId = null;
@@ -674,6 +684,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false } 
     if (focusedId)
         document.querySelector(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
     restoreMailListViewport(listViewport);
+    if (contentFocused)
+        restorePane('content');
 }
 function renderWorkspace(readerSnapshot) {
     const a = apps[state.app];
@@ -1005,6 +1017,7 @@ function updateMailListItem(id) {
         label.textContent = row.meta.read ? 'Read' : 'Unread';
 }
 async function selectRecord(id, focus = false) {
+    const pane = activePane();
     await waitForAttachments();
     await commit();
     const previous = state.current?.id;
@@ -1022,7 +1035,11 @@ async function selectRecord(id, focus = false) {
     else
         renderList();
     renderDetail();
-    if (focus) {
+    if (focus && pane === 'content') {
+        focusContent();
+        document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
+    }
+    else if (focus) {
         const selected = document.querySelector('#selected-item');
         selected?.focus({ preventScroll: true });
         selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -1462,7 +1479,7 @@ async function handleClick(event) {
             if (state.app === 'mail')
                 await deleteSelectedMail();
             else
-                confirmation('Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async () => { await commit(); const record = state.current; await api('delete', { id: record.id, revision: record.revision }); await load(); notice('Item deleted.'); });
+                confirmation('Delete item', 'Delete this item and its revision history? Export a copy first if you need it.', async () => { await commit(); const record = state.current, reload = mailDeletionReload(); await api('delete', { id: record.id, revision: record.revision }); await reload([record.id]); notice('Item deleted.'); });
         }
         if (action === 'logout')
             await signOut();
@@ -1594,7 +1611,7 @@ async function archiveLocal() {
         notice(`Archived ${rows.length} messages.`);
         return;
     }
-    const reconciled = new Set();
+    const reconciled = new Set(), reload = mailDeletionReload();
     try {
         for (const id of ids) {
             if (reconciled.has(id)) {
@@ -1624,7 +1641,7 @@ async function archiveLocal() {
         catch { }
         throw error;
     }
-    await load();
+    await reload(ids);
     notice(`Archived ${count} messages.`);
 }
 async function mailAction(action, record = state.current) {
@@ -1791,7 +1808,7 @@ function accountDialog() {
             renderSettings();
         } });
 }
-const itemMenus = installItemMenus({ state, e, commit, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, waitForMailRead: id => pendingMailReads.get(id), mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
+const itemMenus = installItemMenus({ state, e, commit, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
 function contentEntry() {
     const panel = document.querySelector('#detail');
     return panel?.querySelector('.mail-html, .mail-body, .sheet-wrap') || panel;
@@ -1805,24 +1822,39 @@ function focusContent() {
         entry.focus({ preventScroll: true });
     }
 }
-function scrollContent(direction) {
-    const frame = document.querySelector('.mail-html');
+function scrollMailBody(target, direction) {
+    const frame = target.closest('.mail-html');
     if (frame) {
         frame.contentWindow?.postMessage({ type: 'office-mail-scroll', direction }, '*');
         return;
     }
     const panel = document.querySelector('#detail');
-    const body = panel?.querySelector('.sheet-wrap, #rich-editor, textarea.body-editor');
-    const target = body && body.scrollHeight > body.clientHeight ? body : panel;
-    if (!target)
+    if (!panel)
         return;
-    target.scrollTo({ top: direction === 'start' ? 0 : direction === 'end' ? target.scrollHeight : target.scrollTop + (direction === 'up' ? -1 : 1) * Math.max(40, target.clientHeight * .15), behavior: 'instant' });
-    if (panel && target !== panel) {
-        if (direction === 'start' || direction === 'end')
-            panel.scrollTop = direction === 'start' ? 0 : panel.scrollHeight;
-        else if (target.getBoundingClientRect().top > panel.getBoundingClientRect().bottom)
-            target.scrollIntoView({ block: 'nearest' });
+    panel.scrollTo({ top: direction === 'start' ? 0 : direction === 'end' ? panel.scrollHeight : panel.scrollTop + (direction === 'up' ? -1 : 1) * Math.max(40, panel.clientHeight * .15), behavior: 'instant' });
+}
+let lastPane = 'list';
+function activePane() { const node = document.activeElement; if (node?.closest('#detail'))
+    return 'content'; if (node?.closest('#items'))
+    return 'list'; return lastPane; }
+document.addEventListener('focusin', event => { const node = event.target; if (node.closest('#detail'))
+    lastPane = 'content';
+else if (node.closest('#items'))
+    lastPane = 'list'; });
+function restorePane(pane) {
+    if (pane === 'content') {
+        if (state.current)
+            focusContent();
+        else {
+            const panel = document.querySelector('#detail');
+            if (panel) {
+                panel.tabIndex = -1;
+                panel.focus({ preventScroll: true });
+            }
+        }
     }
+    else
+        (document.querySelector('#selected-item') || document.querySelector('#main'))?.focus({ preventScroll: true });
 }
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented)
@@ -1877,9 +1909,12 @@ document.addEventListener('keydown', event => {
                 selectCell(state.cell, true);
         }
         else {
+            const pane = activePane();
             state.selected.clear();
-            if (state.app !== 'settings')
+            if (state.app !== 'settings') {
                 renderList();
+                restorePane(pane);
+            }
         }
         return;
     }
@@ -1887,7 +1922,9 @@ document.addEventListener('keydown', event => {
         setMode('insert');
         return;
     }
-    if (event.ctrlKey || event.metaKey || event.altKey)
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey)
+        return;
+    if (event.target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input') && ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key))
         return;
     const target = event.target;
     if (event.key === 'Tab' && !event.shiftKey && target.matches('#selected-item')) {
@@ -1910,26 +1947,30 @@ document.addEventListener('keydown', event => {
     }
     const k = keys(), key = event.key;
     setMode('normal');
+    const mailBody = state.app === 'mail' && state.current && state.current.meta.folder !== 'Drafts' && !!target.closest('.mail-body,.mail-html');
     if (Date.now() - sequenceTime > 900)
         keySequence = '';
     sequenceTime = Date.now();
+    if (event.repeat && key === 'g') {
+        event.preventDefault();
+        return;
+    }
     if (keySequence === 'g' && /^[1-7]$/.test(key)) {
         event.preventDefault();
         keySequence = '';
         void attempt(() => changeApp(Object.keys(apps)[Number(key) - 1]));
         return;
     }
-    const inContent = !!target.closest('#detail');
     if (keySequence === 'g' && key === 'g') {
         keySequence = '';
         event.preventDefault();
-        if (inContent)
-            scrollContent('start');
-        else {
-            const row = filteredRows()[0];
-            if (row)
-                void attempt(() => selectRecord(row.id, true));
+        if (mailBody) {
+            scrollMailBody(target, 'start');
+            return;
         }
+        const row = filteredRows()[0];
+        if (row)
+            void attempt(() => selectRecord(row.id, true));
         return;
     }
     if (key === 'g') {
@@ -1939,6 +1980,15 @@ document.addEventListener('keydown', event => {
     }
     keySequence = '';
     const action = Object.keys(k).find(action => k[action] === key);
+    if (event.repeat && action && !['down', 'up', 'left', 'right'].includes(action)) {
+        event.preventDefault();
+        return;
+    }
+    if (mailBody && (action === 'down' || action === 'up' || key === 'G')) {
+        event.preventDefault();
+        scrollMailBody(target, key === 'G' ? 'end' : action === 'up' ? 'up' : 'down');
+        return;
+    }
     if (action === 'help') {
         event.preventDefault();
         help();
@@ -1984,6 +2034,8 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'archive') {
         event.preventDefault();
+        if (event.repeat)
+            return;
         void attempt(archiveLocal);
         return;
     }
@@ -2007,18 +2059,19 @@ document.addEventListener('keydown', event => {
             state.selected.delete(id);
         else
             state.selected.add(id);
+        const pane = activePane();
         renderList();
-        document.querySelector('#selected-item')?.focus({ preventScroll: true });
+        restorePane(pane);
         return;
     }
-    if (state.app === 'sheets' && state.current && target.closest('[data-cell]') && ([k.left, k.right, k.down, k.up, 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'Tab'].includes(key))) {
+    if (state.app === 'sheets' && state.current && target.closest('[data-cell]') && (['ArrowLeft', 'ArrowRight', 'ArrowDown', 'ArrowUp', 'Tab'].includes(key))) {
         event.preventDefault();
         let [r, c] = cellPosition(state.cell);
-        if (key === k.left || key === 'ArrowLeft' || key === 'Tab' && event.shiftKey)
+        if (key === 'ArrowLeft' || key === 'Tab' && event.shiftKey)
             c--;
-        else if (key === k.right || key === 'ArrowRight' || key === 'Tab')
+        else if (key === 'ArrowRight' || key === 'Tab')
             c++;
-        else if (key === k.up || key === 'ArrowUp')
+        else if (key === 'ArrowUp')
             r--;
         else
             r++;
@@ -2036,11 +2089,6 @@ document.addEventListener('keydown', event => {
             selectCell(state.cell, true);
         else
             focusContent();
-        return;
-    }
-    if (inContent && (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G')) {
-        event.preventDefault();
-        scrollContent(key === 'G' ? 'end' : action === 'up' || key === 'N' ? 'up' : 'down');
         return;
     }
     if (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G') {

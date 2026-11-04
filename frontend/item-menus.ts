@@ -3,11 +3,11 @@ import type {AppName, MenuEnvironment, OfficeRecord} from './types.js';
 // Item menus share the application's persistence and provider operations.
 export function installItemMenus(env: MenuEnvironment) {
   const {state,e}=env;
-  let menu: HTMLDivElement | null=null,origin: string | null=null,generation=0;
+  let menu: HTMLDivElement | null=null,origin: string | null=null,generation=0,restoreOrigin: (()=>void)|undefined;
   function close(restore=false) {
     generation++;
     menu?.remove();menu=null;
-    if(restore&&origin)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(origin)}"]`)!?.focus({preventScroll:true});
+    if(restore)restoreOrigin?.();
   }
   const recovery=(r: OfficeRecord)=>r.meta.remote&&['Recovery copies','Not in Inbox'].includes(r.meta.folder||'');
   function actions(rows: OfficeRecord[]) {
@@ -75,7 +75,7 @@ export function installItemMenus(env: MenuEnvironment) {
             await env.api('save',copy);
           }
           count++;
-          if(['delete','trash','discard'].includes(id))removed.push(row.id);
+          if(['delete','trash','discard','archive'].includes(id))removed.push(row.id);
         }
       }catch(cause) { const error=asError(cause);throw Error(`${count} of ${rows.length} items updated. ${error.message}`);}
       finally{await reload(removed);}
@@ -85,12 +85,12 @@ export function installItemMenus(env: MenuEnvironment) {
     else await apply();
   }
   async function open(row: HTMLElement,x: number,y: number) {
-    close();const token=generation,app=state.app,id=row.dataset.id!;
+    const restore=env.capturePane();close();restoreOrigin=restore;const token=generation,app=state.app,id=row.dataset.id!;
     await env.commit();
     if(token!==generation||state.app!==app)return;
     env.mouseSelection();
     if(!state.selected.has(id)){state.selected.clear();state.selected.add(id);}
-    await env.selectRecord(id);
+    if(state.current?.id===id)env.renderList();else await env.selectRecord(id);
     if(token!==generation||state.app!==app)return;
     origin=id;
     const rows=state.rows.filter(r=>state.selected.has(r.id)),ids=rows.map(r=>r.id);
@@ -105,7 +105,10 @@ export function installItemMenus(env: MenuEnvironment) {
     menu.onclick=event=>{const b=(event.target as HTMLElement).closest<HTMLElement>('[data-menu-action]');if(!b)return;const action=b.dataset.menuAction!;close(true);void env.attempt(()=>run(action,ids,app));};
   }
   document.addEventListener('contextmenu',event=>{
-    const row=(event.target as HTMLElement).closest<HTMLElement>('#items [data-id]');
+    const target=event.target as HTMLElement;
+    const detail=target.closest('#detail');
+    if(detail&&(target.closest('input,textarea,select,[contenteditable],a,button,summary')||getSelection()?.toString()))return;
+    const row=target.closest<HTMLElement>('#items [data-id]')||(detail?document.querySelector<HTMLElement>('#selected-item'):null);
     if(!row){close();return;}
     event.preventDefault();void env.attempt(()=>open(row,event.clientX,event.clientY));
   });
@@ -121,7 +124,9 @@ export function installItemMenus(env: MenuEnvironment) {
       return;
     }
     if(event.key!=='ContextMenu'&&!(event.shiftKey&&event.key==='F10'))return;
-    const row=(event.target as HTMLElement).closest<HTMLElement>('#items [data-id]');if(!row)return;
+    const target=event.target as HTMLElement;
+    if((target.closest('input,textarea,select,[contenteditable],a,button,summary')&&!target.closest('#items'))||target.closest('#detail')&&getSelection()?.toString())return;
+    const row=target.closest<HTMLElement>('#items [data-id]')||(target.closest('#detail')?document.querySelector<HTMLElement>('#selected-item'):null);if(!row)return;
     event.preventDefault();const rect=row.getBoundingClientRect();void env.attempt(()=>open(row,rect.left+20,rect.top+20));
   });
   document.addEventListener('pointerdown',event=>{if(!menu?.contains((event.target as HTMLElement)))close();});

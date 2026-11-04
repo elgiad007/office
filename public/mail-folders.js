@@ -134,6 +134,7 @@ async function manageFolder(env, accountId, action) {
     } }); };
 }
 export async function fileMail(env) {
+    const reload = env.mailDeletionReload?.();
     await env.commit();
     const { state, e } = env;
     const rows = state.selected.size ? state.rows.filter(r => state.selected.has(r.id)) : [state.current].filter(isPresent);
@@ -154,13 +155,15 @@ export async function fileMail(env) {
         button.disabled = true;
         void env.attempt(async () => {
             let count = 0;
-            const removed = new Set();
+            const removed = new Set(), moved = [];
             try {
                 await busy(env, async () => { for (const row of rows) {
                     if (!removed.has(row.id)) {
                         const result = await env.api('mail-action', { id: row.id, revision: row.revision, action: form.get('action') || 'move', folder: form.get('folder') });
                         for (const id of result.removedIds || [])
                             removed.add(id);
+                        if ((form.get('action') || 'move') === 'move')
+                            moved.push(row.id);
                     }
                     count++;
                 } });
@@ -173,13 +176,17 @@ export async function fileMail(env) {
             }
             finally {
                 button.disabled = false;
-                await reloadMail(env);
+                if (reload)
+                    await reload([...removed, ...moved]);
+                else
+                    await reloadMail(env);
             }
         });
     };
 }
 /** Quick Move keeps typing focus in the search box, including while navigating matches. */
 export async function quickMoveMail(env) {
+    const reload = env.mailDeletionReload?.();
     await env.commit();
     const { state, e } = env;
     if (state.app !== 'mail')
@@ -218,7 +225,6 @@ export async function quickMoveMail(env) {
         input.disabled = true;
         closeButton.disabled = true;
         render();
-        const reload = env.mailDeletionReload?.();
         let count = completed.size;
         try {
             await busy(env, async () => {

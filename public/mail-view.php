@@ -26,20 +26,30 @@ try {
     // removes sender scripts and event handlers before the bridge is appended.
     $bridge=<<<'JS'
 (()=>{
-  let keys=new Set(['g','G','n','N','Tab']);
+  let keys=new Set(['g','G','n','N','Tab']),sequenceTime=0;
   addEventListener('message',event=>{
     if(event.source!==parent)return;
     const data=event.data;
     if(!data||typeof data!=='object'||Array.isArray(data))return;
-    if(data.type==='office-mail-config'&&Object.keys(data).length===2&&Array.isArray(data.keys)&&data.keys.length<=16&&data.keys.every(key=>typeof key==='string'&&key.length<=32)){keys=new Set(data.keys);return;}
+    if(data.type==='office-mail-config'&&Object.keys(data).length===2&&Array.isArray(data.keys)&&data.keys.length<=64&&data.keys.every(key=>typeof key==='string'&&key.length<=32)){keys=new Set(data.keys);return;}
     if(data.type!=='office-mail-scroll'||Object.keys(data).length!==2||!['up','down','start','end'].includes(data.direction))return;
     const root=document.scrollingElement;
     if(root)scrollTo({top:data.direction==='start'?0:data.direction==='end'?root.scrollHeight:scrollY+(data.direction==='up'?-1:1)*Math.max(40,innerHeight*.15),behavior:'instant'});
   });
   addEventListener('keydown',event=>{
+    if(!event.defaultPrevented&&!event.isComposing&&!event.altKey&&!event.shiftKey&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();parent.postMessage({type:'office-mail-save',ctrlKey:event.ctrlKey,metaKey:event.metaKey,repeat:event.repeat},'*');return;}
     if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey||event.target.closest('input,textarea,select,[contenteditable]'))return;
+    if(event.target.closest('a,button')&&['Enter',' ','Tab','ContextMenu','F10'].includes(event.key))return;
+    if(event.key==='F10'&&!event.shiftKey)return;
+    if(['F10','ContextMenu'].includes(event.key)&&getSelection()?.toString())return;
+    if(/^[1-7]$/.test(event.key)&&Date.now()-sequenceTime>900)return;
+    sequenceTime=event.key==='g'?Date.now():0;
     if(!keys.has(event.key)||(event.key==='Tab'&&(!event.shiftKey||event.target.closest('a,button'))))return;
-    event.preventDefault();parent.postMessage({type:'office-mail-key',key:event.key,shiftKey:event.shiftKey},'*');
+    event.preventDefault();parent.postMessage({type:'office-mail-key',key:event.key,shiftKey:event.shiftKey,repeat:event.repeat},'*');
+  });
+  addEventListener('contextmenu',event=>{
+    if(event.defaultPrevented||event.target.closest('input,textarea,select,[contenteditable],a,button')||getSelection()?.toString())return;
+    event.preventDefault();parent.postMessage({type:'office-mail-context',x:event.clientX,y:event.clientY},'*');
   });
   parent.postMessage({type:'office-mail-ready'},'*');
 })();

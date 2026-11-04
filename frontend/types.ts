@@ -141,6 +141,7 @@ export interface FolderEnvironment {
   mailDeletionReload?: () => (removedIds: string[]) => Promise<void>;
 }
 export interface MenuEnvironment {
+  renderList: () => void;
   state: AppState; e: (value: unknown) => string; commit: () => Promise<void>;
   selectRecord: (id: string, focus?: boolean) => Promise<void>; enterEdit: (preferTitle?: boolean) => void;
   api: RequestApi; load: () => Promise<void>;
@@ -149,5 +150,5 @@ export interface MenuEnvironment {
   confirmation: Confirmation; attempt: Attempt;
   exportRecords: (all?: boolean, selectedRecords?: OfficeRecord[]) => Promise<void>;
   waitForMailRead: (id: string) => Promise<unknown> | undefined;
-  mouseSelection: () => void; fileMail: () => Promise<void>;
+  capturePane: () => () => void; mouseSelection: () => void; fileMail: () => Promise<void>;
 }

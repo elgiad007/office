@@ -28,7 +28,7 @@ export async function testMailDeleteSelection(page,url) {
   const release=id=>{held.get(id).release();held.delete(id);};
   const item=id=>page.locator(`#items [data-id="${id}"]`);
   const selected=async id=>{
-    await page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id===id&&document.activeElement?.id==='selected-item',id);
+    await page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id===id&&(document.activeElement?.id==='selected-item'||document.activeElement?.closest('#detail')),id);
     assert.equal(await page.locator('#detail h1').last().textContent(),'Queue '+id);
   };
   const trash=async()=>{await page.getByRole('button',{name:'Move to Trash',exact:true}).click();await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();};
@@ -38,6 +38,10 @@ export async function testMailDeleteSelection(page,url) {
     await item('gmail-inbox').click();reconcileIds=['gmail-all'];await trash();
     assert.equal(await item('gmail-all').count(),0);
     await page.reload();assert.equal(await item('gmail-all').count(),0);
+    await reset(['prior','current','alias','next']);
+    await item('current').click();await page.keyboard.press('Tab');reconcileIds=['alias'];await page.keyboard.press('d');await selected('next');
+    assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'Reconciled aliases skip forward without jumping to earlier rows');
+
     await reset(['a','b','c']);await item('a').click();await item('b').click({modifiers:['Control']});
     reconcileIds=['b'];await menuTrash('a');
     await page.locator('#notice').filter({hasText:'2 items updated.'}).waitFor();await selected('c');
@@ -50,7 +54,8 @@ export async function testMailDeleteSelection(page,url) {
     await page.locator('#notice').filter({hasText:'Moved to Trash.'}).waitFor();
     await page.reload();assert.equal(await item('a').count(),0);assert.equal(await item('b').count(),0);
 
-    await reset(['a','b','c']);await item('b').click();await trash();await selected('c');
+    await reset(['a','b','c']);await item('b').click();await page.keyboard.press('Tab');await page.keyboard.press('d');await selected('c');
+    assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'Deletion retains content focus');
     // Repeated keyboard processing works directly from the newly focused row.
     await page.keyboard.press('d');await selected('a');await page.keyboard.press('d');
     await page.getByRole('heading',{name:'No messages in this folder.',exact:true}).waitFor();

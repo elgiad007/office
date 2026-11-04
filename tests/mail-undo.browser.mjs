@@ -63,7 +63,7 @@ export async function testMailUndo(page,url) {
     await reset(true,{undoDelete:'z'});await press('d');await deleted();
     await page.locator('#search').fill('u');await page.keyboard.press('z');assert.equal(await page.locator('#search').inputValue(),'uz');await page.locator('#search').fill('');
     await press('Control+z');await press('Alt+z');await press('u');assert.equal(calls.filter(c=>c.route==='mail-undo').length,0,'typing/modifiers and old binding ignored');
-    await page.getByRole('button',{name:'Keyboard shortcuts',exact:true}).click();await page.keyboard.press('z');assert.equal(calls.filter(c=>c.route==='mail-undo').length,0,'dialog guard');await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'Keyboard shortcuts',exact:true}).click();await page.keyboard.press('z');assert.equal(calls.filter(c=>c.route==='mail-undo').length,0,'dialog guard');await page.locator('#dialog [data-close]').click();await page.locator('#dialog').waitFor({state:'hidden'});
     await page.getByRole('button',{name:'Tasks',exact:true}).click();await press('z');assert.equal(calls.filter(c=>c.route==='mail-undo').length,0,'mail-only binding');
     await page.getByRole('button',{name:'Mail',exact:true}).click();await press('z');await page.locator('#notice').filter({hasText:'1 message restored.'}).waitFor();
     console.log('PASS mail undo: pending batch, repeat guard, partial failure/retry, local context menu, toolbar, navigation, remapping, typing/modifiers/dialog and mail-only guards.');

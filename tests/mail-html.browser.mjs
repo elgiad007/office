@@ -7,9 +7,10 @@ export async function testMailHtml(page,url) {
   const pixel='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=';
   const html='<html><head><style>.hero{color:rgb(180, 30, 60);font-size:24px}body{background-image:url(https://mail-images.invalid/background.png)}</style><meta http-equiv="refresh" content="0;url=https://mail-images.invalid/redirect"></head><body><table><tr><td class="hero">Styled newsletter</td></tr></table><img alt="Embedded logo" src="cid:logo"><img alt="Remote logo" src="https://mail-images.invalid/logo.png" onerror="parent.mailExecuted=true"><script>parent.mailExecuted=true</script><form action="https://mail-images.invalid/form"><input name="secret"></form><a href="https://example.com">Visit website</a></body></html>';
   const themedHtml=html.replace('</body>','<p id="default-colors">Default colors</p><div id="explicit-colors" style="background:#fff;color:#111 !important">Sender colors</div><table><tr><td id="legacy-background" bgcolor="#ffffff"><font color="#000000">Legacy background</font></td></tr></table><a id="explicit-link" href="https://example.com" style="color:#123456">Sender link</a><p class="MsoNormal" style="margin:0"><o:p>&nbsp;</o:p></p><p id="after-spacer" style="margin:0">After spacer</p></body>');
-  const raw=['Subject: HTML reader verification','Content-Type: multipart/related; boundary=related','','--related','Content-Type: multipart/alternative; boundary=alternative','','--alternative','Content-Type: text/plain; charset=UTF-8','','Newsletter text alternative','--alternative','Content-Type: text/html; charset=UTF-8','',''+themedHtml,'--alternative--','--related','Content-Type: image/png','Content-ID: <logo>','Content-Disposition: inline; filename=logo.png','Content-Transfer-Encoding: base64','',pixel,'--related--',''].join('\r\n');
+  const raw=['Subject: HTML reader verification','Date: Tue, 03 Nov 2026 12:00:00 +0000','Content-Type: multipart/related; boundary=related','','--related','Content-Type: multipart/alternative; boundary=alternative','','--alternative','Content-Type: text/plain; charset=UTF-8','','Newsletter text alternative','--alternative','Content-Type: text/html; charset=UTF-8','',''+themedHtml,'--alternative--','--related','Content-Type: image/png','Content-ID: <logo>','Content-Disposition: inline; filename=logo.png','Content-Transfer-Encoding: base64','',pixel,'--related--',''].join('\r\n');
   const imported=await page.request.post(url+'api.php?r=import',{headers,data:{format:'eml',base64:Buffer.from(raw).toString('base64')}});
   assert.equal(imported.status(),200);
+  assert.equal((await page.request.post(url+'api.php?r=import-items',{headers,data:{records:[{kind:'mail',title:'HTML navigation next item',body:'Older plain message',meta:{folder:'Inbox',read:true,date:'2000-01-01T12:00:00Z'}}]}})).status(),200);
   const marginCases=[
     ['CSS','<html><head><style>body{margin:24px 12px 18px 9px}</style></head><body><div>Sender margins</div></body></html>',['24px','12px','18px','9px']],
     ['inline','<html><body style="margin:27px 13px 19px 8px"><div>Sender margins</div></body></html>',['27px','13px','19px','8px']],
@@ -38,14 +39,30 @@ export async function testMailHtml(page,url) {
     assert.equal(await page.locator('#detail').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
     const selected=await page.locator('#selected-item').getAttribute('data-id');
     await page.keyboard.press('j');
-    await page.waitForFunction(()=>document.activeElement?.classList.contains('mail-html'));
-    await frame.locator('body').evaluate(()=>new Promise(resolve=>setTimeout(resolve,50)));
-    assert.ok(await frame.locator('body').evaluate(()=>scrollY)>0,'HTML keyboard navigation scrolls its own viewport');
-    await page.keyboard.press('G');
-    assert.ok(await frame.locator('body').evaluate(()=>scrollY)>1000);
-    await page.keyboard.press('g');await page.keyboard.press('g');
-    assert.equal(await frame.locator('body').evaluate(()=>scrollY),0);
-    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected);
+    await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    const down=await frame.locator('body').evaluate(()=>scrollY);assert.ok(down>0,'HTML j scrolls down');
+    await page.keyboard.press('k');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    assert.ok(await frame.locator('body').evaluate(()=>scrollY)<down,'HTML k scrolls up');
+    await page.keyboard.press('G');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    assert.ok(await frame.locator('body').evaluate(()=>scrollY)>1000,'HTML G reaches bottom');
+    await page.keyboard.press('g');await page.keyboard.press('g');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    assert.equal(await frame.locator('body').evaluate(()=>scrollY),0,'HTML gg reaches top');
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,'HTML scrolling keeps selected message');
+    await page.keyboard.press('n');
+    await page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id!==id,selected);
+    assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'HTML n navigates messages and retains content focus');
+    await page.keyboard.press('N');await page.locator('#selected-item[data-id="'+selected+'"]').waitFor();
+    await frame.getByText('Styled newsletter',{exact:true}).waitFor();
+    assert.equal(await page.locator('.mail-html').evaluate(node=>node===document.activeElement),true,'HTML N returns with content focus');
+    await page.keyboard.press('v');
+    await page.locator('#selected-item.multi-selected').waitFor();
+    assert.equal(await page.locator('.mail-html').evaluate(node=>node===document.activeElement),true,'HTML selection keeps reader focus');
+    await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('#items .multi-selected'));
+    await frame.locator('body').evaluate(node=>{node.tabIndex=-1;node.focus();});
+    await page.keyboard.press('Shift+F10');await page.getByRole('menu',{name:'Item actions'}).waitFor();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.mail-html').evaluate(node=>node===document.activeElement),true,'HTML action menu restores reader focus');
+    assert.equal(await frame.locator('body').evaluate(node=>node.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true,cancelable:true}))),false,'HTML save chord is handled by Office');
     // Forged sibling/top messages cannot act as an iframe keyboard event.
     await page.evaluate(()=>window.postMessage({type:'office-mail-key',key:'h',shiftKey:false},'*'));
     await frame.locator('body').evaluate(()=>parent.postMessage({type:'office-mail-key',key:'h',shiftKey:'invalid'},'*'));
@@ -145,6 +162,18 @@ export async function testMailHtml(page,url) {
     await frame.getByText('Styled newsletter',{exact:true}).waitFor();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await page.screenshot({path:'test-results/mail-html-mobile.png',fullPage:true});
+    await page.setViewportSize({width:1440,height:1000});
+    await page.request.post(url+'api.php?r=preferences',{headers,data:{preferences:{...status.preferences,mailDisplay:'html',keys:{...status.preferences?.keys,down:'J',up:'K'}}}});
+    await page.reload();await page.locator('#mail-folder').selectOption('all');await page.locator('.item').filter({hasText:'HTML reader verification'}).click();
+    await frame.getByText('Styled newsletter',{exact:true}).waitFor();
+    await frame.locator('body').evaluate(node=>{const div=document.createElement('div');div.style.height='3000px';node.append(div);node.tabIndex=-1;node.focus();});
+    const remappedId=await page.locator('#selected-item').getAttribute('data-id');
+    await page.keyboard.press('J');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    const remappedDown=await frame.locator('body').evaluate(()=>scrollY);assert.ok(remappedDown>0,'HTML remapped down scrolls');
+    await page.keyboard.press('K');await frame.locator('body').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    assert.ok(await frame.locator('body').evaluate(()=>scrollY)<remappedDown,'HTML remapped up scrolls');
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),remappedId,'HTML remapped scrolling keeps message');
+
   } finally {
     await page.emulateMedia({colorScheme:null});
     await page.setViewportSize({width:1440,height:1000});

@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 
 export async function testFocusNavigation(page,url) {
   const long=Array.from({length:180},(_,i)=>`Content line ${i}`).join('\n');
-  let kind='mail';
+  let kind='mail';const removed=new Set();
   const routes=target=>target.pathname.endsWith('/api.php')&&target.searchParams.get('r')!=='activity';
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');
-    const records=[0,1,2].map(i=>({id:`focus-${kind}-${i}`,kind,title:`Focus ${kind} ${i}`,body:kind==='documents'?long.replaceAll('\n','<br>'):long,revision:1,meta:kind==='mail'?{folder:'Inbox',read:true,from:'sender@example.com'}:kind==='sheets'?{workbook:{sheets:[{name:'Sheet 1',cells:{}}]}}:{}}));
+    if(action==='delete'){removed.add(route.request().postDataJSON().id);await route.fulfill({json:{ok:true}});return;}
+    const records=[0,1,2].map(i=>({id:`focus-${kind}-${i}`,kind,title:`Focus ${kind} ${i}`,body:kind==='documents'?long.replaceAll('\n','<br>'):long,revision:1,meta:kind==='mail'?{folder:'Inbox',read:true,from:'sender@example.com'}:kind==='sheets'?{workbook:{sheets:[{name:'Sheet 1',cells:{}}]}}:{}})).filter(row=>!removed.has(row.id));
     const responses={status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark',accent:'plum',keys:{down:'J',up:'K'}}},accounts:{accounts:[]},records:{records},'google-settings':{configured:false}};
     assert.ok(action in responses,`Unexpected focus API: ${action}`);
     await route.fulfill({json:responses[action]});
@@ -25,19 +26,32 @@ export async function testFocusNavigation(page,url) {
       assert.equal(await page.locator(entry).evaluate(node=>node===document.activeElement),true,kind+' enters nonediting content');
       assert.equal(await page.locator('#detail').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
       assert.deepEqual(await page.locator('#detail').boundingBox(),box,'Focus ring causes no layout shift');
-      await page.keyboard.press('J');
-      assert.ok(await scrollOffset()>0,kind+' scrolls actual content with remapped down');
-      await page.keyboard.press('G');
-      const end=await scrollOffset();
-      assert.ok(end>0,kind+' reaches content end');
-      await page.keyboard.press('g');await page.keyboard.press('g');
-      assert.equal(await scrollOffset(),0,kind+' reaches content start');
-      assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,kind+' keeps selected object');
+      if(kind==='mail'){
+        await page.keyboard.press('J');assert.ok(await scrollOffset()>0,'Remapped Mail down scrolls plain text');
+        const down=await scrollOffset();await page.keyboard.press('K');assert.ok(await scrollOffset()<down,'Remapped Mail up scrolls plain text');
+        await page.keyboard.press('G');assert.ok(await scrollOffset()>down,'Mail G reaches bottom');
+        await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await scrollOffset(),0,'Mail gg reaches top');
+        assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,'Mail scrolling keeps the message');
+        await page.keyboard.press('n');await page.locator('#selected-item[data-id="focus-mail-2"]').waitFor();
+        await page.keyboard.press('N');await page.locator('#selected-item[data-id="focus-mail-1"]').waitFor();
+      }else{
+        await page.keyboard.press('J');
+        await page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id!==id,selected);
+        await page.keyboard.press('G');await page.waitForFunction(()=>document.querySelector('#selected-item')?.dataset.id?.endsWith('-2'));
+        await page.keyboard.press('g');await page.keyboard.press('g');await page.waitForFunction(()=>document.querySelector('#selected-item')?.dataset.id?.endsWith('-0'));
+      }
+      assert.equal(await page.locator(entry).evaluate(node=>node===document.activeElement),true,kind+' keeps content focus');
+      await page.keyboard.press('v');
+      assert.equal(await page.locator(entry).evaluate(node=>node===document.activeElement),true,kind+' selection retains content focus');
+      await page.keyboard.press('Shift+F10');
+      await page.getByRole('menu',{name:'Item actions'}).waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator(entry).evaluate(node=>node===document.activeElement),true,kind+' menu restores content focus');
       await page.keyboard.press('Shift+Tab');
       assert.equal(await page.locator('#selected-item').evaluate(node=>node===document.activeElement),true);
       assert.equal(await page.locator('.list-pane').evaluate(node=>getComputedStyle(node).outlineStyle),'solid');
       await page.keyboard.press('J');
-      await page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id!==id,selected);
+      await page.waitForFunction(suffix=>document.querySelector('#selected-item')?.dataset.id?.endsWith(suffix),kind==='mail'?'-2':'-1');
       if(kind==='sheets'){
         await page.keyboard.press('l');assert.equal(await page.locator('[data-cell=A1]').evaluate(node=>node===document.activeElement),true);
         await page.keyboard.press('Tab');assert.equal(await page.locator('[data-cell=B1]').evaluate(node=>node===document.activeElement),true);
@@ -46,6 +60,21 @@ export async function testFocusNavigation(page,url) {
         await page.locator('.title-input').focus();await page.keyboard.press('Tab');
         assert.equal(await page.locator('#selected-item').evaluate(node=>node===document.activeElement),false,'Editor Tab remains native');
       }
+      if(kind!=='mail'){
+        await page.locator('#items [data-id="focus-'+kind+'-1"]').click();
+        await page.keyboard.press('Tab');
+        for(const next of ['2','0',null]){
+          await page.keyboard.press('d');await page.locator('#confirm').click();
+          if(next!==null){
+            await page.locator('#selected-item[data-id="focus-'+kind+'-'+next+'"]').waitFor();
+            assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,kind+' deletion keeps content focus');
+          }else{
+            await page.waitForFunction(()=>!document.querySelector('#selected-item'));
+            assert.equal(await page.locator('#detail').evaluate(node=>node===document.activeElement),true,kind+' empty detail keeps focus');
+          }
+        }
+      }
+
     }
   }finally{await page.unroute(routes);await page.goto(url+'#mail');await page.reload();}
 }

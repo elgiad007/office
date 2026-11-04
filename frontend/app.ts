@@ -256,6 +256,7 @@ function searchableText(record: OfficeRecord) {
 }
 function filteredRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='mail'||(state.mailScope?matchesMailScope(r,state.mailScope,state.accounts):state.mailFolder==='all'?!['Recovery copies','Not in Inbox','Trash'].includes(r.meta.folder||''):state.mailFolder==='Recovery copies'?['Recovery copies','Not in Inbox'].includes(r.meta.folder||''):(r.meta.folder||'Archive')===state.mailFolder))&&(!q||searchableText(r).includes(q))); }
 async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<DeleteMail>[1],undoable=false) {
+  const pane=activePane();
   const ids=new Set(rows.map(r=>r.id)),visible=filteredRows().map(r=>r.id),currentId=state.current?.id!;
   const context=JSON.stringify([state.mailFolder,state.mailScope,state.search]);
   let gesture: MailDeleteGesture | undefined;
@@ -274,7 +275,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
   }
   if(gesture)gesture.nextId=state.current?.id;
   renderList();if(advance)renderDetail();
-  (document.querySelector<HTMLElement>('#selected-item')!||document.querySelector<HTMLElement>('#main')!)?.focus({preventScroll:true});
+  restorePane(pane);
   document.querySelector<HTMLElement>('#selected-item')!?.scrollIntoView({block:'nearest'});
   let count=0;
   const reconciled=new Set<string>();
@@ -294,8 +295,10 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
         state.rows=state.rows.filter(r=>!reconciled.has(r.id));
         for(const id of reconciled)state.selected.delete(id);
         if(reconciled.has(state.current?.id!)){
-          state.current=filteredRows()[0]||null;renderList();renderDetail();
-          (document.querySelector<HTMLElement>('#selected-item')!||document.querySelector<HTMLElement>('#main')!)?.focus({preventScroll:true});
+          const visibleIds=new Set(filteredRows().map(r=>r.id));
+          const next=[...visible.slice(index+1),...visible.slice(0,index).reverse()].find(id=>!ids.has(id)&&!reconciled.has(id)&&visibleIds.has(id));
+          state.current=state.rows.find(r=>r.id===next)||null;renderList();renderDetail();
+          restorePane(pane);
         }
       }
       // Keep confirmed moves available when switching folders.
@@ -317,6 +320,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
 }
 async function undoMailDelete() {
   if(state.app!=='mail'||undoingMailDelete)return;
+  const pane=activePane();
   const gesture=lastMailDelete;if(!gesture){notice('No mail deletion to undo.');return;}
   undoingMailDelete=true;
   const selectedAtUndo=state.current?.id;
@@ -334,7 +338,7 @@ async function undoMailDelete() {
     if(state.app==='mail'&&restored.length){
       const sameContext=gesture.context===JSON.stringify([state.mailFolder,state.mailScope,state.search])&&selectedAtUndo===gesture.nextId&&state.current?.id===selectedAtUndo;
       await load(sameContext&&restored.includes(gesture.currentId!)?gesture.currentId:undefined,{preserveSelection:true,selectFirst:false});
-      if(sameContext)document.querySelector<HTMLElement>('#selected-item')?.focus({preventScroll:true});
+      if(sameContext)restorePane(pane);
     }
     if(!gesture.receipts.length&&lastMailDelete===gesture)lastMailDelete=undefined;
     if(failures.length)throw Error(`${restored.length} messages restored. ${failures.join(' ')}`);
@@ -344,17 +348,18 @@ async function undoMailDelete() {
 function mailDeletionReload() {
   const currentId=state.current?.id!, ids=filteredRows().map(r=>r.id);
   const context=()=>JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]);
-  const originalContext=context(),mail=state.app==='mail';
+  const originalContext=context(),pane=activePane();
   return async (removedIds: string[])=>{
-    const advance=mail&&ids.includes(currentId)&&removedIds.includes(currentId)&&state.current?.id===currentId&&context()===originalContext;
+    const advance=ids.includes(currentId)&&removedIds.includes(currentId)&&state.current?.id===currentId&&context()===originalContext;
+    if(state.current?.id!==currentId)return;
     await load(undefined,{selectFirst:false});
-    if(!advance||context()!==originalContext||(state.current&&state.current!.id!==currentId))return;
+    if(context()!==originalContext||(state.current&&state.current.id!==currentId))return;
+    if(!advance){restorePane(pane);return;}
     const visible=new Set(filteredRows().map(r=>r.id)),removed=new Set(removedIds),index=ids.indexOf(currentId);
     const nextId=[...ids.slice(index+1),...ids.slice(0,index).reverse()].find(id=>!removed.has(id)&&visible.has(id));
     state.current=state.rows.find(r=>r.id===nextId)||null;
     renderList();renderDetail();
-    const target=document.querySelector<HTMLElement>('#selected-item')!||document.querySelector<HTMLElement>('#main')!;
-    target?.focus({preventScroll:true});
+    restorePane(pane);
     document.querySelector<HTMLElement>('#selected-item')!?.scrollIntoView({block:'nearest'});
   };
 }
@@ -393,6 +398,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   return snapshot;
 }
 async function load(preferId?: string,{selectFirst=true,preserveSelection=false}={}) {
+  const contentFocused=preserveSelection&&activePane()==='content'&&!editable(document.activeElement as HTMLElement);
   await waitForAttachments();
   if(state.app!=='mail')displayedMailId=null;
   itemMenus.close();
@@ -436,6 +442,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false}
   renderWorkspace(readerSnapshot);
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
   restoreMailListViewport(listViewport);
+  if(contentFocused)restorePane('content');
 }
 function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   const a=apps[state.app];
@@ -608,7 +615,7 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus=false) { await waitForAttachments(); await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); renderDetail(); if(focus){
+async function selectRecord(id: string,focus=false) { const pane=activePane(); await waitForAttachments(); await commit(); const previous=state.current?.id;state.current=state.rows.find(r=>r.id===id)||null; state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); renderDetail(); if(focus&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
   const selected=document.querySelector<HTMLElement>('#selected-item');
   selected?.focus({preventScroll:true});
   selected?.scrollIntoView({block:'nearest',inline:'nearest'});
@@ -789,7 +796,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='history')await history();
     if(action==='delete'){
       if(state.app==='mail')await deleteSelectedMail();
-      else confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current!;await api('delete',{id:record.id,revision:record.revision});await load();notice('Item deleted.');});
+      else confirmation('Delete item','Delete this item and its revision history? Export a copy first if you need it.',async()=>{await commit();const record=state.current!,reload=mailDeletionReload();await api('delete',{id:record.id,revision:record.revision});await reload([record.id]);notice('Item deleted.');});
     }
     if(action==='logout')await signOut();
     if(action==='message-headers')await viewMessageHeaders();
@@ -864,7 +871,7 @@ async function archiveLocal() {
     await deleteMailImmediately(rows,r=>api('mail-action',{id:r.id,revision:r.revision,action:'archive'}));
     notice(`Archived ${rows.length} messages.`);return;
   }
-  const reconciled=new Set<string>();
+  const reconciled=new Set<string>(),reload=mailDeletionReload();
   try {
     for(const id of ids){if(reconciled.has(id)){count++;continue;}const r=state.rows.find(r=>r.id===id)!;await pendingMailReads.get(id!);if(r.meta.remote){const result=await api('mail-action',{id:r.id,revision:r.revision,action:'archive'});for(const related of result.removedIds||[])reconciled.add(related);}else{r.meta.folder='Archive';await api('save',r);}count++;}
   } catch(cause) { const error=asError(cause);
@@ -872,7 +879,7 @@ async function archiveLocal() {
     try { await load(); } catch {}
     throw error;
   }
-  await load();notice(`Archived ${count} messages.`);
+  await reload(ids);notice(`Archived ${count} messages.`);
 }
 async function mailAction(action: string,record=state.current) {
   if(state.app!=='mail'||!record)return;await commit();
@@ -958,7 +965,7 @@ function accountDialog() {
     renderSettings();
   }});
 }
-const itemMenus=installItemMenus({state,e,commit,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+const itemMenus=installItemMenus({state,e,commit,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 function contentEntry() {
   const panel=document.querySelector<HTMLElement>('#detail');
   return panel?.querySelector<HTMLElement>('.mail-html, .mail-body, .sheet-wrap')||panel;
@@ -968,18 +975,18 @@ function focusContent() {
   const entry=contentEntry();
   if(entry){entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
-function scrollContent(direction: 'up'|'down'|'start'|'end') {
-  const frame=document.querySelector<HTMLIFrameElement>('.mail-html');
+function scrollMailBody(target: HTMLElement,direction: 'up'|'down'|'start'|'end') {
+  const frame=target.closest<HTMLIFrameElement>('.mail-html');
   if(frame){frame.contentWindow?.postMessage({type:'office-mail-scroll',direction},'*');return;}
-  const panel=document.querySelector<HTMLElement>('#detail');
-  const body=panel?.querySelector<HTMLElement>('.sheet-wrap, #rich-editor, textarea.body-editor');
-  const target=body&&body.scrollHeight>body.clientHeight?body:panel;
-  if(!target)return;
-  target.scrollTo({top:direction==='start'?0:direction==='end'?target.scrollHeight:target.scrollTop+(direction==='up'?-1:1)*Math.max(40,target.clientHeight*.15),behavior:'instant'});
-  if(panel&&target!==panel){
-    if(direction==='start'||direction==='end')panel.scrollTop=direction==='start'?0:panel.scrollHeight;
-    else if(target.getBoundingClientRect().top>panel.getBoundingClientRect().bottom)target.scrollIntoView({block:'nearest'});
-  }
+  const panel=document.querySelector<HTMLElement>('#detail');if(!panel)return;
+  panel.scrollTo({top:direction==='start'?0:direction==='end'?panel.scrollHeight:panel.scrollTop+(direction==='up'?-1:1)*Math.max(40,panel.clientHeight*.15),behavior:'instant'});
+}
+let lastPane: 'content'|'list'='list';
+function activePane(): 'content'|'list' {const node=document.activeElement;if(node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
+document.addEventListener('focusin',event=>{const node=event.target as HTMLElement;if(node.closest('#detail'))lastPane='content';else if(node.closest('#items'))lastPane='list';});
+function restorePane(pane: 'content'|'list') {
+  if(pane==='content'){if(state.current)focusContent();else{const panel=document.querySelector<HTMLElement>('#detail');if(panel){panel.tabIndex=-1;panel.focus({preventScroll:true});}}}
+  else (document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#main'))?.focus({preventScroll:true});
 }
 document.addEventListener('keydown',event=>{
   if(event.defaultPrevented)return;
@@ -995,20 +1002,24 @@ document.addEventListener('keydown',event=>{
   }
   if(event.key==='Escape'&&document.querySelector<HTMLElement>('.shell')!?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();event.preventDefault();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(commit);return;}
-  if(event.key==='Escape'){if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{state.selected.clear();if(state.app!=='settings')renderList();}return;}
+  if(event.key==='Escape'){if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
   if(editable((event.target as HTMLElement))){setMode('insert');return;}
-  if(event.ctrlKey||event.metaKey||event.altKey)return;
+  if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
+  if((event.target as HTMLElement).closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
   const target=event.target as HTMLElement;
   if(event.key==='Tab'&& !event.shiftKey && target.matches('#selected-item')){event.preventDefault();keySequence='';focusContent();return;}
   if(event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';document.querySelector<HTMLElement>('#selected-item')?.focus({preventScroll:true});return;}
   if(event.key===':'&&!event.isComposing&&state.mode==='normal'){event.preventDefault();if(!event.repeat)openCommand();return;}
   const k=keys(), key=event.key;setMode('normal');
+  const mailBody=state.app==='mail'&&state.current&&state.current.meta.folder!=='Drafts'&&!!target.closest('.mail-body,.mail-html');
   if(Date.now()-sequenceTime>900)keySequence='';sequenceTime=Date.now();
+  if(event.repeat&&key==='g'){event.preventDefault();return;}
   if(keySequence==='g'&&/^[1-7]$/.test(key)){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
-  const inContent=!!target.closest('#detail');
-  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inContent)scrollContent('start');else{const row=filteredRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));}return;}
+  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(mailBody){scrollMailBody(target,'start');return;}const row=filteredRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
   const action=Object.keys(k).find(action=>k[action]===key);
+  if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
+  if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}
   if(state.app==='settings')return;
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
@@ -1024,14 +1035,13 @@ document.addEventListener('keydown',event=>{
     return;
   }
   if(action==='undoDelete'&&state.app==='mail'){event.preventDefault();if(!event.repeat&&!event.isComposing)void attempt(undoMailDelete);return;}
-  if(action==='archive'){event.preventDefault();void attempt(archiveLocal);return;}
+  if(action==='archive'){event.preventDefault();if(event.repeat)return;void attempt(archiveLocal);return;}
   if(action==='move'&&state.app==='mail'){event.preventDefault();if(!event.repeat)void attempt(()=>quickMoveMail(mailFolderEnv()));return;}
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector<HTMLButtonElement>('[data-action=reply]')!?.click();return;}
-  if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);renderList();document.querySelector<HTMLElement>('#selected-item')?.focus({preventScroll:true});return;}
-  if(state.app==='sheets'&&state.current&&target.closest<HTMLElement>('[data-cell]')&&([k.left,k.right,k.down,k.up,'ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key===k.left||key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key===k.right||key==='ArrowRight'||key==='Tab')c++;else if(key===k.up||key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
+  if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);const pane=activePane();renderList();restorePane(pane);return;}
+  if(state.app==='sheets'&&state.current&&target.closest<HTMLElement>('[data-cell]')&&(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key==='ArrowRight'||key==='Tab')c++;else if(key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
   if(action==='left'){event.preventDefault();document.querySelector<HTMLElement>('#selected-item')!?.focus();return;}
   if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
-  if(inContent&&(action==='down'||action==='up'||key==='n'||key==='N'||key==='G')){event.preventDefault();scrollContent(key==='G'?'end':action==='up'||key==='N'?'up':'down');return;}
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=filteredRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
 });
 document.addEventListener('focusin',event=>{if((event.target as HTMLElement).id!=='command-input'&&editable((event.target as HTMLElement)))setMode('insert');});

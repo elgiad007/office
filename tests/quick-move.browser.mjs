@@ -45,6 +45,12 @@ export async function testQuickMove(page,url){
     assert.equal(await input.isVisible(),true,'failure leaves picker available');assert.equal(calls.length,2);
     reject=false;await page.keyboard.press('Enter');await input.waitFor({state:'hidden'});assert.deepEqual(calls.slice(2).map(c=>c.id).sort(),['b','c'],'bulk move retains original selection');
     assert.ok(calls.slice(2).every(c=>c.folder==='Travel/Orders'&&c.destinationAccount==='personal'));
+    await page.locator('#mail-folder').selectOption('all');
+    await page.locator('#items [data-id="b"]').click();await page.keyboard.press('Tab');await page.keyboard.press('m');
+    await input.fill('trav');await page.keyboard.press('Enter');await input.waitFor({state:'hidden'});
+    await page.locator('#selected-item[data-id="c"]').waitFor();
+    assert.equal(await page.locator('#items [data-id="b"]').count(),1,'All cached retains the moved record');
+    assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'Quick Move advances middle item and retains content focus');
     await page.locator('#main').focus();await page.keyboard.press('?');
     assert.match(await page.locator('#dialog').textContent(),/Quick Move to folder/);assert.doesNotMatch(await page.locator('#dialog').textContent(),/Toggle read \/ unread/);await page.keyboard.press('Escape');
     await page.getByRole('button',{name:'Settings',exact:true}).click();

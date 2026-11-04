@@ -80,6 +80,7 @@ async function manageFolder(env: FolderEnvironment,accountId: string,action: str
   env.dialog.querySelector<HTMLFormElement>('form')!.onsubmit=event=>{event.preventDefault();const button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!;button.disabled=true;void env.attempt(async()=>{try{await save(new FormData(event.target as HTMLFormElement).get('name') as string);}finally{button.disabled=false;}});};
 }
 export async function fileMail(env: FolderEnvironment) {
+  const reload=env.mailDeletionReload?.();
   await env.commit();const {state,e}=env;
   const rows=state.selected.size?state.rows.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
   if(!rows.length || rows.some(r=>!r.meta.remote || ['Recovery copies','Not in Inbox'].includes(r.meta.folder||'')))throw Error('Select connected mail from one account.');
@@ -90,15 +91,16 @@ export async function fileMail(env: FolderEnvironment) {
   if(!folders.length)throw Error('Create a custom folder or label first using the account’s folder list.');
   env.modal(account.type==='google'?'Organize with labels':'Move to folder',`<form id="file-mail-form"><p>${rows.length} selected message(s) · ${e(account.label)}</p><label>Destination<select name="folder" required>${folders.map(f=>`<option value="${e(f.id)}">${e(f.name)}</option>`).join('')}</select></label>${account.type==='google'?'<label>Action<select name="action"><option value="label">Add label (keep Inbox and other labels)</option><option value="unlabel">Remove label</option><option value="move">Move here (remove Inbox and Trash, keep other labels)</option></select></label>':''}<button class="primary">Apply</button></form>`);
   env.dialog.querySelector<HTMLFormElement>('form')!.onsubmit=event=>{event.preventDefault();const form=new FormData(event.target as HTMLFormElement),button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!;button.disabled=true;void env.attempt(async()=>{
-    let count=0;const removed=new Set<string>();
-    try {await busy(env,async()=>{for(const row of rows){if(!removed.has(row.id)){const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:form.get('action')||'move',folder:form.get('folder')});for(const id of result.removedIds||[])removed.add(id);}count++;}});env.dialog.close();env.notice(`Organized ${count} message(s).`);}
+    let count=0;const removed=new Set<string>(),moved: string[]=[];
+    try {await busy(env,async()=>{for(const row of rows){if(!removed.has(row.id)){const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:form.get('action')||'move',folder:form.get('folder')});for(const id of result.removedIds||[])removed.add(id);if((form.get('action')||'move')==='move')moved.push(row.id);}count++;}});env.dialog.close();env.notice(`Organized ${count} message(s).`);}
     catch(cause) { const error=asError(cause);throw Error(`${count} of ${rows.length} messages organized. ${error.message}`);}
-    finally{button.disabled=false;await reloadMail(env);}
+    finally{button.disabled=false;if(reload)await reload([...removed,...moved]);else await reloadMail(env);}
   });};
 }
 
 /** Quick Move keeps typing focus in the search box, including while navigating matches. */
 export async function quickMoveMail(env: FolderEnvironment) {
+  const reload=env.mailDeletionReload?.();
   await env.commit();
   const {state,e}=env;
   if(state.app!=='mail')return;
@@ -129,7 +131,6 @@ export async function quickMoveMail(env: FolderEnvironment) {
   const move=async()=>{
     const target=matches[index];if(moving||discovering||!target)return;
     moving=true;input.disabled=true;closeButton.disabled=true;render();
-    const reload=env.mailDeletionReload?.();
     let count=completed.size;
     try{
       await busy(env,async()=>{

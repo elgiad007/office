@@ -3,13 +3,13 @@ import { asError } from './utils.js';
 // Item menus share the application's persistence and provider operations.
 export function installItemMenus(env) {
     const { state, e } = env;
-    let menu = null, origin = null, generation = 0;
+    let menu = null, origin = null, generation = 0, restoreOrigin;
     function close(restore = false) {
         generation++;
         menu?.remove();
         menu = null;
-        if (restore && origin)
-            document.querySelector(`#items [data-id="${CSS.escape(origin)}"]`)?.focus({ preventScroll: true });
+        if (restore)
+            restoreOrigin?.();
     }
     const recovery = (r) => r.meta.remote && ['Recovery copies', 'Not in Inbox'].includes(r.meta.folder || '');
     function actions(rows) {
@@ -119,7 +119,7 @@ export function installItemMenus(env) {
                         await env.api('save', copy);
                     }
                     count++;
-                    if (['delete', 'trash', 'discard'].includes(id))
+                    if (['delete', 'trash', 'discard', 'archive'].includes(id))
                         removed.push(row.id);
                 }
             }
@@ -138,7 +138,9 @@ export function installItemMenus(env) {
             await apply();
     }
     async function open(row, x, y) {
+        const restore = env.capturePane();
         close();
+        restoreOrigin = restore;
         const token = generation, app = state.app, id = row.dataset.id;
         await env.commit();
         if (token !== generation || state.app !== app)
@@ -148,7 +150,10 @@ export function installItemMenus(env) {
             state.selected.clear();
             state.selected.add(id);
         }
-        await env.selectRecord(id);
+        if (state.current?.id === id)
+            env.renderList();
+        else
+            await env.selectRecord(id);
         if (token !== generation || state.app !== app)
             return;
         origin = id;
@@ -169,7 +174,11 @@ export function installItemMenus(env) {
             return; const action = b.dataset.menuAction; close(true); void env.attempt(() => run(action, ids, app)); };
     }
     document.addEventListener('contextmenu', event => {
-        const row = event.target.closest('#items [data-id]');
+        const target = event.target;
+        const detail = target.closest('#detail');
+        if (detail && (target.closest('input,textarea,select,[contenteditable],a,button,summary') || getSelection()?.toString()))
+            return;
+        const row = target.closest('#items [data-id]') || (detail ? document.querySelector('#selected-item') : null);
         if (!row) {
             close();
             return;
@@ -195,7 +204,10 @@ export function installItemMenus(env) {
         }
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))
             return;
-        const row = event.target.closest('#items [data-id]');
+        const target = event.target;
+        if ((target.closest('input,textarea,select,[contenteditable],a,button,summary') && !target.closest('#items')) || target.closest('#detail') && getSelection()?.toString())
+            return;
+        const row = target.closest('#items [data-id]') || (target.closest('#detail') ? document.querySelector('#selected-item') : null);
         if (!row)
             return;
         event.preventDefault();

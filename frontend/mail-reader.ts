@@ -29,15 +29,17 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
   moreOpening?.disconnect();
   const frame=panel.querySelector<HTMLIFrameElement>('.mail-html');
   if(frame){
-    const allowed=new Set(['g','G','n','N','Tab',...['up','down','left','right'].map(action=>navigation[action]).filter(Boolean)]);
+    const allowed=new Set(['g','G','n','N','Tab','Escape',':','ContextMenu','F10',...'1234567',...Object.values(navigation).filter(Boolean)]);
     const configure=()=>frame.contentWindow?.postMessage({type:'office-mail-config',keys:[...allowed]},'*');
     const receive=(event: MessageEvent)=>{
       if(!frame.isConnected||event.source!==frame.contentWindow||event.origin!=='null')return;
       const data=event.data;
       if(!data||typeof data!=='object'||Array.isArray(data))return;
       if(data.type==='office-mail-ready'&&Object.keys(data).length===1){configure();return;}
-      if(data.type!=='office-mail-key'||Object.keys(data).length!==3||typeof data.key!=='string'||!allowed.has(data.key)||typeof data.shiftKey!=='boolean')return;
-      frame.dispatchEvent(new KeyboardEvent('keydown',{key:data.key,shiftKey:data.shiftKey,bubbles:true,cancelable:true}));
+      if(data.type==='office-mail-context'&&Object.keys(data).length===3&&Number.isFinite(data.x)&&Number.isFinite(data.y)&&data.x>=0&&data.y>=0&&data.x<=frame.clientWidth&&data.y<=frame.clientHeight){const rect=frame.getBoundingClientRect();frame.dispatchEvent(new MouseEvent('contextmenu',{clientX:rect.left+data.x,clientY:rect.top+data.y,bubbles:true,cancelable:true}));return;}
+      if(data.type==='office-mail-save'&&Object.keys(data).length===4&&typeof data.ctrlKey==='boolean'&&typeof data.metaKey==='boolean'&&(data.ctrlKey||data.metaKey)&&typeof data.repeat==='boolean'){frame.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:data.ctrlKey,metaKey:data.metaKey,repeat:data.repeat,bubbles:true,cancelable:true}));return;}
+      if(data.type!=='office-mail-key'||Object.keys(data).length!==4||typeof data.key!=='string'||!allowed.has(data.key)||typeof data.shiftKey!=='boolean'||typeof data.repeat!=='boolean')return;
+      frame.dispatchEvent(new KeyboardEvent('keydown',{key:data.key,shiftKey:data.shiftKey,repeat:data.repeat,bubbles:true,cancelable:true}));
     };
     window.addEventListener('message',receive);frame.addEventListener('load',configure);
     bridgeCleanup=()=>{window.removeEventListener('message',receive);frame.removeEventListener('load',configure);};
