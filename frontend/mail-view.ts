@@ -32,6 +32,17 @@ export function mailDateGroup(record: OfficeRecord,now=new Date(),weekStart=loca
   return time>=+tomorrow?'Future':time>=+today?'Today':time>=+yesterday?'Yesterday':time>=+week?'This Week':time>=+lastWeek?'Last Week':time>=+month?'This Month':time>=+lastMonth?'Last Month':'Older';
 }
 export interface MailViewGroup {key: string; label: string; rows: OfficeRecord[]; collapsed: boolean}
+/** Reveal a directly opened message without expanding unrelated groups. */
+export function revealMailGroup(record: OfficeRecord,value: unknown): MailViewPreferences {
+  const prefs=mailViewPreferences(value);
+  if(prefs.group==='none')return prefs;
+  const group=mailView([record],prefs).groups[0];
+  if(!group.collapsed)return prefs;
+  const exception=prefs.group+':!'+group.key;
+  const collapsed=prefs.collapsed.filter(key=>key!==group.key&&key!==exception);
+  if(prefs.collapsed.includes(prefs.group+':*'))collapsed.push(exception);
+  return {...prefs,collapsed};
+}
 export function mailView(rows: OfficeRecord[],value: unknown,now=new Date(),weekStart=localWeekStart()) {
   const prefs=mailViewPreferences(value),direction=prefs.sort.endsWith('-asc')?1:-1,collator=new Intl.Collator(undefined,{sensitivity:'base',numeric:true});
   const compare=(a: OfficeRecord,b: OfficeRecord)=>{

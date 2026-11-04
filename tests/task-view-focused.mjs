@@ -4,6 +4,7 @@ import {readFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {testTaskView} from './task-view.browser.mjs';
 import {testMailView} from './mail-view.browser.mjs';
+import {testConnectedMail} from './connected-mail.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
 const server=createServer(async(req,res)=>{
@@ -28,5 +29,6 @@ try{
   await testTaskView(page,`http://127.0.0.1:${server.address().port}/`);
   await page.goto('about:blank');
   await testMailView(page,`http://127.0.0.1:${server.address().port}/`);
+  await testConnectedMail(page,`http://127.0.0.1:${server.address().port}/`);
   assert.deepEqual(errors,[]);
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

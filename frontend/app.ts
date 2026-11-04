@@ -19,7 +19,7 @@ import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
 import {attachmentSection, bindAttachments, waitForAttachments} from './mail-attachments.js';
 import {installItemMenus} from './item-menus.js';
 import {compareMail} from './mail-sort.js';
-import {mailView,mailViewPreferences} from './mail-view.js';
+import {mailView,mailViewPreferences,revealMailGroup} from './mail-view.js';
 import {taskView,taskViewPreferences,taskPriority,taskDue} from './task-view.js';
 import {renderMailListCopy, bindMailListSettings} from './mail-list.js';
 import {createActivity} from './activity.js';
@@ -475,7 +475,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   }
   return snapshot;
 }
-async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false}={},initialRecords?: OfficeRecord[]) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false}={},initialRecords?: OfficeRecord[]) {
   await waitForAttachments();
   // A background refresh must never replace an in-memory draft.
   if(isUnsavedDraft() || (preserveSelection && state.dirty))return;
@@ -505,6 +505,25 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   if (state.app==='mail') state.rows.sort(compareMail);
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
   state.current=state.rows.find(r=>r.id===(preferId||state.current?.id))||null;
+  if(state.app==='mail'&&revealMail&&state.current){
+    // Use the freshly loaded location: a connection's earlier record can move during navigation.
+    const record=state.current;
+    mailListLimit=100;
+    state.mailScope=null;
+    state.mailFolder=record.meta.folder==='Not in Inbox'?'Recovery copies':record.meta.folder==='Custom folder'?'all':record.meta.folder||'Archive';
+    if(record.meta.folder==='Custom folder'&&record.meta.remote&&record.meta.account){
+      const account=state.accounts.find(a=>a.id===record.meta.account);
+      const folder=account?.type==='google'?account.folders?.find(f=>!f.protected&&record.meta.labelIds?.includes(f.id))?.id:record.meta.serverFolder;
+      const scope={account:record.meta.account,folder:folder||'',limit:100};
+      if(folder&&matchesMailScope(record,scope,state.accounts))state.mailScope=scope;
+    }
+    const prefs=revealMailGroup(record,state.prefs.mailView);
+    if(JSON.stringify(prefs.collapsed)!==JSON.stringify(mailViewPreferences(state.prefs.mailView).collapsed)){
+      state.prefs={...state.prefs,mailView:prefs};
+      mailViewSave=mailViewSave.catch(()=>{}).then(()=>api('preferences',{preferences:state.prefs}));
+      void attempt(()=>mailViewSave);
+    }
+  }
   if(state.app==='mail'){
     const editingDraft=state.current&&!state.current!.meta.remote&&state.current!.meta.folder==='Drafts';
     if(state.mailScope&&state.current&&!editingDraft&&!matchesMailScope(state.current,state.mailScope,state.accounts))state.current=null;
@@ -864,9 +883,12 @@ async function openConnectedRecord(id:string){
     state.mailScope=null;
     state.mailFolder=record.meta.folder==='Not in Inbox'?'Recovery copies':record.meta.folder==='Custom folder'?'all':record.meta.folder||'Archive';
   }
-  await load(record.id);
+  await load(record.id,{selectFirst:record.kind!=='mail',revealMail:record.kind==='mail'});
+  const opened=state.current as OfficeRecord | null;
+  if(record.kind==='mail'&&opened?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
   if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
   focusList();
+  document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
 }
 async function changeApp(name: AppName) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(undefined,{enteringApp:true}); }
 function updateMailListItem(id: string) {
@@ -1128,7 +1150,10 @@ async function deleteSelectedMail() {
   const rows=state.selected.size?visible.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
   if(!rows.length)return;
   const protectedMail=(r: OfficeRecord)=>r.meta.remote&&['Trash','Recovery copies','Not in Inbox'].includes(r.meta.folder||'');
-  if(rows.some(protectedMail))throw Error('The selection includes protected mail. Deselect messages in Trash or recovery copies before deleting.');
+  if(rows.some(protectedMail)){
+    if(rows.length===1)throw Error(rows[0].meta.folder==='Trash'?'This email is already in Trash. Use Restore to Inbox to return it to your inbox.':'This is a recovery copy. Use Save locally to keep it or Discard copy to remove only the cached copy.');
+    throw Error('The selection includes messages in Trash or recovery copies. Deselect them before deleting.');
+  }
   const ids=rows.map(r=>r.id),local=rows.filter(r=>!r.meta.remote).length;
   const apply=async(choices:ConnectionDeletionChoices)=>{
     if(state.app!=='mail')throw Error('The application changed. Select the messages again.');

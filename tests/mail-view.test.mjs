@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mailDateGroup,mailSender,mailView,mailViewPreferences,localWeekStart} from '../public/mail-view.js';
+import {mailDateGroup,mailSender,mailView,mailViewPreferences,localWeekStart,revealMailGroup} from '../public/mail-view.js';
 import {messageTime} from '../public/mail-sort.js';
 import {renderMailListCopy} from '../public/mail-list.js';
 const mail=(id,date,from='Alex <alex@example.com>',title=id)=>({id,title,kind:'mail',body:'',meta:{date,from}});
@@ -65,4 +65,15 @@ test('collapse retains all ordered rows while navigation excludes them, includin
   assert.equal(mailView(rows,{collapsed:['date:*']},now).visible.length,0);
   assert.deepEqual(mailView(rows,{collapsed:['date:*','date:!date:Yesterday']},now).visible.map(r=>r.id),['b']);
   assert.equal(mailView(rows,{group:'none',collapsed:['date:*']},now).visible.length,2);
+});
+test('opening a linked message reveals only its date or sender group, including collapse-all',()=>{
+  const record=mail('linked',new Date().toISOString(),'Alex <alex@example.com>');
+  const key=mailView([record],{}).groups[0].key;
+  assert.deepEqual(revealMailGroup(record,{collapsed:[key,'date:Older']}).collapsed,['date:Older']);
+  const p=revealMailGroup(record,{collapsed:['date:*','sender:email:other@example.com']});
+  assert.deepEqual(p.collapsed,['date:*','sender:email:other@example.com','date:!'+key]);
+  assert.equal(mailView([record],p).visible.length,1);
+  const sender=revealMailGroup(record,{group:'sender',collapsed:['sender:*','date:Older']});
+  assert.deepEqual(sender.collapsed,['sender:*','date:Older','sender:!sender:email:alex@example.com']);
+  assert.deepEqual(revealMailGroup(record,{group:'none',collapsed:[key]}).collapsed,[key]);
 });

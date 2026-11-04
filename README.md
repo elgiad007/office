@@ -121,6 +121,8 @@ The Mail list count is labelled **cached messages**: it counts messages stored i
 
 ## Connections between items
 
+Opening a connected email selects and scrolls to its row in its latest cached folder, expanding its date or sender group when needed. Custom IMAP folders and Gmail labels open in their account view when available. Trash and recovery copies keep their restore/save/discard actions; the delete shortcut explains those options. If the linked message is no longer available, Office reports that instead of selecting another message.
+
 All seven item types can be connected to each other. Connections appear on both items and stay intact when titles change. They are Office data, including for read-only synced mail and events; linking does not edit provider content.
 
 Select an item and use command mode:
