@@ -1172,6 +1172,9 @@ function collect() {
     state.current.title = values.title || state.current.title;
     if ('body' in values)
         state.current.body = values.body;
+    // PHP returns empty metadata as []; JSON would drop named properties added to it.
+    if (Array.isArray(state.current.meta))
+        state.current.meta = { ...state.current.meta };
     const m = state.current.meta;
     for (const key of ['due', 'priority', 'email', 'phone', 'company', 'group', 'location', 'to', 'sendAccount'])
         if (key in values)

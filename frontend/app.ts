@@ -744,6 +744,8 @@ function selectCell(ref: string,focus=false) {
 function collect() {
   if (!state.current) return; const form=document.querySelector<HTMLFormElement>('#record-form')!; if (!form) return; const values=Object.fromEntries(new FormData(form)) as Record<string, string>;
   state.current!.title=values.title||state.current!.title; if ('body' in values) state.current!.body=values.body;
+  // PHP returns empty metadata as []; JSON would drop named properties added to it.
+  if(Array.isArray(state.current!.meta))state.current!.meta={...state.current!.meta};
   const m=state.current!.meta;
   for (const key of ['due','priority','email','phone','company','group','location','to','sendAccount'] as const) if (key in values) m[key]=values[key];
   for (const key of ['start','end'] as const) if (key in values) m[key]=values[key]?(dateOnly(values[key])?values[key]:new Date(values[key]).toISOString()):'';
