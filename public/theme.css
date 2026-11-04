@@ -55,7 +55,9 @@
 .folder-link:hover, .folder-link:focus-visible { background: var(--wash); }
 .folder-link[aria-current="location"] { background: var(--wash); font-weight: 650; }
 .folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
-.items > .item:focus-visible { outline-offset: -2px; }
+/* Keep the current item identifiable when focus moves into its content. */
+.items .item.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+.items .item:focus-visible { outline-offset: -2px; }
 .mail-group-header { display: flex; align-items: center; gap: 7px; width: 100%; padding: 8px 9px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--wash); text-align: left; font-size: 12px; font-weight: 650; }
 .mail-group-header:focus-visible { outline-offset: -2px; }
 .mail-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
