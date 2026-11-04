@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {openMailAttachments} from './mail-reader-ui.mjs';
 
 export async function testMailCompact(page,url) {
@@ -8,7 +9,10 @@ export async function testMailCompact(page,url) {
   let fileRequests=0;
   const routes=target=>target.pathname.endsWith('/api.php')&&target.searchParams.get('r')!=='activity';
   const htmlRoute=target=>target.pathname.endsWith('/mail-view.php');
-  await page.route(htmlRoute,route=>route.fulfill({contentType:'text/html',body:'<p>HTML message body</p>'}));
+  const mailView=await readFile(new URL('../public/mail-view.php',import.meta.url),'utf8');
+  const bridge=mailView.match(/\$bridge=<<<'JS'\r?\n([\s\S]*?)\r?\nJS;/)[1];
+  const scroll=await readFile(new URL('../public/keyboard-scroll.js',import.meta.url),'utf8');
+  await page.route(htmlRoute,route=>route.fulfill({contentType:'text/html',body:`<p style="margin-top:400px">HTML message body</p><script type="module">${scroll}\n${bridge}</script>`}));
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');
     if(action==='status')return route.fulfill({json:{authenticated:true,csrf:'fixture',preferences:{}}});
@@ -62,11 +66,22 @@ export async function testMailCompact(page,url) {
     assert.ok(await page.locator('.mail-metadata-popover').getByText(/Downloaded copy from Inbox/).isVisible());
     await page.keyboard.press('Escape');assert.equal(await details.evaluate(node=>node===document.activeElement),true);
     assert.equal(await page.locator('[data-mail-disclosure="metadata"]').evaluate(d=>d.open),false);
-    await firstFrameMenu();await page.screenshot({path:'test-results/mail-compact-more-desktop.png',fullPage:true});await page.getByRole('button',{name:'Text only',exact:true}).click();await positionedMenu();
-    assert.equal(await page.getByRole('button',{name:'Text only',exact:true}).evaluate(node=>node===document.activeElement),true,'Display changes retain keyboard focus');
-    assert.equal(await page.locator('[data-mail-disclosure="more"]').evaluate(d=>d.open),true);
-    await page.keyboard.press('Escape');
+    const more=page.locator('[data-mail-disclosure="more"]');
+    const assertClosed=()=>page.waitForFunction(()=>!document.querySelector('[data-mail-disclosure="more"]').open);
+    await firstFrameMenu();await page.screenshot({path:'test-results/mail-compact-more-desktop.png',fullPage:true});
+    await page.frameLocator('.mail-html').getByText('HTML message body',{exact:true}).click();await assertClosed();
+    await firstFrameMenu();await page.locator('.mail-subject-row h1').click();await assertClosed();
+    await firstFrameMenu();await page.getByRole('button',{name:'Text only',exact:true}).click();await assertClosed();
     assert.equal(await page.locator('[data-mail-disclosure="more"] > summary').evaluate(node=>node===document.activeElement),true);
+    await firstFrameMenu();await page.getByRole('button',{name:'HTML',exact:true}).focus();await page.keyboard.press('Enter');await assertClosed();
+    assert.equal(await page.locator('.mail-html').count(),1,'Keyboard selection still changes display mode');
+    await firstFrameMenu();await page.getByRole('button',{name:'Original colors',exact:true}).click();await assertClosed();
+    await firstFrameMenu();await page.getByRole('button',{name:'Load images',exact:true}).click();await assertClosed();
+    await firstFrameMenu();await page.getByRole('button',{name:'Export',exact:true}).click();await assertClosed();
+    // Pointer events cover taps without needing a separate touch browser context.
+    await firstFrameMenu();await page.locator('.mail-subject-row h1').dispatchEvent('pointerdown',{pointerType:'touch'});await assertClosed();
+    await firstFrameMenu();await page.frameLocator('.mail-html').getByText('HTML message body',{exact:true}).dispatchEvent('pointerdown',{pointerType:'touch'});await assertClosed();
+    await firstFrameMenu();await page.keyboard.press('Escape');assert.equal(await more.evaluate(d=>d.open),false);
     await select('plain');assert.equal(await page.locator('#detail [data-mail-mode]').count(),0,'Plain messages have no HTML/text controls');
     await assertBodyGap();
     await firstFrameMenu('Enter');await page.setViewportSize({width:900,height:650});await positionedMenu();await page.keyboard.press('Escape');await page.setViewportSize({width:1440,height:1000});await firstFrameMenu('Space');

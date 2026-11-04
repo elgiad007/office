@@ -114,7 +114,7 @@ export async function testMailHtml(page,url) {
         await page.screenshot({path:'test-results/mail-html-dark.png',fullPage:true});
         await openMailMore(page);await page.getByRole('button',{name:'Original colors',exact:true}).click();
         await frame.getByText('Sender colors',{exact:true}).waitFor();
-        assert.equal(await page.getByRole('button',{name:'Original colors',exact:true}).getAttribute('aria-pressed'),'true');
+        assert.equal(await page.locator('[data-mail-colors]').getAttribute('aria-pressed'),'true');
       }
       assert.deepEqual(await frame.locator('#explicit-colors').evaluate(node=>[getComputedStyle(node).backgroundColor,getComputedStyle(node).color]),['rgb(255, 255, 255)','rgb(17, 17, 17)']);
       assert.equal(await frame.locator('#legacy-background').evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(255, 255, 255)');
@@ -122,12 +122,12 @@ export async function testMailHtml(page,url) {
       assert.equal(await frame.locator('.hero').evaluate(node=>getComputedStyle(node).color),'rgb(180, 30, 60)');
       assert.ok(await frame.locator('.MsoNormal').evaluate(node=>node.getBoundingClientRect().height)>0,'Outlook empty paragraph retains its height');
       if(dark) {
-        await page.getByRole('button',{name:'Text only',exact:true}).click();
-        await page.getByRole('button',{name:'HTML',exact:true}).click();
-        assert.equal(await page.getByRole('button',{name:'Original colors',exact:true}).getAttribute('aria-pressed'),'true');
-        await page.getByRole('button',{name:'Original colors',exact:true}).click();
+        await openMailMore(page);await page.getByRole('button',{name:'Text only',exact:true}).click();
+        await openMailMore(page);await page.getByRole('button',{name:'HTML',exact:true}).click();
+        assert.equal(await page.locator('[data-mail-colors]').getAttribute('aria-pressed'),'true');
+        await openMailMore(page);await page.getByRole('button',{name:'Original colors',exact:true}).click();
         await frame.getByText('Sender colors',{exact:true}).waitFor();
-        assert.equal(await page.getByRole('button',{name:'Original colors',exact:true}).getAttribute('aria-pressed'),'false');
+        assert.equal(await page.locator('[data-mail-colors]').getAttribute('aria-pressed'),'false');
       }
       if(theme==='system') {
         await page.emulateMedia({colorScheme:'light'});
@@ -147,7 +147,7 @@ export async function testMailHtml(page,url) {
     assert.equal(await page.locator('.mail-body').textContent(),'Newsletter text alternative');
     assert.equal(await page.locator('.mail-html').count(),0);
     await openMailMore(page);await page.getByRole('button',{name:'HTML',exact:true}).click();
-    await page.getByRole('button',{name:'Load images',exact:true}).click();
+    await openMailMore(page);await page.getByRole('button',{name:'Load images',exact:true}).click();
     await frame.getByAltText('Remote logo').evaluate(img=>img.decode());
     assert.ok(remoteRequests>0);
     await page.getByRole('button',{name:'Settings',exact:true}).click();

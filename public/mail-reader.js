@@ -3,6 +3,7 @@ import { escapeHtml as e } from './formats.js';
 const modes = new Map(), imageConsent = new Set(), originalColors = new Set();
 let readerSize;
 let moreOpening;
+let moreCleanup;
 function displayMode(record, prefs) { return modes.get(record.id) || (prefs.mailDisplay === 'text' ? 'text' : 'html'); }
 export function mailDisplayControls(record, prefs) {
     if (record.meta.headerOnly || !record.meta.hasHtml)
@@ -28,6 +29,8 @@ export function bindMailReader(panel, record, render, navigation = {}) {
     bridgeCleanup?.();
     readerSize?.disconnect();
     moreOpening?.disconnect();
+    moreCleanup?.();
+    const more = panel.querySelector('[data-mail-disclosure="more"]');
     const frame = panel.querySelector('.mail-html');
     if (frame) {
         const allowed = new Set(['g', 'G', 'n', 'N', 'Tab', 'Escape', ':', 'ContextMenu', 'F10', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ...'1234567', ...Object.values(navigation).filter(Boolean)]);
@@ -40,6 +43,10 @@ export function bindMailReader(panel, record, render, navigation = {}) {
                 return;
             if (data.type === 'office-mail-ready' && Object.keys(data).length === 1) {
                 configure();
+                return;
+            }
+            if (data.type === 'office-mail-pointer' && Object.keys(data).length === 1) {
+                more.open = false;
                 return;
             }
             if (data.type === 'office-mail-context' && Object.keys(data).length === 3 && Number.isFinite(data.x) && Number.isFinite(data.y) && data.x >= 0 && data.y >= 0 && data.x <= frame.clientWidth && data.y <= frame.clientHeight) {
@@ -60,7 +67,22 @@ export function bindMailReader(panel, record, render, navigation = {}) {
         bridgeCleanup = () => { window.removeEventListener('message', receive); frame.removeEventListener('load', configure); };
     }
     const header = panel.querySelector('.mail-reader-header');
-    const more = panel.querySelector('[data-mail-disclosure="more"]');
+    const dismissOutside = (event) => { if (more.isConnected && !more.contains(event.target))
+        more.open = false; };
+    const dismissSelection = (event) => {
+        dismissOutside(event);
+        if (!more.open || !more.isConnected || !event.target.closest('.mail-more-popover button:not(:disabled)'))
+            return;
+        // Close before a button's handler captures reader state or rerenders it.
+        more.open = false;
+        more.querySelector('summary').focus({ preventScroll: true });
+    };
+    document.addEventListener('pointerdown', dismissOutside, true);
+    document.addEventListener('click', dismissSelection, true);
+    moreCleanup = () => {
+        document.removeEventListener('pointerdown', dismissOutside, true);
+        document.removeEventListener('click', dismissSelection, true);
+    };
     const fit = () => {
         if (!header.isConnected) {
             readerSize?.disconnect();

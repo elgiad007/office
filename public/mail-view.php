@@ -52,6 +52,7 @@ try {
     if(event.defaultPrevented||event.target.closest('input,textarea,select,[contenteditable],a,button')||getSelection()?.toString())return;
     event.preventDefault();parent.postMessage({type:'office-mail-context',x:event.clientX,y:event.clientY},'*');
   });
+  addEventListener('pointerdown',()=>parent.postMessage({type:'office-mail-pointer'},'*'),{passive:true});
   parent.postMessage({type:'office-mail-ready'},'*');
 })();
 JS;

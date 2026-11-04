@@ -4,6 +4,7 @@ import {escapeHtml as e} from './formats.js';
 const modes=new Map<string, string>(), imageConsent=new Set<string>(), originalColors=new Set<string>();
 let readerSize: ResizeObserver | undefined;
 let moreOpening: MutationObserver | undefined;
+let moreCleanup: (()=>void)|undefined;
 function displayMode(record: OfficeRecord,prefs: Preferences) {return modes.get(record.id)||(prefs.mailDisplay==='text'?'text':'html');}
 export function mailDisplayControls(record: OfficeRecord,prefs: Preferences) {
   if(record.meta.headerOnly||!record.meta.hasHtml)return '';
@@ -27,6 +28,8 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
   bridgeCleanup?.();
   readerSize?.disconnect();
   moreOpening?.disconnect();
+  moreCleanup?.();
+  const more=panel.querySelector<HTMLDetailsElement>('[data-mail-disclosure="more"]')!;
   const frame=panel.querySelector<HTMLIFrameElement>('.mail-html');
   if(frame){
     const allowed=new Set(['g','G','n','N','Tab','Escape',':','ContextMenu','F10','ArrowUp','ArrowDown','PageUp','PageDown','Home','End',...'1234567',...Object.values(navigation).filter(Boolean)]);
@@ -36,6 +39,7 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
       const data=event.data;
       if(!data||typeof data!=='object'||Array.isArray(data))return;
       if(data.type==='office-mail-ready'&&Object.keys(data).length===1){configure();return;}
+      if(data.type==='office-mail-pointer'&&Object.keys(data).length===1){more.open=false;return;}
       if(data.type==='office-mail-context'&&Object.keys(data).length===3&&Number.isFinite(data.x)&&Number.isFinite(data.y)&&data.x>=0&&data.y>=0&&data.x<=frame.clientWidth&&data.y<=frame.clientHeight){const rect=frame.getBoundingClientRect();frame.dispatchEvent(new MouseEvent('contextmenu',{clientX:rect.left+data.x,clientY:rect.top+data.y,bubbles:true,cancelable:true}));return;}
       if(data.type==='office-mail-save'&&Object.keys(data).length===4&&typeof data.ctrlKey==='boolean'&&typeof data.metaKey==='boolean'&&(data.ctrlKey||data.metaKey)&&typeof data.repeat==='boolean'){frame.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:data.ctrlKey,metaKey:data.metaKey,repeat:data.repeat,bubbles:true,cancelable:true}));return;}
       if(data.type!=='office-mail-key'||Object.keys(data).length!==4||typeof data.key!=='string'||!allowed.has(data.key)||typeof data.shiftKey!=='boolean'||typeof data.repeat!=='boolean')return;
@@ -45,7 +49,20 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
     bridgeCleanup=()=>{window.removeEventListener('message',receive);frame.removeEventListener('load',configure);};
   }
   const header=panel.querySelector<HTMLElement>('.mail-reader-header')!;
-  const more=panel.querySelector<HTMLDetailsElement>('[data-mail-disclosure="more"]')!;
+  const dismissOutside=(event: Event)=>{if(more.isConnected&&!more.contains(event.target as Node))more.open=false;};
+  const dismissSelection=(event: Event)=>{
+    dismissOutside(event);
+    if(!more.open||!more.isConnected||!(event.target as Element).closest('.mail-more-popover button:not(:disabled)'))return;
+    // Close before a button's handler captures reader state or rerenders it.
+    more.open=false;
+    more.querySelector<HTMLElement>('summary')!.focus({preventScroll:true});
+  };
+  document.addEventListener('pointerdown',dismissOutside,true);
+  document.addEventListener('click',dismissSelection,true);
+  moreCleanup=()=>{
+    document.removeEventListener('pointerdown',dismissOutside,true);
+    document.removeEventListener('click',dismissSelection,true);
+  };
   const fit=()=>{
     if(!header.isConnected){readerSize?.disconnect();moreOpening?.disconnect();return;}
     if(frame){
