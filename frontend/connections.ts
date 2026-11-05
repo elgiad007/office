@@ -12,7 +12,7 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
     if(checkingDeletion)return;
     const linked:{row:Parameters<ConfirmDeletion>[0][number];result:ConnectionList}[]=[];
     checkingDeletion=true;
-    try{for(const row of rows){const result=await env.api(`connections&id=${encodeURIComponent(row.id)}`);if(result.links.length)linked.push({row,result});}}
+    try{for(const row of rows){const result=await env.api(`connections&id=${encodeURIComponent(row.id)}&visibility=all`);if(result.links.length)linked.push({row,result});}}
     finally{checkingDeletion=false;}
     if(!linked.length){if(skipUnconnected)await action({});else env.confirmation(title,message,()=>action({}));return;}
     const choices:ConnectionDeletionChoices={},names=new Map(linked.map(({row})=>[row.id,row.title]));
@@ -133,7 +133,7 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
   }
   async function view(all=false,sourceId?:string){
     const source=all?'':sourceId??env.current();if(source===undefined||source?.startsWith('draft-'))throw new CommandError('Save and select an item first, or use :links all.');
-    await openConnectionExplorer(env,source||'');
+    await openConnectionExplorer({...env,changed:()=>void section()},source||'');
   }
   return {autocomplete,mutate,section,view,confirmDeletion};
 }

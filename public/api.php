@@ -52,13 +52,17 @@ try {
     if($route==='connection-search' && $method==='GET') { session_write_close();json_response(['items'=>connection_search((string)($_GET['q']??''),(string)($_GET['kind']??''),(string)($_GET['exclude']??''))]); }
     if($route==='connections' && $method==='GET') {
         session_write_close();
-        $mode=(string)($_GET['mode']??'');$offset=(int)($_GET['offset']??0);
-        if($mode==='overview')json_response(connection_overview($offset));
-        if($mode==='items')json_response(connection_explorer_search((string)($_GET['q']??''),(string)($_GET['kind']??''),$offset));
-        json_response(connection_list((string)($_GET['id']??''),(string)($_GET['q']??''),$offset,(string)($_GET['kind']??''),(string)($_GET['group']??''),$mode==='graph'));
+        $mode=(string)($_GET['mode']??'');$offset=(int)($_GET['offset']??0);$visibility=(string)($_GET['visibility']??'active');
+        if($mode==='overview')json_response(connection_overview($offset,$visibility));
+        if($mode==='items')json_response(connection_explorer_search((string)($_GET['q']??''),(string)($_GET['kind']??''),$offset,$visibility));
+        json_response(connection_list((string)($_GET['id']??''),(string)($_GET['q']??''),$offset,(string)($_GET['kind']??''),(string)($_GET['group']??''),$mode==='graph',$visibility));
     }
     if($route==='connection' && $method==='POST') {
         $a=(string)($input['id']??'');$b=(string)($input['target']??'');
+        if(in_array($input['action']??'',['archive','restore'],true)){
+            $changed=connection_set_archived($a,$b,(string)($input['scope']??'edge'),$input['action']==='archive',(string)($input['visibility']??'active'));
+            json_response(['ok'=>true,'changed'=>$changed,'connectionCounts'=>(object)connection_counts()]);
+        }
         if(($input['action']??'add')==='add')connection_add($a,$b);
         elseif($input['action']==='remove'){get_record($a);get_record($b);db()->prepare('DELETE FROM connections WHERE (a=? AND b=?) OR (a=? AND b=?)')->execute([$a,$b,$b,$a]);}
         else fail('Unknown connection action.');
@@ -146,7 +150,7 @@ try {
     }
     if ($route==='backup' && $method==='GET') {
         $db=db(); $db->beginTransaction();
-        $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]);$files=$db->query('SELECT * FROM mail_files')->fetchAll(); $links=$db->query('SELECT a,b,created FROM connections')->fetchAll(); $db->commit();
+        $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]);$files=$db->query('SELECT * FROM mail_files')->fetchAll(); $links=$db->query('SELECT a,b,created,archived FROM connections')->fetchAll(); $db->commit();
         json_response(['format'=>'portable-office','version'=>1,'created'=>gmdate('c'),'records'=>$records,'revisions'=>$revisions,'preferences'=>$prefs,'mailFiles'=>$files,'connections'=>$links]);
     }
     if ($route==='restore' && $method==='POST') {
@@ -166,6 +170,8 @@ try {
         $prefs=$backup['preferences']??[]; if (!is_array($prefs) || strlen(json_encode($prefs))>10000) fail('Invalid preferences.');
         $links=$backup['connections']??[];if(!is_array($links)||count($links)>100000)fail('Invalid connections.');
         foreach($links as $link)if(!is_array($link)||!is_string($link['a']??null)||!is_string($link['b']??null)||$link['a']===$link['b']||!isset($seen[$link['a']],$seen[$link['b']]))fail('Invalid connection endpoints.');
+        foreach($links as $link)if(!in_array($link['archived']??0,[0,1,false,true],true))fail('Invalid connection archive status.');
+        foreach($links as $link)if(isset($link['created'])&&!is_string($link['created']))fail('Invalid connection date.');
         $files=$backup['mailFiles']??[];if(!is_array($files)||count($files)>50000)fail('Invalid attachment backup.');
         $fileKeys=[];
         foreach($files as $file){

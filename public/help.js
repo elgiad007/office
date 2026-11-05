@@ -45,6 +45,7 @@ export function helpEntries(k) {
     add('gg / G; Home / End', 'First / last map card', 'Connections map');
     add('Backspace', 'Go back through connections', 'Connections window, outside typing fields', 'Restores the previous map and focus. Without earlier history, moves up to the workspace overview; stays there when already at the top.');
     add('Enter / Space on From card', 'Return to the view you came from', 'Connections map', 'The faded From card and dashed line show your navigation path. Current identifies the neighborhood center independently of selection.');
+    add('Active / Archived / All', 'Choose connection visibility', 'Connections toolbar', 'Active is the default. Archive or restore a group, the selected item’s connections, or a single link. Underlying items are unchanged.');
     add('Shift+Arrow keys; + / -', 'Pan / zoom the map', 'Connections map', 'Fit view remains available in the toolbar.');
     add('ArrowDown / ArrowUp', 'Choose matching folder', 'Quick Move search');
     add('Enter', 'Move to chosen folder', 'Quick Move');

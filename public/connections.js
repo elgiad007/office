@@ -14,7 +14,7 @@ export function createConnections(env) {
         checkingDeletion = true;
         try {
             for (const row of rows) {
-                const result = await env.api(`connections&id=${encodeURIComponent(row.id)}`);
+                const result = await env.api(`connections&id=${encodeURIComponent(row.id)}&visibility=all`);
                 if (result.links.length)
                     linked.push({ row, result });
             }
@@ -263,7 +263,7 @@ export function createConnections(env) {
         const source = all ? '' : sourceId ?? env.current();
         if (source === undefined || source?.startsWith('draft-'))
             throw new CommandError('Save and select an item first, or use :links all.');
-        await openConnectionExplorer(env, source || '');
+        await openConnectionExplorer({ ...env, changed: () => void section() }, source || '');
     }
     return { autocomplete, mutate, section, view, confirmDeletion };
 }

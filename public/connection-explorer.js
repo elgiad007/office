@@ -11,10 +11,11 @@ export async function openConnectionExplorer(env, source = '') {
     <div class="connection-tools"><div class="connection-history"><button data-history="-1" aria-label="Back in connections">←</button><button data-history="1" aria-label="Forward in connections">→</button><button data-overview>Workspace overview</button></div>
       <label>Find connected items<input data-connection-filter type="search" placeholder="Search the whole workspace" maxlength="500"></label>
       <label>Item type<select data-connection-kind><option value="">All types</option>${Object.entries(itemTypes).map(([kind, type]) => `<option value="${kind}">${e(type.label)}</option>`).join('')}</select></label>
+      <label>Connections<select data-connection-visibility aria-label="Connection visibility"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>
       <button data-toggle-panel aria-expanded="true" aria-controls="connection-panel">Hide details</button></div>
     <p class="connection-location" data-location></p>
     <div class="connection-workspace"><section class="connection-map-pane" aria-label="Connections map">
-      <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span></div>
+      <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span><span data-group-actions></span></div>
       <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-edges></g><g data-navigation-path></g><g data-nodes></g></svg></div>
       <p class="connection-map-note" data-map-note></p>
       <div class="connection-legend" aria-label="Item type legend">${Object.entries(itemTypes).map(([kind, type]) => `<span class="connection-type" data-kind="${kind}">${symbols[kind]} ${e(type.label)}</span>`).join('')}</div>
@@ -23,6 +24,8 @@ export async function openConnectionExplorer(env, source = '') {
     const dialog = env.dialog, host = dialog.querySelector('.connections-view');
     const query = (s) => host.querySelector(s);
     const filter = query('[data-connection-filter]'), kind = query('[data-connection-kind]');
+    const visibilityControl = query('[data-connection-visibility]');
+    let visibility = 'active', mutating = false;
     const more = query('[data-connection-more]'), svg = query('svg'), map = query('[data-connection-graph]');
     const status = query('[data-connection-status]');
     const textMeasure = document.createElement('canvas').getContext('2d');
@@ -93,7 +96,11 @@ export async function openConnectionExplorer(env, source = '') {
     } });
     resize.observe(map);
     const panel = query('#connection-panel');
-    const itemButtons = (item) => `<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
+    const archiveButtons = (scope, id, active, archived, target = '') => [
+        ...(visibility !== 'archived' && active > 0 ? ['archive'] : []), ...(visibility !== 'active' && archived > 0 ? ['restore'] : [])
+    ].map(action => `<button data-archive-action="${action}" data-archive-scope="${scope}" data-archive-id="${e(id)}" data-archive-target="${e(target)}" ${mutating ? 'disabled' : ''}>${action === 'archive' ? 'Archive' : 'Restore'}${scope === 'group' ? ' group' : scope === 'item' ? ' connections' : ''}</button>`).join('');
+    const itemButtons = (item) => `<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>${archiveButtons('item', item.id, item.activeDegree ?? (visibility !== 'archived' ? item.degree || 0 : 0), item.archivedDegree ?? (visibility === 'archived' ? item.degree || 0 : 0))}`;
+    const archiveBadge = (count, total) => count ? `<span class="connection-archive-badge">${count === total ? 'Archived' : count + ' archived'}</span>` : '';
     let openingItem = false;
     const openItem = async (id) => {
         if (openingItem)
@@ -132,6 +139,7 @@ export async function openConnectionExplorer(env, source = '') {
             env.notice(failure.message, true);
     };
     function wireItems(root) {
+        root.querySelectorAll('[data-archive-action]').forEach(button => button.onclick = () => void archiveConnections(button));
         root.querySelectorAll('[data-select]').forEach(button => button.onclick = () => select(button.dataset.select));
         root.querySelectorAll('[data-open]').forEach(button => button.onclick = () => openItem(button.dataset.open));
         root.querySelectorAll('[data-explore]').forEach(button => button.onclick = () => void navigate({ mode: 'graph', id: button.dataset.explore, group: '', q: '', kind: '' }));
@@ -139,7 +147,7 @@ export async function openConnectionExplorer(env, source = '') {
     }
     function selection() {
         const item = data.items.find(item => item.id === selected), section = query('[data-selection]');
-        section.innerHTML = item ? `<h3>${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind] || '●'} ${e(typeLabel(item.kind))} · ${item.degree ?? '—'} total connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>` : '<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
+        section.innerHTML = item ? `<h3>${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind] || '●'} ${e(typeLabel(item.kind))} · ${item.degree ?? '—'} ${visibility === 'all' ? 'total' : visibility} connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>` : '<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
         wireItems(section);
         const peers = new Set([selected]);
         for (const link of data.links)
@@ -249,7 +257,7 @@ export async function openConnectionExplorer(env, source = '') {
             size();
             points = new Map(connectionGroupLayout(groups.map(group => group.id), width, height).map(p => [p.id, p]));
             query('[data-edges]').innerHTML = '';
-            query('[data-nodes]').innerHTML = groups.map(group => { const p = points.get(group.id), lines = titleLines(group.title, 228); return `<g role="button" tabindex="0" data-group-node="${e(group.id)}" data-kind="${e(group.kind)}" aria-label="Explore group ${e(typeLabel(group.kind))}: ${e(group.title)}, ${group.items} items, ${group.links} connections" transform="translate(${p.x} ${p.y})"><rect x="-150" y="-52" width="300" height="104" rx="14"/><text class="connection-group-symbol" x="-132" y="-9" aria-hidden="true">${symbols[group.kind] || '●'}</text><text class="connection-group-title" text-anchor="middle">${lines.map((line, i) => `<tspan x="16" y="${-19 + i * 19}">${e(line)}</tspan>`).join('')}</text><text class="connection-group-count" y="31" text-anchor="middle">${group.items} items · ${group.links} connections</text><title>${e(typeLabel(group.kind) + ' · ' + group.title)}</title></g>`; }).join('');
+            query('[data-nodes]').innerHTML = groups.map(group => { const p = points.get(group.id), lines = titleLines(group.title, 228); return `<g role="button" tabindex="0" data-group-node="${e(group.id)}" data-kind="${e(group.kind)}" aria-label="Explore group ${e(typeLabel(group.kind))}: ${e(group.title)}, ${group.items} items, ${group.links} connections" transform="translate(${p.x} ${p.y})"><rect x="-150" y="-52" width="300" height="104" rx="14"/><text class="connection-group-symbol" x="-132" y="-9" aria-hidden="true">${symbols[group.kind] || '●'}</text><text class="connection-group-title" text-anchor="middle">${lines.map((line, i) => `<tspan x="16" y="${-19 + i * 19}">${e(line)}</tspan>`).join('')}</text><text class="connection-group-count" y="31" text-anchor="middle">${group.items} items · ${group.links} connections</text>${group.archivedLinks ? '<text class="connection-archive-label" y="47" text-anchor="middle">' + (group.archivedLinks === group.links ? 'Archived' : group.archivedLinks + ' archived') + '</text>' : ''}<title>${e(typeLabel(group.kind) + ' · ' + group.title)}</title></g>`; }).join('');
             query('[data-map-note]').textContent = `Map: ${groups.length} of ${(data.groups || []).length} loaded groups. Each group contains items joined by a path of connections. Select a group to explore it.`;
         }
         else {
@@ -258,8 +266,8 @@ export async function openConnectionExplorer(env, source = '') {
             const eligible = data.links.filter(link => points.has(link.a) && points.has(link.b));
             const related = eligible.filter(link => link.a === selected || link.b === selected), others = eligible.filter(link => link.a !== selected && link.b !== selected);
             const edges = [...related, ...others].slice(0, 500);
-            query('[data-edges]').innerHTML = edges.map(link => { const a = points.get(link.a), b = points.get(link.b); return `<line data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`; }).join('');
-            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id), lines = titleLines(item.title, 185); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind] || '●'}</text><text class="connection-node-title">${lines.map((line, i) => `<tspan x="-81" y="${-12 + i * 17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(typeLabel(item.kind))} · ${item.degree ?? '—'} links</text><title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
+            query('[data-edges]').innerHTML = edges.map(link => { const a = points.get(link.a), b = points.get(link.b); return `<line class="${link.archived ? 'connection-archived-edge' : ''}" data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`; }).join('');
+            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id), lines = titleLines(item.title, 185); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind] || '●'}</text><text class="connection-node-title">${lines.map((line, i) => `<tspan x="-81" y="${-12 + i * 17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(typeLabel(item.kind))} · ${item.degree ?? '—'} ${visibility === 'archived' ? 'archived links' : 'links'}</text><title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
             query('[data-map-note]').textContent = `Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length > GRAPH_LIMIT || eligible.length > 500 ? `Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. ` : ''}Drag to pan · Wheel/pinch to zoom · Select to highlight.`;
         }
         renderArrival();
@@ -282,12 +290,15 @@ export async function openConnectionExplorer(env, source = '') {
         query('[data-location]').textContent = place.mode === 'overview' ? 'Workspace overview' : place.mode === 'items' ? 'Search results across the workspace' : place.id ? `Connections of ${data.items.find(item => item.id === place.id)?.title || 'selected item'}` : 'Connected group';
         query('[data-list-title]').textContent = place.mode === 'overview' ? 'Connected groups' : place.mode === 'items' ? 'Matching items' : 'Loaded connections';
         const list = query('[data-connection-list]'), byId = new Map(data.items.map(item => [item.id, item])), start = listPage * 50;
-        list.innerHTML = place.mode === 'overview' ? (data.groups || []).slice(start, start + 50).map(group => `<div class="connection-list-row" data-kind="${e(group.kind)}"><strong><span class="connection-group-symbol" role="img" aria-label="${e(typeLabel(group.kind))}">${symbols[group.kind] || '●'}</span> ${e(group.title)}</strong><span>${group.items} items · ${group.links} connections</span><button data-group="${e(group.id)}">Explore group</button></div>`).join('') : place.mode === 'items' ? data.items.slice(start, start + 50).map(item => `<div class="connection-list-row"><button data-select="${e(item.id)}">${e(item.title)}</button><span>${e(typeLabel(item.kind))} · ${item.degree} connections</span>${itemButtons(item)}</div>`).join('') : data.links.slice(start, start + 50).map(link => `<div class="connection-list-row">${[link.a, link.b].map(id => { const item = byId.get(id); return `<button data-select="${e(id)}">${symbols[item.kind] || '●'} ${e(item.title)}</button>`; }).join('<span aria-label="connected to">↔</span>')}</div>`).join('');
+        list.innerHTML = place.mode === 'overview' ? (data.groups || []).slice(start, start + 50).map(group => `<div class="connection-list-row" data-kind="${e(group.kind)}"><strong><span class="connection-group-symbol" role="img" aria-label="${e(typeLabel(group.kind))}">${symbols[group.kind] || '●'}</span> ${e(group.title)}</strong><span>${group.items} items · ${group.links} connections</span>${archiveBadge(group.archivedLinks || 0, group.links)}<button data-group="${e(group.id)}">Explore group</button>${archiveButtons('group', group.id, group.links - (group.archivedLinks || 0), group.archivedLinks || 0)}</div>`).join('') : place.mode === 'items' ? data.items.slice(start, start + 50).map(item => `<div class="connection-list-row"><button data-select="${e(item.id)}">${e(item.title)}</button><span>${e(typeLabel(item.kind))} · ${item.degree} ${visibility === 'all' ? 'total' : visibility} connections</span>${itemButtons(item)}</div>`).join('') : data.links.slice(start, start + 50).map(link => `<div class="connection-list-row" data-connection-edge="${e(link.a)}|${e(link.b)}">${[link.a, link.b].map(id => { const item = byId.get(id); return `<button data-select="${e(id)}">${symbols[item.kind] || '●'} ${e(item.title)}</button>`; }).join('<span aria-label="connected to">↔</span>')}${archiveBadge(link.archived ? 1 : 0, 1)}${archiveButtons('edge', link.a, link.archived ? 0 : 1, link.archived ? 1 : 0, link.b)}</div>`).join('');
         if (!list.childElementCount)
             list.innerHTML = '<p>No connections found. Try a different search or item type.</p>';
         wireItems(list);
         more.hidden = !data.more;
         more.textContent = place.mode === 'overview' ? 'Load more groups' : place.mode === 'items' ? 'Load more items' : 'Load more connections';
+        const groupActions = query('[data-group-actions]');
+        groupActions.innerHTML = place.group ? archiveButtons('group', place.group, data.activeTotal ?? data.links.filter(link => !link.archived).length, data.archivedTotal ?? data.links.filter(link => link.archived).length) : '';
+        wireItems(groupActions);
         renderMap();
         if (reset) {
             fit();
@@ -297,7 +308,7 @@ export async function openConnectionExplorer(env, source = '') {
         const loaded = place.mode === 'overview' ? (data.groups || []).length : place.mode === 'items' ? data.items.length : data.links.length;
         query('[data-list-range]').textContent = loaded ? `${start + 1}–${Math.min(start + 50, loaded)} of ${loaded}` : '0 results';
         host.querySelectorAll('[data-list-page]').forEach(button => button.disabled = Number(button.dataset.listPage) < 0 ? listPage === 0 : start + 50 >= loaded);
-        status.textContent = place.mode === 'overview' ? `${loaded} of ${data.groupTotal ?? loaded} groups loaded · ${data.itemTotal ?? 0} items · ${data.total ?? 0} total connections.` : `${loaded} of ${data.total ?? loaded} ${place.mode === 'items' ? 'matching items' : 'connections'} loaded. ${data.more ? 'Load more to continue.' : ''}`;
+        status.textContent = `${visibility === 'all' ? 'All' : visibility === 'active' ? 'Active' : 'Archived'} · ` + (place.mode === 'overview' ? `${loaded} of ${data.groupTotal ?? loaded} groups loaded · ${data.itemTotal ?? 0} items · ${data.total ?? 0} total connections.` : `${loaded} of ${data.total ?? loaded} ${place.mode === 'items' ? 'matching items' : 'connections'} loaded. ${data.more ? 'Load more to continue.' : ''}`);
         host.querySelectorAll('[data-history]').forEach(button => button.disabled = Number(button.dataset.history) < 0 ? historyIndex === 0 : historyIndex === history.length - 1);
     }
     async function fetchPage(reset) {
@@ -312,7 +323,7 @@ export async function openConnectionExplorer(env, source = '') {
         status.textContent = 'Loading connections…';
         host.setAttribute('aria-busy', 'true');
         const offset = reset ? 0 : place.mode === 'overview' ? (data.groups || []).length : place.mode === 'items' ? data.items.length : data.links.length;
-        const route = `connections&mode=${place.mode}&id=${encodeURIComponent(place.id)}&group=${encodeURIComponent(place.group)}&q=${encodeURIComponent(place.q)}&kind=${encodeURIComponent(place.kind)}&offset=${offset}`;
+        const route = `connections&mode=${place.mode}&id=${encodeURIComponent(place.id)}&group=${encodeURIComponent(place.group)}&q=${encodeURIComponent(place.q)}&kind=${encodeURIComponent(place.kind)}&visibility=${visibility}&offset=${offset}`;
         try {
             const result = await env.api(route);
             if (version !== request || !active())
@@ -320,7 +331,7 @@ export async function openConnectionExplorer(env, source = '') {
             listPage = reset ? 0 : Math.floor(offset / 50);
             data = reset ? result : { ...result, links: [...new Map([...data.links, ...result.links].map(link => [link.a + '|' + link.b, link])).values()], items: [...new Map([...data.items, ...result.items].map(item => [item.id, item])).values()], groups: [...(data.groups || []), ...(result.groups || [])] };
             render(reset || place.mode === 'overview');
-            if (reset && document.activeElement !== filter && document.activeElement !== kind)
+            if (reset && document.activeElement !== filter && document.activeElement !== kind && document.activeElement !== visibilityControl)
                 focusMap(selected || focusedId);
         }
         catch (error) {
@@ -336,8 +347,57 @@ export async function openConnectionExplorer(env, source = '') {
             }
         }
     }
-    function remember() { if (!busy)
+    function remember() { if (!busy && !mutating)
         history[historyIndex].snapshot = { data, selected, focusedId, view: { ...view }, fitWidth, listPage, scroll: panel.scrollTop, width, height }; }
+    function invalidateHistory() { for (const entry of history) {
+        delete entry.snapshot;
+        delete entry.from;
+    } }
+    async function archiveConnections(button) {
+        if (mutating)
+            return;
+        mutating = true;
+        clearTimeout(timer);
+        ++request;
+        busy = false;
+        more.disabled = true;
+        host.setAttribute('aria-busy', 'true');
+        filter.value = place.q;
+        kind.value = place.kind;
+        host.querySelectorAll('[data-archive-action]').forEach(button => button.disabled = true);
+        const action = button.dataset.archiveAction, scope = button.dataset.archiveScope;
+        status.textContent = action === 'archive' ? 'Archiving connections…' : 'Restoring connections…';
+        try {
+            const result = await env.api('connection', { action, scope, id: button.dataset.archiveId, target: button.dataset.archiveTarget || '', visibility });
+            invalidateHistory();
+            env.changed?.();
+            if (!active())
+                return;
+            if (scope === 'group' && action === 'archive' && visibility === 'active')
+                await navigate({ mode: 'overview', id: '', group: '', q: '', kind: '' });
+            else
+                await fetchPage(true);
+            if (active()) {
+                const message = `${action === 'archive' ? 'Archived' : 'Restored'} ${result.changed ?? 0} connections.`;
+                status.textContent = message + ' ' + status.textContent;
+                env.notice(message);
+            }
+        }
+        catch (error) {
+            if (active())
+                status.textContent = `Could not ${action === 'archive' ? 'archive' : 'restore'} connections: ${error.message}`;
+        }
+        finally {
+            mutating = false;
+            if (active()) {
+                if (!busy) {
+                    more.disabled = false;
+                    host.setAttribute('aria-busy', 'false');
+                }
+                host.querySelectorAll('[data-archive-action]').forEach(button => button.disabled = false);
+            }
+        }
+    }
     async function navigate(next, record = true) { clearTimeout(timer); sequenceTime = 0; if (record) {
         const from = navigationOrigin(next);
         remember();
@@ -382,6 +442,7 @@ export async function openConnectionExplorer(env, source = '') {
     const search = () => { clearTimeout(timer); ++request; busy = false; more.disabled = true; timer = setTimeout(() => void runSearch(), 220); };
     filter.oninput = search;
     kind.onchange = search;
+    visibilityControl.onchange = () => { visibility = visibilityControl.value; clearTimeout(timer); invalidateHistory(); void fetchPage(true); };
     more.onclick = () => { if (!busy)
         void fetchPage(false); };
     host.querySelectorAll('[data-list-page]').forEach(button => button.onclick = () => { listPage += Number(button.dataset.listPage); render(false); query('[data-list-title]').focus(); });
