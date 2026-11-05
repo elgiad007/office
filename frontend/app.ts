@@ -44,7 +44,7 @@ function rememberSelection() {
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys()});
 const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,open:selectRecord,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
-const connections=createConnections({api,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
+const connections=createConnections({api,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
 class DraftCancelled extends Error {}
@@ -1327,6 +1327,11 @@ function focusContent() {
   const entry=contentEntry();
   if(entry){entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
+function restoreConnectionsFocus(opener:HTMLElement|null) {
+  if(opener?.isConnected&&!opener.isContentEditable&&!opener.matches('input,textarea,select'))opener.focus({preventScroll:true});
+  if(document.activeElement!==opener||editable(document.activeElement))focusList();
+  setMode('normal');
+}
 function focusList() {
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
@@ -1425,7 +1430,7 @@ document.addEventListener('keydown',event=>{
   if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=navigableRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
 });
-document.addEventListener('focusin',event=>{if((event.target as HTMLElement).id!=='command-input'&&editable((event.target as HTMLElement)))setMode('insert');});
+document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view')&&target.id!=='command-input'&&editable(target))setMode('insert');});
 document.addEventListener('pointerdown',()=>state.lastActivity=Date.now(),{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});
 window.addEventListener('beforeunload',event=>{if(state.dirty||state.savePromise){event.preventDefault();event.returnValue='';}});

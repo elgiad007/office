@@ -39,7 +39,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys() });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
-const connections = createConnections({ api, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
+const connections = createConnections({ api, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
 class DraftCancelled extends Error {
@@ -2356,6 +2356,13 @@ function focusContent() {
         entry.focus({ preventScroll: true });
     }
 }
+function restoreConnectionsFocus(opener) {
+    if (opener?.isConnected && !opener.isContentEditable && !opener.matches('input,textarea,select'))
+        opener.focus({ preventScroll: true });
+    if (document.activeElement !== opener || editable(document.activeElement))
+        focusList();
+    setMode('normal');
+}
 function focusList() {
     const entry = document.querySelector('#selected-item') || document.querySelector('#items') || document.querySelector('#main');
     if (entry) {
@@ -2705,7 +2712,7 @@ document.addEventListener('keydown', event => {
             void attempt(() => selectRecord(rows[next].id, true));
     }
 });
-document.addEventListener('focusin', event => { if (event.target.id !== 'command-input' && editable(event.target))
+document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view') && target.id !== 'command-input' && editable(target))
     setMode('insert'); });
 document.addEventListener('pointerdown', () => state.lastActivity = Date.now(), { passive: true });
 document.addEventListener('wheel', () => state.lastActivity = Date.now(), { passive: true });

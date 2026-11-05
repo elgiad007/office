@@ -37,7 +37,9 @@ export async function openConnectionExplorer(env, source = '') {
     let history = [{ place: { ...place } }], historyIndex = 0, disposed = false;
     const active = () => !disposed && host.isConnected && dialog.open;
     const cleanup = () => { disposed = true; ++request; clearTimeout(timer); observer.disconnect(); resize.disconnect(); dialog.removeEventListener('close', onClose); dialog.removeEventListener('cancel', cancel); };
-    const onClose = () => { cleanup(); if (opener?.isConnected)
+    const onClose = () => { cleanup(); if (env.closed)
+        env.closed(opener);
+    else if (opener?.isConnected)
         opener.focus({ preventScroll: true }); };
     const cancel = () => clearTimeout(timer);
     dialog.addEventListener('close', onClose, { once: true });

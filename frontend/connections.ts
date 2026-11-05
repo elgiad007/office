@@ -6,7 +6,7 @@ import type {ConnectionItem,ConnectionList,RequestApi,ConfirmDeletion,Connection
 
 const label=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const detail=(item:ConnectionItem)=>Object.entries(item.meta).filter(([key])=>itemTypes[item.kind as ItemKind]?.fields.some(field=>field===key)).map(([,value])=>value).join(' · ');
-export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,string>;current:()=>string|undefined;open:(id:string)=>Promise<void>;modal:(title:string,body:string)=>void;dialog:HTMLDialogElement;notice:(message:string,error?:boolean)=>void;command:(value:string)=>void;confirmation:(title:string,message:string,action:()=>unknown)=>void;attempt:(action:()=>unknown)=>unknown}) {
+export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,string>;closed?:(opener:HTMLElement|null)=>void;current:()=>string|undefined;open:(id:string)=>Promise<void>;modal:(title:string,body:string)=>void;dialog:HTMLDialogElement;notice:(message:string,error?:boolean)=>void;command:(value:string)=>void;confirmation:(title:string,message:string,action:()=>unknown)=>void;attempt:(action:()=>unknown)=>unknown}) {
   let checkingDeletion=false;
   const confirmDeletion: ConfirmDeletion=async(rows,title,message,action,skipUnconnected=false)=>{
     if(checkingDeletion)return;

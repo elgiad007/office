@@ -7,7 +7,7 @@ type Place={mode:'overview'|'graph'|'items';id:string;group:string;q:string;kind
 type Camera={x:number;y:number;w:number;h:number};
 type NavigationOrigin={id:string;title:string;kind:string;role:'item'|'group'|'overview'|'search'};
 type HistoryEntry={place:Place;from?:NavigationOrigin;snapshot?:{data:ConnectionList;selected:string;focusedId:string;view:Camera;fitWidth:number;listPage:number;scroll:number;width:number;height:number}};
-type Env={api:RequestApi;keys?:()=>Record<string,string>;changed?:()=>void;dialog:HTMLDialogElement;modal:(title:string,body:string)=>void;open:(id:string)=>Promise<void>;notice:(message:string,error?:boolean)=>void};
+type Env={api:RequestApi;keys?:()=>Record<string,string>;changed?:()=>void;closed?:(opener:HTMLElement|null)=>void;dialog:HTMLDialogElement;modal:(title:string,body:string)=>void;open:(id:string)=>Promise<void>;notice:(message:string,error?:boolean)=>void};
 const typeLabel=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦'};
 const ORIGIN_ID='navigation-origin';
@@ -43,7 +43,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   let history:HistoryEntry[]=[{place:{...place}}],historyIndex=0,disposed=false;
   const active=()=>!disposed&&host.isConnected&&dialog.open;
   const cleanup=()=>{disposed=true;++request;clearTimeout(timer);observer.disconnect();resize.disconnect();dialog.removeEventListener('close',onClose);dialog.removeEventListener('cancel',cancel);};
-  const onClose=()=>{cleanup();if(opener?.isConnected)opener.focus({preventScroll:true});};
+  const onClose=()=>{cleanup();if(env.closed)env.closed(opener);else if(opener?.isConnected)opener.focus({preventScroll:true});};
   const cancel=()=>clearTimeout(timer);
   dialog.addEventListener('close',onClose,{once:true});dialog.addEventListener('cancel',cancel);
   const observer=new MutationObserver(()=>{if(!host.isConnected)cleanup();});observer.observe(dialog,{childList:true});
