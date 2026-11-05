@@ -94,10 +94,10 @@ function connection_overview(int $offset=0): array {
     foreach($edges as $edge){foreach([$edge['a'],$edge['b']] as $id)if(!isset($parents[$id])){$parents[$id]=$id;$sizes[$id]=1;}
         $a=$find($edge['a']);$b=$find($edge['b']);if($a!==$b){if($sizes[$a]<$sizes[$b])[$a,$b]=[$b,$a];$parents[$b]=$a;$sizes[$a]+=$sizes[$b];}}
     $groups=[];
-    foreach($parents as $id=>$_){$root=$find($id);if(!isset($groups[$root]))$groups[$root]=['id'=>$root,'title'=>'','items'=>0,'links'=>0];$groups[$root]['items']++;}
+    foreach($parents as $id=>$_){$root=$find($id);if(!isset($groups[$root]))$groups[$root]=['id'=>$root,'title'=>'','kind'=>'','items'=>0,'links'=>0];$groups[$root]['items']++;}
     foreach($edges as $edge)$groups[$find($edge['a'])]['links']++;
-    $titles=db()->query('SELECT id,title FROM records WHERE EXISTS (SELECT 1 FROM connections WHERE a=records.id OR b=records.id) ORDER BY title COLLATE NOCASE,id');
-    foreach($titles as $row){$root=$find($row['id']);if($groups[$root]['title']==='')$groups[$root]['title']=$row['title'];}
+    $titles=db()->query('SELECT id,title,kind FROM records WHERE EXISTS (SELECT 1 FROM connections WHERE a=records.id OR b=records.id) ORDER BY title COLLATE NOCASE,id');
+    foreach($titles as $row){$root=$find($row['id']);if($groups[$root]['title']===''){$groups[$root]['title']=$row['title'];$groups[$root]['kind']=$row['kind'];}}
     $groups=array_values($groups);usort($groups,fn($a,$b)=>($b['items']<=>$a['items'])?:strcmp($a['id'],$b['id']));
     return ['links'=>[],'items'=>[],'groups'=>array_slice($groups,max(0,$offset),60),'more'=>max(0,$offset)+60<count($groups),'total'=>count($edges),'itemTotal'=>count($parents),'groupTotal'=>count($groups)];
 }

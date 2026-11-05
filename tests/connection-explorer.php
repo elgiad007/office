@@ -20,6 +20,8 @@ $overview=connection_overview();
 check($overview['groupTotal']===66&&$overview['itemTotal']===1331&&$overview['total']===1266,'overview counts complete components across thousands of edges');
 check(count($overview['groups'])===60&&$overview['more']&&count(connection_overview(60)['groups'])===6,'overview pages groups');
 check($overview['groups'][0]['items']===1201&&$overview['groups'][0]['links']===1201,'large cyclic component grouped correctly');
+check($overview['groups'][0]['title']==='Large project'&&$overview['groups'][0]['kind']==='documents','group type matches the item supplying its displayed title');
+foreach(array_merge($overview['groups'],connection_overview(60)['groups']) as $summary)if($summary['items']===2)check($summary['kind']==='contacts'&&str_starts_with($summary['title'],'Peer '),'mixed-type group uses its named representative type');
 $group=$overview['groups'][0]['id'];$page=connection_list('','',0,'',$group,true);
 check($page['total']===1201&&count($page['links'])===100&&$page['more'],'group drilldown pages actual component edges');
 $seen=[];for($offset=0;$offset<1201;$offset+=100)foreach(connection_list('','',$offset,'',$group,true)['links'] as $link)$seen[$link['a'].'|'.$link['b']]=true;
