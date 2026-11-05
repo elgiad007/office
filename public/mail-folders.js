@@ -106,10 +106,15 @@ export function renderMailFolders(env) {
     }));
     host.querySelectorAll('[data-open-folder]').forEach(button => {
         const owner = state.accounts.find(a => a.id === button.dataset.folderAccount);
-        const id = button.dataset.openFolder;
-        const junk = owner?.type === 'google' ? id === 'SPAM' : owner?.folders?.some(f => f.id === id && f.role === 'Junk');
-        if (owner && junk)
-            bindEmptyJunk(env, button, owner, id);
+        const folder = owner?.folders?.find(f => f.id === button.dataset.openFolder);
+        if (!owner || !folder)
+            return;
+        const leaf = (folder.delimiter ? folder.name.split(folder.delimiter).at(-1) : folder.name)?.toLowerCase();
+        // Older catalogs may still classify the system Spam mailbox as a custom folder.
+        const legacyJunk = (!folder.role || folder.role === 'Custom folder') && (folder.protected || owner.gmailSpamUrl) && ['spam', 'junk', 'junk email', 'junk e-mail'].includes(leaf || '');
+        const junk = owner.type === 'google' ? folder.id === 'SPAM' : folder.role === 'Junk' || legacyJunk;
+        if (junk)
+            bindEmptyJunk(env, button, owner, folder.id);
     });
     host.querySelectorAll('[data-open-folder]').forEach(b => { if (scope?.account === b.dataset.folderAccount && scope.folder === b.dataset.openFolder)
         b.setAttribute('aria-current', 'location'); });
@@ -122,6 +127,7 @@ export function renderMailFolders(env) {
 }
 function bindEmptyJunk(env, button, account, folder = '') {
     const title = account?.type === 'google' ? 'Empty Spam Folder' : 'Empty Junk Folder';
+    const gmailSpamUrl = account?.gmailSpamUrl;
     const open = (x, y) => {
         const menu = document.createElement('div');
         menu.className = 'item-context-menu folder-context-menu';
@@ -129,9 +135,9 @@ function bindEmptyJunk(env, button, account, folder = '') {
         menu.setAttribute('role', 'menu');
         const item = document.createElement('button');
         item.type = 'button';
-        item.className = 'danger';
+        item.className = gmailSpamUrl ? '' : 'danger';
         item.setAttribute('role', 'menuitem');
-        item.textContent = title + '…';
+        item.textContent = gmailSpamUrl ? 'Open Gmail Spam' : title + '…';
         menu.append(item);
         button.insertAdjacentElement('afterend', menu);
         menu.addEventListener('toggle', event => { if (event.newState === 'closed')
@@ -143,6 +149,10 @@ function bindEmptyJunk(env, button, account, folder = '') {
         item.onclick = () => {
             menu.hidePopover();
             button.focus();
+            if (gmailSpamUrl) {
+                window.open(gmailSpamUrl, '_blank', 'noopener,noreferrer');
+                return;
+            }
             void env.attempt(async () => {
                 await env.commit();
                 const result = await busy(env, () => env.api('mail-empty-junk', { action: 'preview', account: account?.id || '', folder }));

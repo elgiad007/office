@@ -63,6 +63,7 @@ export interface MailFolder {
 }
 export interface Account {
   id: string; type: 'imap' | 'google' | 'caldav'; label: string;
+  gmailSpamUrl?: string;
   folders?: MailFolder[]; last_sync?: string | null; error?: string | null;
 }
 export interface Preferences {

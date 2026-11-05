@@ -82,6 +82,7 @@ try{
  const gmailSaved=await a.call('account-save',gmailDraft);
  const gmailAccount=(await a.call('accounts')).accounts.find(account=>account.id===gmailSaved.id);
  assert.equal(gmailAccount.type,'imap');
+ assert.equal(gmailAccount.gmailSpamUrl,'https://mail.google.com/mail/u/?authuser=fixture%40gmail.com#spam');
  assert.ok(!JSON.stringify(gmailAccount).includes('abcdefghijklmnop'));
  await a.call('account-delete',{id:gmailSaved.id});
  const integration={client_id:'shared.apps.googleusercontent.com',client_secret:'shared-secret-not-exported',redirect:a.url.replace('api.php?r=','api.php?r=oauth-callback')};

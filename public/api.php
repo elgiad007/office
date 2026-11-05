@@ -213,8 +213,15 @@ try {
     }
     if ($route==='accounts' && $method==='GET') {
         session_write_close();
-        $rows=db()->query('SELECT id,label,type,last_sync,error FROM accounts ORDER BY label')->fetchAll();
-        foreach ($rows as &$row) $row['folders']=setting('mail-folders:'.$row['id'],[]);
+        $rows=db()->query('SELECT id,label,type,last_sync,error,config FROM accounts ORDER BY label')->fetchAll();
+        foreach ($rows as &$row) {
+            $config=json_decode($row['config'],true,64,JSON_THROW_ON_ERROR);
+            unset($row['config']);
+            if ($row['type']==='imap' && imap_is_gmail(['config'=>$config])) {
+                $row['gmailSpamUrl']='https://mail.google.com/mail/u/?authuser='.rawurlencode($config['email']??'').'#spam';
+            }
+            $row['folders']=setting('mail-folders:'.$row['id'],[]);
+        }
         unset($row); json_response(['accounts'=>$rows]);
     }
     if ($route==='mail-empty-junk' && $method==='POST') {

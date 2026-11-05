@@ -9,7 +9,12 @@ export async function testMailView(page,url) {
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences};
-    else if(action==='accounts')json={accounts:[{id:'view-account',type:'imap',label:'View fixture',folders:[{id:'Junk',name:'Junk',role:'Junk',protected:true}]}]};
+    else if(action==='accounts')json={accounts:[
+      {id:'view-account',type:'imap',label:'View fixture',folders:[{id:'Junk',name:'Junk',role:'Junk',protected:true}]},
+      {id:'gmail-imap',type:'imap',label:'Gmail IMAP',gmailSpamUrl:'https://mail.google.com/mail/u/?authuser=fixture%40gmail.com#spam',
+        folders:[{id:'[Gmail]/Spam',name:'[Gmail]/Spam',delimiter:'/',role:'Custom folder',protected:false}]},
+      {id:'gmail-oauth',type:'google',label:'Google authorization',folders:[{id:'SPAM',name:'Spam',protected:true}]},
+    ]};
     else if(action==='records'){reads++;json={records};}
     else if(action==='sync')json={count:0};
     else if(action==='preferences'){preferences=route.request().postDataJSON().preferences;writes++;json={ok:true};}
@@ -134,5 +139,15 @@ export async function testMailView(page,url) {
     await item('flagged').waitFor({state:'detached'});
     assert.equal(emptyRequests,1);
     console.log('PASS Empty Junk browser flow: folder context menu, cancellation, keyboard access, confirmation and refresh.');
+    await page.evaluate(()=>{window.open=(url)=>{document.body.dataset.openedUrl=String(url);return null;};});
+    await page.locator('[data-account-tree="gmail-imap"] > summary').click();
+    await page.locator('[data-open-folder="[Gmail]/Spam"]').click({button:'right'});
+    await page.getByRole('menuitem',{name:'Open Gmail Spam',exact:true}).click();
+    assert.equal(await page.locator('body').getAttribute('data-opened-url'),'https://mail.google.com/mail/u/?authuser=fixture%40gmail.com#spam');
+    assert.equal(emptyRequests,1);
+    await page.locator('[data-account-tree="gmail-oauth"] > summary').click();
+    await page.locator('[data-open-folder="SPAM"]').click({button:'right'});
+    await page.getByRole('menuitem',{name:'Empty Spam Folder…',exact:true}).waitFor();
+    console.log('PASS Gmail Spam menus: legacy IMAP opens Gmail and Google authorization offers permanent deletion.');
   }finally{await page.setViewportSize({width:1440,height:1000});await page.unroute(routes);await page.goto('about:blank');}
 }
