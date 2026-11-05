@@ -20,7 +20,7 @@ export const commandRegistry = {
     new: { arguments: 1, action: 'Create an item', context: 'Normal mode', options: ':new [type], for example :new event. :new linked <type> links the saved new draft to the current item. ' + Object.entries(creationTypes).map(([type, app]) => type + ' → ' + app).join('; ') + '. Omit type for current app; type required in Settings.' },
     link: { arguments: 2, action: 'Link an existing item', context: 'Selected item', options: ':link [type] <name or ID>. Search titles and descriptions. ↑/↓ choose; Tab accepts; Enter links. Escape dismisses suggestions and keeps command mode.' },
     unlink: { arguments: 2, action: 'Remove a connection', context: 'Selected item', options: ':unlink [type] <name or ID>. Only current connections are suggested.' },
-    links: { arguments: 1, action: 'View connections', context: 'Selected item or workspace', options: ':links opens current connections; :links all opens the workspace list and graph.' },
+    links: { arguments: 1, aliases: ['l'], action: 'View connections', context: 'Selected item or workspace', options: ':links opens current connections; :links all opens the workspace list and graph.' },
 };
 const registry = commandRegistry;
 const aliases = new Map();
