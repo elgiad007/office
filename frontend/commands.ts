@@ -10,6 +10,7 @@ export const commandRegistry={
   sheets:{arguments:0,aliases:['sh'],action:'Switch to Sheets',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   wiki:{arguments:0,aliases:['w'],action:'Switch to Wiki',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   settings:{arguments:0,aliases:['set'],action:'Switch to Settings',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
+  sync:{arguments:0,action:'Sync all connected accounts',context:'Normal mode, including Settings',options:'No arguments; same general sync as Sync now. Does nothing if a sync is already running.'},
   head:{arguments:0,action:'View original message headers',context:'Selected mail message',options:'No arguments; locally cached headers.'},
   q:{arguments:0,action:'Sign out',context:'Normal mode',options:'No arguments; prompts for unsaved drafts, saves existing items and returns to the password screen.'},
   log:{arguments:0,action:'Open activity log',context:'Normal mode',options:'All levels; no arguments.'},

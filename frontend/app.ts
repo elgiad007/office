@@ -108,6 +108,7 @@ const commandHandlers={
   sheets:()=>changeApp('sheets'),
   wiki:()=>changeApp('wiki'),
   settings:()=>changeApp('settings'),
+  sync:()=>syncAccounts(),
   head:async()=>{if(state.app!=='mail'||!state.current)throw new CommandError('Select a mail message before using :head.');await viewMessageHeaders();},
   q:signOut,
   log:()=>activity.open(),

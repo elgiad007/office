@@ -24,8 +24,8 @@ test('navigation names and exact aliases resolve to canonical commands without a
 test('commands normalize whitespace and validate every argument before dispatch',()=>{
  assert.deepEqual(resolveCommand(': new doc '),{name:'new',argument:'documents'});
  for(const type of ['mail','event','task','contact','doc','page','sheet'])assert.ok(resolveCommand(':new '+type).argument);
- for(const name of ['head','q','new','log','errors','warnings'])assert.equal(resolveCommand(':'+name).name,name);
- for(const name of ['log','errors','warnings'])assert.throws(()=>resolveCommand(':'+name+' extra'),{name:'Error',message:'Unknown parameter: extra'});
+ for(const name of ['head','q','new','log','errors','warnings','sync'])assert.equal(resolveCommand(':'+name).name,name);
+ for(const name of ['log','errors','warnings','sync'])assert.throws(()=>resolveCommand(':'+name+' extra'),{name:'Error',message:'Unknown parameter: extra'});
  for(const value of [':',':unknown',':__proto__',':new constructor',':head extra',':q extra',':new doc extra'])assert.throws(()=>resolveCommand(value));
 });
 test('command errors report only the first offending token',()=>{
