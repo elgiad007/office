@@ -80,9 +80,10 @@ export async function openConnectionExplorer(env, source = '') {
     resize.observe(map);
     const panel = query('#connection-panel');
     const itemButtons = (item) => `<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
+    const openItem = (id) => { dialog.close(); void env.open(id).catch(error => env.notice(error.message, true)); };
     function wireItems(root) {
         root.querySelectorAll('[data-select]').forEach(button => button.onclick = () => select(button.dataset.select));
-        root.querySelectorAll('[data-open]').forEach(button => button.onclick = () => { dialog.close(); void env.open(button.dataset.open).catch(error => env.notice(error.message, true)); });
+        root.querySelectorAll('[data-open]').forEach(button => button.onclick = () => openItem(button.dataset.open));
         root.querySelectorAll('[data-explore]').forEach(button => button.onclick = () => void navigate({ mode: 'graph', id: button.dataset.explore, group: '', q: '', kind: '' }));
         root.querySelectorAll('[data-group]').forEach(button => button.onclick = () => void navigate({ mode: 'graph', id: '', group: button.dataset.group, q: '', kind: '' }));
     }
@@ -138,6 +139,10 @@ export async function openConnectionExplorer(env, source = '') {
         const node = mapNodes().find(node => nodeId(node) === focusedId);
         if (!node)
             return;
+        if (node.dataset.node && place.mode === 'graph' && place.id === node.dataset.node && selected === node.dataset.node) {
+            openItem(node.dataset.node);
+            return;
+        }
         void navigate({ mode: 'graph', id: node.dataset.node || '', group: node.dataset.groupNode || '', q: '', kind: '' });
     }
     function renderMap() {

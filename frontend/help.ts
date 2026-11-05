@@ -28,7 +28,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add(k.edit+' / Enter','Edit selected cell','Sheets, normal mode');add('Tab / Shift+Tab','Next / previous cell','Sheets, focused cell');
   add('/','Focus header search','Message headers, outside search field');add('n / p','Next / previous header match','Message headers, outside search field');add('Enter / Shift+Enter','Next / previous header match','Message headers search field');
   add(`${k.left} / ${k.down} / ${k.up} / ${k.right}; Arrow keys`,'Navigate map cards','Connections map',`Left/right continue across row boundaries. In a single horizontal row, ${k.down} moves left and ${k.up} moves right. Focused items stay in view.`);
-  add('Enter / Space','Explore focused group or item / select item','Connections map','Enter fetches the focused item’s neighborhood; Open item in details opens its content.');
+  add('Enter / Space','Explore or open focused item / select item','Connections map','Enter explores groups and item neighborhoods. When the selected item is already the neighborhood center, Enter opens its content, just like Open item.');
   add(k.search==='/'?'/':`/ / ${k.search}`,'Search connected items','Connections window','Enter or Escape in search returns focus to the map. Typing fields retain their normal keys.');
   add('gg / G; Home / End','First / last map card','Connections map');
   add('Shift+Arrow keys; + / -','Pan / zoom the map','Connections map','Fit view remains available in the toolbar.');

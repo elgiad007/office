@@ -85,6 +85,14 @@ try{
   await page.screenshot({path:`test-results/connection-explorer-${viewport.width}.png`});
  }
  await page.keyboard.press('Escape');assert.equal(await page.locator('dialog').isVisible(),false);assert.equal(await page.locator('#launch').evaluate(node=>node===document.activeElement),true);
+ // A search result drills into its neighborhood, then Enter opens its content without another fetch.
+ await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.keyboard.press('/');await page.locator('[data-connection-filter]').fill('Project item 1199');await page.keyboard.press('Enter');await page.waitForFunction(()=>document.activeElement?.getAttribute('data-node')==='n1199');
+ await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1199');
+ const leafRequests=requests.length;await page.keyboard.press('Enter');await page.waitForFunction(()=>window.opened==='n1199');assert.equal(await page.locator('dialog').isVisible(),false);assert.equal(requests.length,leafRequests);
+ // Group exploration still drills down before opening, even when its representative is selected.
+ await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
+ const groupRequests=requests.length;await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelector('.connections-view')?.getAttribute('aria-busy')==='false');assert.ok(requests.length>groupRequests);assert.equal(await page.locator('dialog').isVisible(),true);
+ await page.keyboard.press('Enter');await page.waitForFunction(()=>window.opened==='n0');assert.equal(await page.locator('dialog').isVisible(),false);
  await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.locator('[data-connection-filter]').fill('Project item 0001');await page.waitForTimeout(260);await page.evaluate(()=>window.replace());await page.waitForTimeout(650);assert.equal(await page.getByRole('button',{name:'Other dialog'}).count(),1);
  assert.deepEqual(errors,[]);console.log('PASS explorer: full screen, 1,200-edge fixture, grouping, bounded map/list, selection, zoom/pan, neighborhood requests, global search, type filters, history, stale responses, responsive views and lifecycle.');
 }catch(error){if(page)await page.screenshot({path:'test-results/connection-explorer-failure.png'});throw error;}

@@ -53,9 +53,10 @@ export async function openConnectionExplorer(env:Env,source='') {
   const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{view.w*=width/oldW;view.h*=height/oldH;updateView();if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
   const panel=query<HTMLElement>('#connection-panel');
   const itemButtons=(item:ConnectionItem)=>`<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
+  const openItem=(id:string)=>{dialog.close();void env.open(id).catch(error=>env.notice(error.message,true));};
   function wireItems(root:Element){
     root.querySelectorAll<HTMLButtonElement>('[data-select]').forEach(button=>button.onclick=()=>select(button.dataset.select!));
-    root.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(button=>button.onclick=()=>{dialog.close();void env.open(button.dataset.open!).catch(error=>env.notice(error.message,true));});
+    root.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(button=>button.onclick=()=>openItem(button.dataset.open!));
     root.querySelectorAll<HTMLButtonElement>('[data-explore]').forEach(button=>button.onclick=()=>void navigate({mode:'graph',id:button.dataset.explore!,group:'',q:'',kind:''}));
     root.querySelectorAll<HTMLButtonElement>('[data-group]').forEach(button=>button.onclick=()=>void navigate({mode:'graph',id:'',group:button.dataset.group!,q:'',kind:''}));
   }
@@ -82,6 +83,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     const node=candidate||visible||nodes[0];if(node)node.focus({preventScroll:true});else map.focus({preventScroll:true});
   }
   function exploreFocused(){const node=mapNodes().find(node=>nodeId(node)===focusedId);if(!node)return;
+    if(node.dataset.node&&place.mode==='graph'&&place.id===node.dataset.node&&selected===node.dataset.node){openItem(node.dataset.node);return;}
     void navigate({mode:'graph',id:node.dataset.node||'',group:node.dataset.groupNode||'',q:'',kind:''});
   }
   function renderMap(){
