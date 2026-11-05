@@ -43,6 +43,7 @@ export function helpEntries(k) {
     add('Enter / Space', 'Explore or open focused item / select item', 'Connections map', 'Enter explores groups and item neighborhoods. When the selected item is already the neighborhood center, Enter opens its content, just like Open item.');
     add(k.search === '/' ? '/' : `/ / ${k.search}`, 'Search connected items', 'Connections window', 'Enter or Escape in search returns focus to the map. Typing fields retain their normal keys.');
     add('gg / G; Home / End', 'First / last map card', 'Connections map');
+    add('Backspace', 'Go back through connections', 'Connections window, outside typing fields', 'Restores the previous map and focus. Without earlier history, moves up to the workspace overview; stays there when already at the top.');
     add('Shift+Arrow keys; + / -', 'Pan / zoom the map', 'Connections map', 'Fit view remains available in the toolbar.');
     add('ArrowDown / ArrowUp', 'Choose matching folder', 'Quick Move search');
     add('Enter', 'Move to chosen folder', 'Quick Move');

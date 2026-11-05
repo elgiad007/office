@@ -25,7 +25,7 @@ const server=createServer(async(req,res)=>{
   res.setHeader('content-type','text/html');res.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/theme.css"></head><body><button id="launch">Connections</button><button id="replace">Replace dialog</button><dialog id="dialog" aria-labelledby="dialog-title"></dialog><script type="module">
    import {openConnectionExplorer} from '/connection-explorer.js';const dialog=document.querySelector('dialog');
    const env={dialog,keys:()=>window.testKeys||{},api:async route=>{const r=await fetch('/api.php?r='+route);return r.json();},modal:(title,body)=>{dialog.innerHTML='<div class="dialog-head"><h2 id="dialog-title">'+title+'</h2><button data-close>Close</button></div>'+body;dialog.querySelector('[data-close]').onclick=()=>dialog.close();if(!dialog.open)dialog.showModal();},open:async id=>{window.opened=id;},notice:message=>{throw Error(message);}};
-   document.querySelector('#launch').onclick=()=>openConnectionExplorer(env);
+   document.querySelector('#launch').onclick=()=>openConnectionExplorer(env,window.launchSource||'');
    window.replace=()=>{dialog.innerHTML='<button>Other dialog</button>';};
   </script></body></html>`);return;
  }
@@ -67,7 +67,8 @@ try{
  await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');
  await page.keyboard.press('k');assert.equal(await focusedId(),'n0');await page.keyboard.press('j');assert.equal(await focusedId(),'n1');await page.keyboard.press('j');assert.equal(await focusedId(),'n1');
  await page.evaluate(()=>window.testKeys={up:'K',down:'J'});await page.keyboard.press('K');assert.equal(await focusedId(),'n0');await page.keyboard.press('J');assert.equal(await focusedId(),'n1');await page.keyboard.press('ArrowUp');assert.equal(await focusedId(),'n1');await page.evaluate(()=>window.testKeys={});
- await page.getByRole('button',{name:'Back in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();assert.equal(await focusedId(),'n1');
+ const historyRequests=requests.length;await page.keyboard.press('Backspace');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();assert.equal(await focusedId(),'n1');assert.equal(requests.length,historyRequests);
+ await page.getByRole('button',{name:'Forward in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');await page.keyboard.press('Backspace');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
  await page.locator('[data-select="n1"]').first().click();await page.locator('[data-selection] h3').filter({hasText:'Project item 0001'}).waitFor();
  assert.equal(await page.locator('line.highlighted').count(),1);assert.ok(await page.locator('[data-node].dimmed').count()>0);
  const initial=await page.locator('svg').getAttribute('viewBox');await page.getByRole('button',{name:'Zoom in',exact:true}).click();assert.notEqual(await page.locator('svg').getAttribute('viewBox'),initial);
@@ -99,6 +100,13 @@ try{
  await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
  const groupRequests=requests.length;await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelector('.connections-view')?.getAttribute('aria-busy')==='false');assert.ok(requests.length>groupRequests);assert.equal(await page.locator('dialog').isVisible(),true);
  await page.keyboard.press('Enter');await page.waitForFunction(()=>window.opened==='n0');assert.equal(await page.locator('dialog').isVisible(),false);
+ // A direct item opening has no history: Backspace adds the overview as its parent.
+ await page.evaluate(()=>window.launchSource='n1');await page.locator('#launch').click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await page.locator('[data-history="-1"]').isDisabled(),true);
+ await page.keyboard.press('Backspace');await page.locator('[data-group-node]').waitFor();assert.equal(await focusedId(),'n0');assert.equal(await page.locator('[data-history="-1"]').isDisabled(),true);assert.equal(await page.locator('[data-history="1"]').isDisabled(),false);
+ const overviewRequests=requests.length;await page.keyboard.press('Backspace');assert.equal(requests.length,overviewRequests);assert.equal(await focusedId(),'n0');
+ await page.getByRole('button',{name:'Forward in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');await page.keyboard.press('Backspace');await page.locator('[data-group-node]').waitFor();
+ await page.keyboard.press('/');await page.locator('[data-connection-filter]').fill('abc');await page.locator('[data-connection-filter]').press('Backspace');assert.equal(await page.locator('[data-connection-filter]').inputValue(),'ab');assert.equal(await page.locator('[data-connection-filter]').evaluate(node=>node===document.activeElement),true);
+ await page.locator('[data-close]').click();await page.evaluate(()=>window.launchSource='');
  await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.locator('[data-connection-filter]').fill('Project item 0001');await page.waitForTimeout(260);await page.evaluate(()=>window.replace());await page.waitForTimeout(650);assert.equal(await page.getByRole('button',{name:'Other dialog'}).count(),1);
  assert.deepEqual(errors,[]);console.log('PASS explorer: full screen, 1,200-edge fixture, grouping, bounded map/list, selection, zoom/pan, neighborhood requests, global search, type filters, history, stale responses, responsive views and lifecycle.');
 }catch(error){if(page)await page.screenshot({path:'test-results/connection-explorer-failure.png'});throw error;}

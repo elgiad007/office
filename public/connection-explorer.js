@@ -246,8 +246,8 @@ export async function openConnectionExplorer(env, source = '') {
         history.push({ place: { ...next } });
         historyIndex++;
     } place = { ...next }; selected = place.id || place.group; focusedId = selected; filter.value = place.q; kind.value = place.kind; panel.scrollTop = 0; await fetchPage(true); }
-    host.querySelectorAll('[data-history]').forEach(button => button.onclick = () => {
-        const index = historyIndex + Number(button.dataset.history);
+    function moveHistory(delta) {
+        const index = historyIndex + delta;
         if (index < 0 || index >= history.length)
             return;
         remember();
@@ -276,7 +276,8 @@ export async function openConnectionExplorer(env, source = '') {
         more.disabled = false;
         host.setAttribute('aria-busy', 'false');
         focusMap(focusedId || selected);
-    });
+    }
+    host.querySelectorAll('[data-history]').forEach(button => button.onclick = () => moveHistory(Number(button.dataset.history)));
     query('[data-overview]').onclick = () => void navigate({ mode: 'overview', id: '', group: '', q: '', kind: '' });
     const runSearch = () => navigate({ mode: filter.value.trim() || kind.value ? 'items' : 'overview', id: '', group: '', q: filter.value.trim(), kind: kind.value });
     const search = () => { clearTimeout(timer); ++request; busy = false; more.disabled = true; timer = setTimeout(() => void runSearch(), 220); };
@@ -325,6 +326,22 @@ export async function openConnectionExplorer(env, source = '') {
                 clearTimeout(timer);
                 void runSearch().then(() => { if (active() && filter.value.trim() === value && document.activeElement === filter)
                     focusMap(); });
+            }
+            return;
+        }
+        if (event.key === 'Backspace') {
+            event.preventDefault();
+            sequenceTime = 0;
+            if (event.repeat)
+                return;
+            if (historyIndex > 0)
+                moveHistory(-1);
+            else if (place.mode !== 'overview') {
+                // Make the overview a parent, preserving Forward without creating a Backspace loop.
+                remember();
+                history.unshift({ place: { mode: 'overview', id: '', group: '', q: '', kind: '' } });
+                historyIndex = 1;
+                moveHistory(-1);
             }
             return;
         }

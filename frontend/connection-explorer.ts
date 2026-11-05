@@ -139,12 +139,13 @@ export async function openConnectionExplorer(env:Env,source='') {
   }
   function remember(){if(!busy)history[historyIndex].snapshot={data,selected,focusedId,view:{...view},fitWidth,listPage,scroll:panel.scrollTop,width,height};}
   async function navigate(next:Place,record=true){clearTimeout(timer);sequenceTime=0;if(record){remember();history=history.slice(0,historyIndex+1);history.push({place:{...next}});historyIndex++;}place={...next};selected=place.id||place.group;focusedId=selected;filter.value=place.q;kind.value=place.kind;panel.scrollTop=0;await fetchPage(true);}
-  host.querySelectorAll<HTMLButtonElement>('[data-history]').forEach(button=>button.onclick=()=>{const index=historyIndex+Number(button.dataset.history);if(index<0||index>=history.length)return;
+  function moveHistory(delta:number){const index=historyIndex+delta;if(index<0||index>=history.length)return;
     remember();historyIndex=index;const entry=history[index],snapshot=entry.snapshot;
     if(!snapshot){void navigate(entry.place,false);return;}
     clearTimeout(timer);++request;busy=false;place={...entry.place};filter.value=place.q;kind.value=place.kind;data=snapshot.data;selected=snapshot.selected;focusedId=snapshot.focusedId;listPage=snapshot.listPage;render(false);
     size();view={...snapshot.view,w:snapshot.view.w*width/snapshot.width,h:snapshot.view.h*height/snapshot.height};fitWidth=snapshot.fitWidth;updateView();panel.scrollTop=snapshot.scroll;more.disabled=false;host.setAttribute('aria-busy','false');focusMap(focusedId||selected);
-  });
+  }
+  host.querySelectorAll<HTMLButtonElement>('[data-history]').forEach(button=>button.onclick=()=>moveHistory(Number(button.dataset.history)));
   query<HTMLButtonElement>('[data-overview]').onclick=()=>void navigate({mode:'overview',id:'',group:'',q:'',kind:''});
   const runSearch=()=>navigate({mode:filter.value.trim()||kind.value?'items':'overview',id:'',group:'',q:filter.value.trim(),kind:kind.value});
   const search=()=>{clearTimeout(timer);++request;busy=false;more.disabled=true;timer=setTimeout(()=>void runSearch(),220);};filter.oninput=search;kind.onchange=search;
@@ -164,6 +165,14 @@ export async function openConnectionExplorer(env:Env,source='') {
     if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
     const target=event.target as Element,typing=!!target.closest('input,textarea,select,[contenteditable="true"]');
     if(typing){if(target===filter&&event.key==='Escape'){event.preventDefault();focusMap();}else if(target===filter&&event.key==='Enter'){event.preventDefault();const value=filter.value.trim();clearTimeout(timer);void runSearch().then(()=>{if(active()&&filter.value.trim()===value&&document.activeElement===filter)focusMap();});}return;}
+    if(event.key==='Backspace'){event.preventDefault();sequenceTime=0;if(event.repeat)return;
+      if(historyIndex>0)moveHistory(-1);
+      else if(place.mode!=='overview'){
+        // Make the overview a parent, preserving Forward without creating a Backspace loop.
+        remember();history.unshift({place:{mode:'overview',id:'',group:'',q:'',kind:''}});historyIndex=1;moveHistory(-1);
+      }
+      return;
+    }
     const bindings={left:'h',right:'l',up:'k',down:'j',search:'/',...env.keys?.()};
     if(event.key==='/'||event.key===bindings.search){event.preventDefault();sequenceTime=0;filter.focus();filter.select();return;}
     if(!map.contains(target))return;
