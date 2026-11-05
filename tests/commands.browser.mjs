@@ -4,7 +4,7 @@ export async function testCommands(page,url) {
   let authenticated=true,creates=[],logout=0,saves=0,releaseCreate,createStarted,failLogout=false;
   const notices=[];
   const synced=[];
-  const accounts=[{id:'work-mail',label:'Work Account',type:'imap'},{id:'work-calendar',label:'Work Account',type:'caldav'}];
+  const accounts=[{id:'work-mail',label:'Work Account',type:'imap'},{id:'work-calendar',label:'Work Account',type:'caldav'},{id:'personal-mail',label:'Personal',type:'imap'}];
   const records=[{id:'headers',kind:'mail',title:'Header fixture',body:'Body',revision:1,meta:{folder:'Inbox',read:true,raw:'Subject: Header fixture\r\n\r\nBody'}}];
   const routes=t=>t.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
@@ -61,18 +61,27 @@ export async function testCommands(page,url) {
     assert.deepEqual(synced,[]);
     await page.keyboard.press(':');
     await page.locator('#command-input').fill(':sync ');
-    assert.equal(await page.getByRole('listbox',{name:'Matching accounts'}).getByRole('option').count(),2);
+    assert.equal(await page.getByRole('listbox',{name:'Matching accounts'}).getByRole('option').count(),3);
     await page.locator('#command-input').fill(':sync work-cal');
     assert.equal(await page.getByRole('listbox',{name:'Matching accounts'}).getByRole('option').count(),1);
     await page.keyboard.press('Tab');
-    assert.equal(await page.locator('#command-input').inputValue(),':sync work-calendar');
+    assert.equal(await page.locator('#command-input').inputValue(),':sync "Work Account"');
     await page.keyboard.press('Enter');
     await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
     assert.deepEqual(synced,['work-calendar']);
     synced.length=0;
+    await page.locator('#main').focus();
+    await page.keyboard.press(':');
+    await page.locator('#command-input').fill(':sync personal');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('#command-input').inputValue(),':sync Personal');
+    await page.locator('#command-input').fill(':sync "Work Account"');
+    await page.keyboard.press('Enter');
+    await page.locator('#notice').filter({hasText:'Several accounts have that name'}).waitFor();
+    assert.deepEqual(synced,[]);
     await run(':sync');
     await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
-    assert.deepEqual(synced.sort(),['work-calendar','work-mail']);
+    assert.deepEqual(synced.sort(),['personal-mail','work-calendar','work-mail']);
     for(const [command,level,count] of [['errors','error',1],['warnings','warning',1],['log','',3]]){
       await run(':bogus');
       await run(':'+command);await page.locator('#activity-dialog[open]').waitFor();

@@ -100,9 +100,22 @@ export function createConnections(env) {
         input.setAttribute('aria-expanded', 'false');
         let version = 0, timer, index = 0, command = '', chosen = false;
         let items = [];
+        let selectedAccount;
         const hide = () => { version++; clearTimeout(timer); list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
-        const accept = () => { if (!items[index])
-            return; input.value = ':' + command + ' ' + items[index].id; hide(); input.focus(); };
+        const accept = () => {
+            const item = items[index];
+            if (!item)
+                return;
+            if (command === 'sync') {
+                const name = /[\s"]/.test(item.title) ? JSON.stringify(item.title) : item.title;
+                input.value = ':sync ' + name;
+                selectedAccount = { id: item.id, value: input.value };
+            }
+            else
+                input.value = ':' + command + ' ' + item.id;
+            hide();
+            input.focus();
+        };
         function render() {
             list.innerHTML = items.length ? items.map((item, i) => `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt === undefined ? '' : `<span>${e(item.excerpt)}</span>`}</div>`).join('') : `<p role="status">No matching ${command === 'sync' ? 'accounts' : 'items'}.</p>`;
             list.hidden = false;
@@ -122,6 +135,7 @@ export function createConnections(env) {
             hide();
             chosen = false;
             index = 0;
+            selectedAccount = undefined;
             const accountQuery = syncQuery(input.value);
             if (accountQuery !== undefined) {
                 command = 'sync';
@@ -147,6 +161,7 @@ export function createConnections(env) {
             } }); }, 150);
         });
         return {
+            selectedAccountId() { return selectedAccount?.value === input.value ? selectedAccount.id : undefined; },
             key(event) {
                 if (event.isComposing || list.hidden)
                     return false;

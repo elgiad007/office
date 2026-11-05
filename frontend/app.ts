@@ -138,7 +138,10 @@ function openCommand(value=':') {
     if(event.key!=='Enter'||event.isComposing)return;
     event.preventDefault();if(event.repeat||commandBusy)return;
     let command: ReturnType<typeof resolveCommand>;
-    try{command=resolveCommand(input.value);}catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});closeCommand(true);return;}
+    try{
+      command=resolveCommand(input.value);
+      if(command.name==='sync')command.argument=commandSuggestions?.selectedAccountId()??command.argument;
+    }catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});closeCommand(true);return;}
     activity.clearCommandError();
     commandBusy=true;closeCommand(true);
     void (async()=>{try{

@@ -51,15 +51,24 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
     input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
     let version=0,timer:ReturnType<typeof setTimeout>,index=0,command='',chosen=false;
     let items:{id:string; title:string; detail:string; excerpt?:string}[]=[];
+    let selectedAccount:{id:string; value:string}|undefined;
     const hide=()=>{version++;clearTimeout(timer);list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');};
-    const accept=()=>{if(!items[index])return;input.value=':'+command+' '+items[index].id;hide();input.focus();};
+    const accept=()=>{
+      const item=items[index];if(!item)return;
+      if(command==='sync'){
+        const name=/[\s"]/.test(item.title)?JSON.stringify(item.title):item.title;
+        input.value=':sync '+name;
+        selectedAccount={id:item.id,value:input.value};
+      }else input.value=':'+command+' '+item.id;
+      hide();input.focus();
+    };
     function render(){
       list.innerHTML=items.length?items.map((item,i)=>`<div role="option" id="connection-option-${i}" aria-selected="${i===index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt===undefined?'':`<span>${e(item.excerpt)}</span>`}</div>`).join(''):`<p role="status">No matching ${command==='sync'?'accounts':'items'}.</p>`;
       list.hidden=false;input.setAttribute('aria-expanded','true');if(items.length){input.setAttribute('aria-activedescendant','connection-option-'+index);list.children[index]?.scrollIntoView({block:'nearest'});}else input.removeAttribute('aria-activedescendant');
     }
     list.onpointerdown=event=>{event.preventDefault();const option=(event.target as HTMLElement).closest<HTMLElement>('[data-index]');if(option){index=Number(option.dataset.index);accept();}};
     input.addEventListener('input',()=>{
-      hide();chosen=false;index=0;
+      hide();chosen=false;index=0;selectedAccount=undefined;
       const accountQuery=syncQuery(input.value);
       if(accountQuery!==undefined){
         command='sync';list.setAttribute('aria-label','Matching accounts');
@@ -73,6 +82,7 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
       timer=setTimeout(()=>{void search(input.value).then(result=>{if(request!==version||!input.isConnected)return;items=result.map(item=>({id:item.id,title:label(item.kind)+' · '+item.title,detail:detail(item),excerpt:item.excerpt}));index=0;render();}).catch(error=>{if(request===version){items=[];list.innerHTML=`<p role="status">${e(error.message)}</p>`;list.hidden=false;input.setAttribute('aria-expanded','true');}});},150);
     });
     return {
+      selectedAccountId(){return selectedAccount?.value===input.value?selectedAccount.id:undefined;},
       key(event:KeyboardEvent){
         if(event.isComposing||list.hidden)return false;
         if(event.key==='Escape'){event.preventDefault();hide();return true;}

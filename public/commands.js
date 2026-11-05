@@ -33,7 +33,16 @@ for (const name of Object.keys(registry)) {
 export class CommandError extends Error {
 }
 export function syncQuery(value) {
-    return value.trimStart().replace(/^:/, '').trimStart().match(/^sync\s+([\s\S]*)$/)?.[1].trim();
+    const query = value.trimStart().replace(/^:/, '').trimStart().match(/^sync\s+([\s\S]*)$/)?.[1].trim();
+    if (query?.startsWith('"') && query.endsWith('"')) {
+        try {
+            return JSON.parse(query);
+        }
+        catch {
+            return query;
+        }
+    }
+    return query;
 }
 export function connectionQuery(value) {
     const match = value.trimStart().replace(/^:/, '').trimStart().match(/^(link|unlink)(?:\s+(.*))?$/);
@@ -48,7 +57,7 @@ export function resolveCommand(value) {
     if (!command)
         throw new CommandError('Unknown command' + (name ? ': ' + name : ''));
     if (command === 'sync')
-        return { name: command, argument: syncQuery(value) || undefined };
+        return { name: command, argument: args.length ? syncQuery(value) : undefined };
     if (command === 'link' || command === 'unlink') {
         const query = connectionQuery(value);
         if (!query.query)

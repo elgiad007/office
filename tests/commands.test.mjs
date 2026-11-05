@@ -35,6 +35,8 @@ test('commands normalize whitespace and validate every argument before dispatch'
 test('sync accepts an optional account name and suggests accounts after a space',()=>{
  assert.deepEqual(resolveCommand(':sync '),{name:'sync',argument:undefined});
  assert.deepEqual(resolveCommand(': sync Work  Calendar '),{name:'sync',argument:'Work  Calendar'});
+ assert.equal(resolveCommand(':sync '+JSON.stringify('Work "Calendar"')).argument,'Work "Calendar"');
+ assert.equal(resolveCommand(':sync ""').argument,'');
  assert.equal(syncQuery(':sync'),undefined);
  assert.equal(syncQuery(':sync '),'');
  assert.equal(syncQuery(':sync Work Ca'),'Work Ca');

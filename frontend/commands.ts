@@ -31,7 +31,11 @@ for(const name of Object.keys(registry) as CommandName[]){
 export class CommandError extends Error {}
 export interface ResolvedCommand {name: keyof typeof registry; argument?: string; linked?: boolean; kind?: string}
 export function syncQuery(value: string): string | undefined {
-  return value.trimStart().replace(/^:/,'').trimStart().match(/^sync\s+([\s\S]*)$/)?.[1].trim();
+  const query=value.trimStart().replace(/^:/,'').trimStart().match(/^sync\s+([\s\S]*)$/)?.[1].trim();
+  if(query?.startsWith('"')&&query.endsWith('"')){
+    try{return JSON.parse(query) as string;}catch{return query;}
+  }
+  return query;
 }
 export function connectionQuery(value: string): {name:'link'|'unlink';kind?: string;query:string} | null {
   const match=value.trimStart().replace(/^:/,'').trimStart().match(/^(link|unlink)(?:\s+(.*))?$/);
@@ -43,7 +47,7 @@ export function resolveCommand(value: string): ResolvedCommand {
   const [name,...args]=value.trim().replace(/^:/,'').trim().split(/\s+/);
   const command=Object.hasOwn(registry,name)?name as CommandName:aliases.get(name);
   if(!command)throw new CommandError('Unknown command'+(name?': '+name:''));
-  if(command==='sync')return {name:command,argument:syncQuery(value)||undefined};
+  if(command==='sync')return {name:command,argument:args.length?syncQuery(value):undefined};
   if(command==='link'||command==='unlink'){
     const query=connectionQuery(value)!;
     if(!query.query)throw new CommandError('Choose an item name or ID.');

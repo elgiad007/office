@@ -175,6 +175,8 @@ function openCommand(value = ':') {
         let command;
         try {
             command = resolveCommand(input.value);
+            if (command.name === 'sync')
+                command.argument = commandSuggestions?.selectedAccountId() ?? command.argument;
         }
         catch (cause) {
             activity.notice(asError(cause).message, true, { log: !(cause instanceof CommandError) });
