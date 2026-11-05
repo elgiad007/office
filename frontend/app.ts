@@ -35,7 +35,7 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
   wiki:{name:'Wiki',singular:'page',empty:'No pages yet.',hint:'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].',icon:'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3'},
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
 };
-const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x'};
+const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L'};
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const lastSelectedItems=new Map<AppName,string>();
 function rememberSelection() {
@@ -44,7 +44,7 @@ function rememberSelection() {
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys()});
 const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,open:selectRecord,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
-const connections=createConnections({api,current:()=>state.current?.id,open:openConnectedRecord,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
+const connections=createConnections({api,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
 class DraftCancelled extends Error {}
@@ -1327,6 +1327,11 @@ function focusContent() {
   const entry=contentEntry();
   if(entry){entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
+function restoreConnectionsFocus(opener:HTMLElement|null) {
+  if(opener?.isConnected&&!opener.isContentEditable&&!opener.matches('input,textarea,select'))opener.focus({preventScroll:true});
+  if(document.activeElement!==opener||editable(document.activeElement))focusList();
+  setMode('normal');
+}
 function focusList() {
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
@@ -1402,6 +1407,7 @@ document.addEventListener('keydown',event=>{
   if(action==='help'){event.preventDefault();help();return;}
   if(state.app==='settings')return;
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
+  if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}
   if(action==='completeTask'&&state.app==='tasks'&&!event.shiftKey){event.preventDefault();void attempt(completeTask);return;}
   if(action==='edit'||(state.app==='sheets'&&key==='Enter')){event.preventDefault();enterEdit();return;}
@@ -1424,7 +1430,7 @@ document.addEventListener('keydown',event=>{
   if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=navigableRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
 });
-document.addEventListener('focusin',event=>{if((event.target as HTMLElement).id!=='command-input'&&editable((event.target as HTMLElement)))setMode('insert');});
+document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view')&&target.id!=='command-input'&&editable(target))setMode('insert');});
 document.addEventListener('pointerdown',()=>state.lastActivity=Date.now(),{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});
 window.addEventListener('beforeunload',event=>{if(state.dirty||state.savePromise){event.preventDefault();event.returnValue='';}});

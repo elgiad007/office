@@ -8,6 +8,7 @@ test('help follows current bindings including help and Sheets movement',()=>{
  assert.equal(rows.find(r=>r.action==='Open keyboard and command help').shortcut,'!');
  assert.equal(rows.find(r=>r.action==='Move between cells').shortcut,'Arrow keys');
  assert.equal(rows.find(r=>r.action==='Edit selected cell').shortcut,'I / Enter');
+ assert.equal(helpEntries({...keys,connections:'C'}).find(r=>r.action==='Open selected item connections').shortcut,'C');
  for(const key of Object.keys(keys))assert.ok(rows.some(r=>r.shortcut.includes(({help:'!',left:'H',down:'J',up:'K',right:'L',edit:'I'})[key]||keys[key])),key);
 });
 test('command help inventory and type options come from parser registry',()=>{

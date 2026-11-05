@@ -25,6 +25,14 @@ function db(): PDO {
         CREATE TABLE IF NOT EXISTS mail_files (record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, part TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(record_id,part));');
     @chmod(data_dir() . '/office.sqlite', 0600);
     $db->exec('CREATE TABLE IF NOT EXISTS connections (a TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, b TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, created TEXT NOT NULL, PRIMARY KEY(a,b), CHECK(a<b)); CREATE INDEX IF NOT EXISTS connections_b ON connections(b);');
+    if(!in_array('archived',array_column($db->query('PRAGMA table_info(connections)')->fetchAll(),'name'),true)){
+        $db->exec('BEGIN IMMEDIATE');
+        try{
+            if(!in_array('archived',array_column($db->query('PRAGMA table_info(connections)')->fetchAll(),'name'),true))$db->exec('ALTER TABLE connections ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1))');
+            $db->exec('COMMIT');
+        }catch(Throwable $error){$db->exec('ROLLBACK');throw $error;}
+    }
+    $db->exec('CREATE INDEX IF NOT EXISTS connections_active_a ON connections(archived,a); CREATE INDEX IF NOT EXISTS connections_active_b ON connections(archived,b);');
     return $db;
 }
 function setting(string $key, mixed $fallback = null): mixed {

@@ -14,6 +14,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('Tab / Shift+Tab','Enter selected content / return to list','Selected list row / content entry','Enters without editing. Standard controls and spreadsheet cells retain native Tab behavior.');
   add('g 1 … g 7','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets. Sequence timeout: 900 ms.');
   add(k.search,'Search current application');add('n / N','Next / previous item in search results','Normal mode','Keeps focus in the current pane, including mail bodies.');
+  add(k.connections||'L','Open selected item connections','Normal mode','Remappable in Settings. Also available as :links or :l; add all for the workspace overview.');
   add(k.new,'Create an item / compose');add(k.edit,'Enter edit mode');add(k.select,'Toggle current item selection');add(k.save,'Save changes');
   add('Ctrl+S / Cmd+S','Save changes','Normal or insert mode, outside dialogs');
   add('Escape','Leave edit mode; clear selection otherwise','Outside dialogs','Saves existing items. New drafts stay unsaved until Save. In formula input, return focus to selected cell.');
@@ -27,6 +28,14 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('Arrow keys','Move between cells','Sheets, focused cell','30 rows × 12 columns; item shortcuts still navigate records.');
   add(k.edit+' / Enter','Edit selected cell','Sheets, normal mode');add('Tab / Shift+Tab','Next / previous cell','Sheets, focused cell');
   add('/','Focus header search','Message headers, outside search field');add('n / p','Next / previous header match','Message headers, outside search field');add('Enter / Shift+Enter','Next / previous header match','Message headers search field');
+  add(`${k.left} / ${k.down} / ${k.up} / ${k.right}; Arrow keys`,'Navigate map cards','Connections map',`Left/right continue across row boundaries. In a single horizontal row, ${k.down} moves left and ${k.up} moves right. Focused items stay in view.`);
+  add('Enter / Space','Explore or open focused item / select item','Connections map','Enter explores groups and item neighborhoods. When the selected item is already the neighborhood center, Enter opens its content, just like Open item.');
+  add(k.search==='/'?'/':`/ / ${k.search}`,'Search connected items','Connections window','Enter or Escape in search returns focus to the map. Typing fields retain their normal keys.');
+  add('gg / G; Home / End','First / last map card','Connections map');
+  add('Backspace','Go back through connections','Connections window, outside typing fields','Restores the previous map and focus. Without earlier history, moves up to the workspace overview; stays there when already at the top.');
+  add('Enter / Space on From card','Return to the view you came from','Connections map','The faded From card and dashed line show your navigation path. Current identifies the neighborhood center independently of selection.');
+  add('Active / Archived / All','Choose connection visibility','Connections toolbar','Active is the default. Archive or restore a group, the selected item’s connections, or a single link. Underlying items are unchanged.');
+  add('Shift+Arrow keys; + / -','Pan / zoom the map','Connections map','Fit view remains available in the toolbar.');
   add('ArrowDown / ArrowUp','Choose matching folder','Quick Move search');add('Enter','Move to chosen folder','Quick Move');add('Escape','Cancel Quick Move','Quick Move','Cannot dismiss while a move is running.');
   add('Shift+F10 / Menu key','Open item action menu','List or nonediting content');add('ArrowDown / ArrowUp / Home / End','Focus next / previous / first / last action','Item action menu');add('Enter / Space','Run focused action','Item action menu');add('Escape / Tab','Close menu and return focus','Item action menu');
   add('Escape','Close mail disclosure, actions menu or narrow-screen folders','Mail','Returns focus to the relevant toggle.');

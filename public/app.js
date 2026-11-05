@@ -29,7 +29,7 @@ const apps = {
     wiki: { name: 'Wiki', singular: 'page', empty: 'No pages yet.', hint: 'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].', icon: 'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3' },
     sheets: { name: 'Sheets', singular: 'workbook', empty: 'No workbooks yet.', hint: 'Create a workbook or import a CSV file.', icon: 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18' },
 };
-const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', pageDown: 'd', pageUp: 'u', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'D', undoDelete: 'U', completeTask: 'x' };
+const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', pageDown: 'd', pageUp: 'u', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'D', undoDelete: 'U', completeTask: 'x', connections: 'L' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiEditing: false, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const lastSelectedItems = new Map();
 function rememberSelection() {
@@ -39,7 +39,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys() });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
-const connections = createConnections({ api, current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
+const connections = createConnections({ api, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
 class DraftCancelled extends Error {
@@ -2356,6 +2356,13 @@ function focusContent() {
         entry.focus({ preventScroll: true });
     }
 }
+function restoreConnectionsFocus(opener) {
+    if (opener?.isConnected && !opener.isContentEditable && !opener.matches('input,textarea,select'))
+        opener.focus({ preventScroll: true });
+    if (document.activeElement !== opener || editable(document.activeElement))
+        focusList();
+    setMode('normal');
+}
 function focusList() {
     const entry = document.querySelector('#selected-item') || document.querySelector('#items') || document.querySelector('#main');
     if (entry) {
@@ -2595,6 +2602,12 @@ document.addEventListener('keydown', event => {
         document.querySelector('#search')?.focus();
         return;
     }
+    if (action === 'connections') {
+        event.preventDefault();
+        if (!event.repeat)
+            void attempt(() => connections.view());
+        return;
+    }
     if (action === 'new') {
         event.preventDefault();
         void attempt(createRecord);
@@ -2699,7 +2712,7 @@ document.addEventListener('keydown', event => {
             void attempt(() => selectRecord(rows[next].id, true));
     }
 });
-document.addEventListener('focusin', event => { if (event.target.id !== 'command-input' && editable(event.target))
+document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view') && target.id !== 'command-input' && editable(target))
     setMode('insert'); });
 document.addEventListener('pointerdown', () => state.lastActivity = Date.now(), { passive: true });
 document.addEventListener('wheel', () => state.lastActivity = Date.now(), { passive: true });

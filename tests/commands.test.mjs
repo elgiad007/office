@@ -9,6 +9,10 @@ test('connection commands preserve multiword queries and support every registere
  }
  assert.deepEqual(resolveCommand(':link abc-123'),{name:'link',kind:undefined,argument:'abc-123'});
  assert.deepEqual(resolveCommand(':links all'),{name:'links',argument:'all'});
+ assert.deepEqual(resolveCommand(':l'),{name:'links',argument:undefined});
+ assert.deepEqual(resolveCommand(':l all'),{name:'links',argument:'all'});
+ assert.throws(()=>resolveCommand(':l other'),CommandError);
+ assert.equal(connectionQuery(':l'),null);
  assert.deepEqual(connectionQuery(':link event '),{name:'link',kind:'calendar',query:''});
  assert.deepEqual(connectionQuery(':unlink Quarter end'),{name:'unlink',kind:undefined,query:'Quarter end'});
  assert.equal(connectionQuery(':new linked event'),null);
