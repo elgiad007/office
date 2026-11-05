@@ -111,7 +111,7 @@ export function renderMailFolders(env) {
             return;
         const leaf = (folder.delimiter ? folder.name.split(folder.delimiter).at(-1) : folder.name)?.toLowerCase();
         // Older catalogs may still classify the system Spam mailbox as a custom folder.
-        const legacyJunk = (!folder.role || folder.role === 'Custom folder') && (folder.protected || owner.gmailSpamUrl) && ['spam', 'junk', 'junk email', 'junk e-mail'].includes(leaf || '');
+        const legacyJunk = (!folder.role || folder.role === 'Custom folder') && (folder.protected || owner.gmailImap) && ['spam', 'junk', 'junk email', 'junk e-mail'].includes(leaf || '');
         const junk = owner.type === 'google' ? folder.id === 'SPAM' : folder.role === 'Junk' || legacyJunk;
         if (junk)
             bindEmptyJunk(env, button, owner, folder.id);
@@ -126,8 +126,7 @@ export function renderMailFolders(env) {
         more.onclick = () => env.attempt(() => syncOpenFolder(env, true));
 }
 function bindEmptyJunk(env, button, account, folder = '') {
-    const title = account?.type === 'google' ? 'Empty Spam Folder' : 'Empty Junk Folder';
-    const gmailSpamUrl = account?.gmailSpamUrl;
+    const title = account?.type === 'google' || account?.gmailImap ? 'Empty Spam Folder' : 'Empty Junk Folder';
     const open = (x, y) => {
         const menu = document.createElement('div');
         menu.className = 'item-context-menu folder-context-menu';
@@ -135,9 +134,9 @@ function bindEmptyJunk(env, button, account, folder = '') {
         menu.setAttribute('role', 'menu');
         const item = document.createElement('button');
         item.type = 'button';
-        item.className = gmailSpamUrl ? '' : 'danger';
+        item.className = 'danger';
         item.setAttribute('role', 'menuitem');
-        item.textContent = gmailSpamUrl ? 'Open Gmail Spam' : title + '…';
+        item.textContent = title + '…';
         menu.append(item);
         button.insertAdjacentElement('afterend', menu);
         menu.addEventListener('toggle', event => { if (event.newState === 'closed')
@@ -149,20 +148,16 @@ function bindEmptyJunk(env, button, account, folder = '') {
         item.onclick = () => {
             menu.hidePopover();
             button.focus();
-            if (gmailSpamUrl) {
-                window.open(gmailSpamUrl, '_blank', 'noopener,noreferrer');
-                return;
-            }
             void env.attempt(async () => {
                 await env.commit();
                 const result = await busy(env, () => env.api('mail-empty-junk', { action: 'preview', account: account?.id || '', folder }));
                 if (env.state.app !== 'mail')
                     return;
                 if ('authorize' in result && account) {
-                    env.confirmation('Authorize permanent deletion', `Google requires full Gmail access to permanently delete spam from ${account.label}. Continue to Google to grant that permission for this account?`, async () => {
+                    env.confirmation('Authorize permanent Spam deletion', `Google requires full Gmail access for Office to permanently empty Spam for ${account.label}. You only need to grant this permission once per Gmail account in Office. After that, you can empty Spam directly in Office. If you revoke access, you’ll need to grant it again.`, async () => {
                         const authorization = await env.api('google-connect', { id: account.id, permanentDelete: true });
                         location.href = authorization.url;
-                    });
+                    }, 'Continue to Google');
                     return;
                 }
                 if (!('count' in result))

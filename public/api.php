@@ -30,7 +30,9 @@ try {
             if (empty($tokens['access_token'])) fail('Google did not return an access token. Connect again.');
             $profile=google_json('https://gmail.googleapis.com/gmail/v1/users/me/profile',$tokens['access_token']);
             finish_google_connection($oauth,$tokens,$profile);
-            $_SESSION['google_notice']=['message'=>'Google account connected.','error'=>false];
+            $_SESSION['google_notice']=['message'=>!empty($oauth['permanentDelete'])
+                ?'Permanent Spam deletion authorized. Return to Mail and choose Empty Spam Folder to review and confirm deletion.'
+                :'Google account connected.','error'=>false];
         } catch (HttpError $e) { $_SESSION['google_notice']=['message'=>$e->getMessage(),'error'=>true]; }
         catch (Throwable $e) { $_SESSION['google_notice']=['message'=>'Google connection failed. Try connecting again.','error'=>true]; }
         header('Location: ./#settings',true,303); exit;
@@ -218,7 +220,7 @@ try {
             $config=json_decode($row['config'],true,64,JSON_THROW_ON_ERROR);
             unset($row['config']);
             if ($row['type']==='imap' && imap_is_gmail(['config'=>$config])) {
-                $row['gmailSpamUrl']='https://mail.google.com/mail/u/?authuser='.rawurlencode($config['email']??'').'#spam';
+                $row['gmailImap']=true;
             }
             $row['folders']=setting('mail-folders:'.$row['id'],[]);
         }
@@ -295,7 +297,7 @@ try {
     }
     if ($route==='account-delete' && $method==='POST') {
         $a=account((string)($input['id']??'')); $db=db(); $db->beginTransaction();
-        $q=$db->prepare("DELETE FROM records WHERE json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1"); $q->execute([$a['id']]); $db->prepare('DELETE FROM accounts WHERE id=?')->execute([$a['id']]); $db->commit(); json_response(['ok'=>true]);
+        $q=$db->prepare("DELETE FROM records WHERE json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1"); $q->execute([$a['id']]); $db->prepare('DELETE FROM accounts WHERE id=?')->execute([$a['id']]); $db->prepare('DELETE FROM settings WHERE key=?')->execute(['gmail-spam-grant:'.$a['id']]); $db->commit(); json_response(['ok'=>true]);
     }
     if ($route==='google-connect' && $method==='POST') {
         json_response(['url'=>start_google_connection($input)]);

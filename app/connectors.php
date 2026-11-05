@@ -32,12 +32,20 @@ function account(string $id): array {
     $r['config']=json_decode($r['config'],true,64,JSON_THROW_ON_ERROR); $r['credentials']=decrypt_secret($r['secret']); return $r;
 }
 function google_token(array &$a): string {
-    $s=$a['credentials']; if (empty($s['refresh_token'])) fail('Connect this Google account first.');
-    if (($s['expires']??0)>time()+60) return $s['access_token'];
+    $s=refresh_google_credentials($a['credentials']);
+    if ($s!==$a['credentials']) {
+        db()->prepare('UPDATE accounts SET secret=? WHERE id=?')->execute([encrypt_secret($s),$a['id']]);
+        $a['credentials']=$s;
+    }
+    return $s['access_token'];
+}
+function refresh_google_credentials(array $s): array {
+    if (empty($s['refresh_token'])) fail('Connect this Google account first.');
+    if (($s['expires']??0)>time()+60) return $s;
     $r=web_request('https://oauth2.googleapis.com/token','POST',['Content-Type: application/x-www-form-urlencoded'],http_build_query(['client_id'=>$s['client_id'],'client_secret'=>$s['client_secret'],'refresh_token'=>$s['refresh_token'],'grant_type'=>'refresh_token']));
     $t=json_decode($r['body'],true,64,JSON_THROW_ON_ERROR); if (empty($t['access_token'])) fail('Google authorization expired. Reconnect.');
     $s['access_token']=$t['access_token']; $s['expires']=time()+(int)$t['expires_in'];
-    db()->prepare('UPDATE accounts SET secret=? WHERE id=?')->execute([encrypt_secret($s),$a['id']]); $a['credentials']=$s; return $s['access_token'];
+    return $s;
 }
 function remote_id(string $account,string $source): string { return 'remote_'.substr(hash('sha256',$account.'|'.$source),0,48); }
 function cache_remote(array $a,string $source,string $kind,string $title,string $body,array $meta): void {

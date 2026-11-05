@@ -41,6 +41,25 @@ function expunge_imap_junk(mixed $socket,array $batch): array {
     return array_values(array_diff($batch,imap_search_ids($socket,'UID '.$uids)));
 }
 
+function require_gmail_imap_spam_folder(array $account,string $folder): void {
+    imap_with_connection($account,function($socket)use($folder){
+        $capabilities=implode('',imap_command($socket,'CAPABILITY')['lines']);
+        $special=preg_match('/\bSPECIAL-USE\b/i',$capabilities);
+        $folders=imap_list_folders(imap_command($socket,'LIST "" "*"'.($special?' RETURN (SPECIAL-USE)':'')));
+        if (!($folders[$folder]['junk']??false)) fail('This folder is not Gmail’s system Spam folder. Refresh folders and try again.',409);
+    });
+}
+
+function gmail_empty_junk_token(array &$account): ?string {
+    if ($account['type']==='imap') return gmail_imap_spam_token($account);
+    if (!google_can_delete_mail($account)) return null;
+    try { return google_token($account); }
+    catch (HttpError $e) {
+        if (preg_match('/^Provider returned HTTP (?:400|401)\./',$e->getMessage())) return null;
+        throw $e;
+    }
+}
+
 function preview_empty_junk(string $accountId,string $folder): array {
     if ($accountId==='') {
         if ($folder!=='') fail('Choose Local Junk.');
@@ -49,11 +68,18 @@ function preview_empty_junk(string $accountId,string $folder): array {
     return with_account_mail_lock($accountId,function()use($accountId,$folder){
         $account=account($accountId);
         $preview=['account'=>$accountId,'folder'=>$folder,'type'=>$account['type']];
-        if ($account['type']==='google' && $folder==='SPAM') {
-            if (!google_can_delete_mail($account)) return $preview+['authorize'=>true,'ids'=>[]];
-            $token=google_token($account);
-            $ids=gmail_junk_ids(fn($path)=>google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages'.$path,$token));
-            return $preview+['name'=>$account['label'].' / Spam','ids'=>$ids];
+        $gmailImap=$account['type']==='imap' && imap_is_gmail($account);
+        if (($account['type']==='google' && $folder==='SPAM') || $gmailImap) {
+            if ($gmailImap) gmail_imap_login($account);
+            $token=gmail_empty_junk_token($account);
+            if (!$token) return $preview+['authorize'=>true,'ids'=>[]];
+            if ($gmailImap) require_gmail_imap_spam_folder($account,$folder);
+            try { $ids=gmail_junk_ids(fn($path)=>google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages'.$path,$token)); }
+            catch (HttpError $e) {
+                if (str_starts_with($e->getMessage(),'Provider returned HTTP 401.')) return $preview+['authorize'=>true,'ids'=>[]];
+                throw $e;
+            }
+            return $preview+['name'=>$account['label'].' / Spam','ids'=>$ids,'gmailApi'=>true];
         }
         if ($account['type']!=='imap') fail('Choose the account’s Junk or Spam folder.');
         return $preview+['name'=>$account['label'].' / '.imap_folder_decode($folder)]
@@ -61,11 +87,31 @@ function preview_empty_junk(string $accountId,string $folder): array {
     });
 }
 
+/** Convert Gmail's hexadecimal API identifier to the exact unsigned IMAP identifier. */
+function gmail_api_id_to_imap(string $id): ?string {
+    if (!preg_match('/^[0-9a-f]{1,16}$/Di',$id)) return null;
+    $decimal='0';
+    foreach (str_split($id) as $hex) {
+        $carry=hexdec($hex);
+        for ($i=strlen($decimal)-1;$i>=0;$i--) {
+            $digit=(int)$decimal[$i]*16+$carry;
+            $decimal[$i]=(string)($digit%10);
+            $carry=intdiv($digit,10);
+        }
+        if ($carry) $decimal=$carry.$decimal;
+    }
+    return $decimal;
+}
+
 function forget_deleted_junk(array $preview,array $ids): void {
     $provider="json_extract(meta,'$.providerId')";
     $scope="kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?";
     $args=[$preview['account']];
-    if ($preview['type']==='imap') {
+    if ($preview['type']==='imap' && !empty($preview['gmailApi'])) {
+        $provider="json_extract(meta,'$.gmailMessageId')";
+        $ids=array_values(array_filter(array_map('gmail_api_id_to_imap',$ids),fn($id)=>$id!==null));
+        if (!$ids) return;
+    } elseif ($preview['type']==='imap') {
         $scope.=" AND json_extract(meta,'$.serverFolder')=? AND CAST(json_extract(meta,'$.uidValidity') AS TEXT)=?";
         array_push($args,$preview['folder'],$preview['validity']);
     }
@@ -116,9 +162,10 @@ function empty_junk(array $preview): array {
     return with_account_mail_mutation($preview['account'],function()use($preview){
         $account=account($preview['account']);
         if ($account['type']!==$preview['type']) fail('The mail account changed. Review the folder again.',409);
-        if ($account['type']==='google') {
-            if (!google_can_delete_mail($account)) fail('Authorize permanent deletion for this Gmail account first.',403);
-            $token=google_token($account);
+        if (!empty($preview['gmailApi'])) {
+            if ($account['type']!=='google' && !imap_is_gmail($account)) fail('The mail account changed. Review the folder again.',409);
+            $token=gmail_empty_junk_token($account);
+            if (!$token) fail('Authorize permanent deletion for this Gmail account first.',403);
             $base='https://gmail.googleapis.com/gmail/v1/users/me/messages';
             $live=gmail_junk_ids(fn($path)=>google_json($base.$path,$token));
             return empty_junk_batches($preview,$live,function($batch)use($base,$token){

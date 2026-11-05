@@ -24,15 +24,18 @@ function save_google_settings(array $input): void {
 
 function start_google_connection(array $input): string {
     $permanentDelete=false;
+    $imapSpam=false;
     if (!empty($input['id'])) {
         $a = account((string)$input['id']);
-        if ($a['type'] !== 'google') fail('Not a Google account.');
-        $credentials = $a['credentials'];
-        $redirect = $a['config']['redirect'];
-        $email = $a['config']['email'];
-        $calendar = $a['config']['calendar'] ?? true;
-        $label = $a['label'];
         $permanentDelete=($input['permanentDelete']??false)===true;
+        $imapSpam=$permanentDelete && $a['type']==='imap' && imap_is_gmail($a);
+        if (!$imapSpam && $a['type']!=='google') fail('Not a Google account.');
+        $credentials=$imapSpam?google_settings():$a['credentials'];
+        if (!$credentials) fail('Configure Google integration in Office Settings, then try Empty Spam Folder again.');
+        $redirect=$imapSpam?$credentials['redirect']:$a['config']['redirect'];
+        $email=$imapSpam?gmail_imap_login($a):$a['config']['email'];
+        $calendar=!$imapSpam && ($a['config']['calendar']??true);
+        $label=$a['label'];
     } else {
         $credentials = google_settings();
         if (!$credentials) fail('Configure Google integration in Settings once before connecting accounts.');
@@ -45,7 +48,7 @@ function start_google_connection(array $input): string {
     }
     $state = bin2hex(random_bytes(24));
     $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
-    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,
+    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,'imapSpam'=>$imapSpam,
         'credentials'=>encrypt_secret(['client_id'=>$credentials['client_id'],'client_secret'=>$credentials['client_secret']]),
         'state'=>$state,'verifier'=>$verifier,'time'=>time()];
     return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query([
@@ -60,6 +63,34 @@ function google_can_delete_mail(array $account): bool {
         && in_array('https://mail.google.com/',explode(' ',$account['credentials']['scope']??''),true);
 }
 
+function gmail_imap_login(array $account): string {
+    $email=$account['credentials']['username']??'';
+    if ($account['type']!=='imap' || !imap_is_gmail($account) || !filter_var($email,FILTER_VALIDATE_EMAIL)) fail('Use the full Gmail address as the IMAP username before authorizing Spam deletion.');
+    return $email;
+}
+
+function save_gmail_imap_spam_grant(string $id,array $credentials): void {
+    $query=db()->prepare('INSERT INTO settings(key,value) SELECT ?,? WHERE EXISTS (SELECT 1 FROM accounts WHERE id=?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+    $query->execute(['gmail-spam-grant:'.$id,json_encode(encrypt_secret($credentials),JSON_THROW_ON_ERROR),$id]);
+    if (!$query->rowCount()) fail('The IMAP account was removed. Connect it again first.',409);
+}
+
+function gmail_imap_spam_token(array $account): ?string {
+    $key='gmail-spam-grant:'.$account['id'];
+    $encrypted=setting($key);
+    if (!$encrypted) return null;
+    $credentials=decrypt_secret($encrypted);
+    if (strcasecmp(gmail_imap_login($account),$credentials['email']??'')!==0
+        || !in_array('https://mail.google.com/',explode(' ',$credentials['scope']??''),true)) return null;
+    try { $fresh=refresh_google_credentials($credentials); }
+    catch (HttpError $e) {
+        if (preg_match('/^Provider returned HTTP (?:400|401)\./',$e->getMessage())) return null;
+        throw $e;
+    }
+    if ($fresh!==$credentials) save_gmail_imap_spam_grant($account['id'],$fresh);
+    return $fresh['access_token'];
+}
+
 /** Validate the grant and provider identity before changing any saved account. */
 function finish_google_connection(array $oauth, array $tokens, array $profile): string {
     $email = $profile['emailAddress'] ?? '';
@@ -70,6 +101,17 @@ function finish_google_connection(array $oauth, array $tokens, array $profile): 
     $mailScope=$permanentDelete?'https://mail.google.com/':'https://www.googleapis.com/auth/gmail.modify';
     if (!in_array($mailScope, $scopes, true)
         || ($oauth['calendar'] && !in_array('https://www.googleapis.com/auth/calendar.readonly', $scopes, true))) fail('Required Google permissions were not approved. Connect again.');
+    $credentials = array_merge($tokens, decrypt_secret($oauth['credentials']), ['expires'=>time()+(int)($tokens['expires_in'] ?? 3600)]);
+    if (!empty($oauth['imapSpam'])) {
+        if (!$permanentDelete) fail('Google did not grant permanent deletion.');
+        return with_account_mail_lock($oauth['account'],function()use($oauth,$credentials,$email){
+            $id=$oauth['account'];
+            if (strcasecmp($oauth['email'],$email)!==0 || strcasecmp(gmail_imap_login(account($id)),$email)!==0) fail('Choose the same Gmail account that Office uses for IMAP.');
+            $credentials['email']=$email;
+            save_gmail_imap_spam_grant($id,$credentials);
+            return $id;
+        });
+    }
     $db = db(); $db->exec('BEGIN IMMEDIATE');
     try {
         $id = $oauth['account'];
@@ -80,7 +122,6 @@ function finish_google_connection(array $oauth, array $tokens, array $profile): 
         foreach ($db->query("SELECT id,config FROM accounts WHERE type='google'")->fetchAll() as $row) {
             if ($row['id'] !== $id && strcasecmp(json_decode($row['config'], true)['email'], $email) === 0) fail('This Google account is already connected. Use Authorize on the existing account.',409);
         }
-        $credentials = array_merge($tokens, decrypt_secret($oauth['credentials']), ['expires'=>time()+(int)($tokens['expires_in'] ?? 3600)]);
         $config = ['email'=>$email,'redirect'=>$oauth['redirect'],'calendar'=>$oauth['calendar'],'permanentDelete'=>$permanentDelete];
         if ($id) $db->prepare('UPDATE accounts SET config=?,secret=?,error=NULL WHERE id=?')->execute([json_encode($config),encrypt_secret($credentials),$id]);
         else {

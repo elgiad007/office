@@ -1653,7 +1653,7 @@ catch (cause) {
     notice(error.message, true);
 } }
 function modal(title, body) { dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector('[data-close]').onclick = () => dialog.close(); dialog.showModal(); }
-function confirmation(title, message, action) { modal(title, `<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(title)}</button></div>`); dialog.querySelector('#cancel').onclick = () => dialog.close(); dialog.querySelector('#cancel').focus(); dialog.querySelector('#confirm').onclick = async () => { dialog.close(); await attempt(action); }; }
+function confirmation(title, message, action, confirmLabel = title) { modal(title, `<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(confirmLabel)}</button></div>`); dialog.querySelector('#cancel').onclick = () => dialog.close(); dialog.querySelector('#cancel').focus(); dialog.querySelector('#confirm').onclick = async () => { dialog.close(); await attempt(action); }; }
 function download(name, text, type = 'text/plain') { const url = URL.createObjectURL(new Blob([text], { type })); const a = document.createElement('a'); a.href = url; a.download = name.replace(/[\\/:*?"<>|]/g, '_'); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function originalMail(record) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64), c => c.charCodeAt(0)) : record.meta.raw || ''; }
 async function viewMessageHeaders() {

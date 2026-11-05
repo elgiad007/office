@@ -6,6 +6,7 @@ require __DIR__.'/imap.php'; // Includes the scripted peer and verified MOVE reg
 require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/mail-folders.php';
 require dirname(__DIR__).'/app/mail-empty-junk.php';
+require dirname(__DIR__).'/app/google.php';
 function make_account(string $id,string $type='imap'): array {
     db()->prepare('INSERT INTO accounts (id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute([$id,'Fixture',$type,'{}','']);
     return ['id'=>$id,'label'=>'Fixture','config'=>[]];
@@ -347,6 +348,26 @@ try {
         check($result['deleted']===1 && $result['skipped']===1 && $result['unconfirmed']===1,'targeted expunge skips arrivals and moved mail and reports partial completion');
         check(count(mail_cache_rows($before['account']))===3,'cache removes only confirmed expunged messages');
     });
+    $gmailImap=make_account('gmail-imap-grant');
+    $login=['username'=>'fixture@gmail.com','password'=>'imap-fixture-secret'];
+    $config=['host'=>'imap.gmail.com','email'=>'other-address@example.com'];
+    db()->prepare('UPDATE accounts SET config=?,secret=? WHERE id=?')->execute([json_encode($config),encrypt_secret($login),$gmailImap['id']]);
+    $integration=['client_id'=>'client-fixture','client_secret'=>'google-fixture-secret','redirect'=>'https://office.example.com/api.php?r=oauth-callback'];
+    set_setting('google_integration',encrypt_secret($integration));
+    parse_str(parse_url(start_google_connection(['id'=>$gmailImap['id'],'permanentDelete'=>true]),PHP_URL_QUERY),$consent);
+    check($consent['login_hint']===$login['username'] && $consent['scope']==='https://mail.google.com/','Gmail IMAP consent uses the actual IMAP login and full Gmail scope only');
+    $tokens=['access_token'=>'access-fixture','refresh_token'=>'refresh-fixture','scope'=>'https://mail.google.com/','expires_in'=>3600];
+    refused(fn()=>finish_google_connection($_SESSION['oauth'],$tokens,['emailAddress'=>'other-address@example.com']),'same Gmail account');
+    check(gmail_imap_spam_token(account($gmailImap['id']))===null,'authorization for another account leaves no grant');
+    finish_google_connection($_SESSION['oauth'],$tokens,['emailAddress'=>$login['username']]);
+    $connected=account($gmailImap['id']);
+    check($connected['config']===$config && $connected['credentials']===$login && gmail_imap_spam_token($connected)==='access-fixture','grant is reused separately from the unchanged IMAP account');
+    $spamPath='[Gmail]/Spam';
+    cache_remote($gmailImap,'spam-fixture','mail','Deleted Spam','',['folder'=>'Junk','serverFolder'=>$spamPath,'providerId'=>'12','gmailMessageId'=>'18446744073709551615']);
+    cache_remote($gmailImap,'inbox-fixture','mail','Keep Inbox','',['folder'=>'Inbox','providerId'=>'12','gmailMessageId'=>'18446744073709551614']);
+    forget_deleted_junk(['account'=>$gmailImap['id'],'type'=>'imap','gmailApi'=>true],['ffffffffffffffff']);
+    $remaining=mail_cache_rows($gmailImap['id']);
+    check(count($remaining)===1 && $remaining[0]['title']==='Keep Inbox','Gmail API deletion evicts the exact unsigned IMAP identity and preserves an unrelated matching UID');
     echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
     foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');
