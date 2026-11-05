@@ -1,12 +1,12 @@
 import {escapeHtml as e} from './formats.js';
 import {itemTypes,type ItemKind} from './item-types.js';
-import {connectionLayout,connectionGroupLayout,connectionTitleLines,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
+import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
 import type {ConnectionItem,ConnectionList,RequestApi} from './types.js';
 
 type Place={mode:'overview'|'graph'|'items';id:string;group:string;q:string;kind:string};
 type Camera={x:number;y:number;w:number;h:number};
-type HistoryEntry={place:Place;snapshot?:{data:ConnectionList;selected:string;view:Camera;fitWidth:number;listPage:number;scroll:number;width:number;height:number}};
-type Env={api:RequestApi;dialog:HTMLDialogElement;modal:(title:string,body:string)=>void;open:(id:string)=>Promise<void>;notice:(message:string,error?:boolean)=>void};
+type HistoryEntry={place:Place;snapshot?:{data:ConnectionList;selected:string;focusedId:string;view:Camera;fitWidth:number;listPage:number;scroll:number;width:number;height:number}};
+type Env={api:RequestApi;keys?:()=>Record<string,string>;dialog:HTMLDialogElement;modal:(title:string,body:string)=>void;open:(id:string)=>Promise<void>;notice:(message:string,error?:boolean)=>void};
 const typeLabel=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦'};
 
@@ -20,7 +20,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     <p class="connection-location" data-location></p>
     <div class="connection-workspace"><section class="connection-map-pane" aria-label="Connections map">
       <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span></div>
-      <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Drag to pan, wheel or pinch to zoom. Use arrow keys to pan, plus or minus to zoom, and Home to fit."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-edges></g><g data-nodes></g></svg></div>
+      <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-edges></g><g data-nodes></g></svg></div>
       <p class="connection-map-note" data-map-note></p>
       <div class="connection-legend" aria-label="Item type legend">${Object.entries(itemTypes).map(([kind,type])=>`<span class="connection-type" data-kind="${kind}">${symbols[kind]} ${e(type.label)}</span>`).join('')}</div>
     </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
@@ -33,7 +33,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   const textMeasure=document.createElement('canvas').getContext('2d');
   const titleLines=(title:string,maxWidth:number)=>{if(textMeasure)textMeasure.font=`600 14px ${getComputedStyle(svg).fontFamily}`;return connectionTitleLines(title,40,textMeasure?text=>textMeasure.measureText(text).width:undefined,maxWidth);};
   let place:Place={mode:source?'graph':'overview',id:source,group:'',q:'',kind:''};
-  let data:ConnectionList={links:[],items:[],more:false},selected=source,request=0,busy=false,listPage=0,timer:ReturnType<typeof setTimeout>|undefined;
+  let data:ConnectionList={links:[],items:[],more:false},selected=source,focusedId='',sequenceTime=0,request=0,busy=false,listPage=0,timer:ReturnType<typeof setTimeout>|undefined;
   let points=new Map<string,{x:number;y:number}>(),width=900,height=600,view={x:-100,y:-100,w:900,h:600},fitWidth=900;
   let history:HistoryEntry[]=[{place:{...place}}],historyIndex=0,disposed=false;
   const active=()=>!disposed&&host.isConnected&&dialog.open;
@@ -50,7 +50,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     const unit=Math.max(w/width,h/height,overview?1:.65);view={x:x+w/2-width*unit/2,y:y+h/2-height*unit/2,w:width*unit,h:height*unit};fitWidth=view.w;updateView();}
   function zoom(factor:number,px=width/2,py=height/2){size();const w=Math.max(width*.25,Math.min(Math.max(fitWidth*4,width*8),view.w*factor)),f=w/view.w;view={x:view.x+px/width*view.w*(1-f),y:view.y+py/height*view.h*(1-f),w,h:view.h*f};updateView();}
   function centerSelection(){const p=points.get(selected);if(p){size();view={x:p.x-width/2,y:p.y-height/2,w:width,h:height};updateView();}}
-  const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{view.w*=width/oldW;view.h*=height/oldH;updateView();}});resize.observe(map);
+  const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{view.w*=width/oldW;view.h*=height/oldH;updateView();if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
   const panel=query<HTMLElement>('#connection-panel');
   const itemButtons=(item:ConnectionItem)=>`<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
   function wireItems(root:Element){
@@ -71,12 +71,25 @@ export async function openConnectionExplorer(env:Env,source='') {
     if(!points.has(id)&&place.mode!=='overview'){renderMap();fit();}else selection();
     if(oldIds!==[...points.keys()].join())status.textContent='Map updated to include the selected item. The list contains all loaded results.';
   }
+  const mapNodes=()=>[...svg.querySelectorAll<SVGGElement>('[data-node],[data-group-node]')];
+  const nodeId=(node:SVGGElement)=>node.dataset.node||node.dataset.groupNode!;
+  function reveal(id:string){const p=points.get(id);if(!p)return;
+    const halfW=place.mode==='overview'?GROUP_CARD.width/2:120,halfH=place.mode==='overview'?GROUP_CARD.height/2:32;
+    if(p.x-halfW<view.x||p.x+halfW>view.x+view.w||p.y-halfH<view.y||p.y+halfH>view.y+view.h){view.x=p.x-view.w/2;view.y=p.y-view.h/2;updateView();}
+  }
+  function focusMap(preferred=focusedId){const nodes=mapNodes(),candidate=nodes.find(node=>nodeId(node)===preferred);
+    const visible=nodes.find(node=>{const p=points.get(nodeId(node))!;return p.x>=view.x&&p.x<=view.x+view.w&&p.y>=view.y&&p.y<=view.y+view.h;});
+    const node=candidate||visible||nodes[0];if(node)node.focus({preventScroll:true});else map.focus({preventScroll:true});
+  }
+  function exploreFocused(){const node=mapNodes().find(node=>nodeId(node)===focusedId);if(!node)return;
+    void navigate({mode:'graph',id:node.dataset.node||'',group:node.dataset.groupNode||'',q:'',kind:''});
+  }
   function renderMap(){
+    const restoreFocus=map.contains(document.activeElement);
     if(place.mode==='overview'){
       const groups=(data.groups||[]).slice(0,GRAPH_LIMIT);
       size();points=new Map(connectionGroupLayout(groups.map(group=>group.id),width,height).map(p=>[p.id,p]));
       query('[data-edges]').innerHTML='';query('[data-nodes]').innerHTML=groups.map(group=>{const p=points.get(group.id)!,lines=titleLines(group.title,268);return `<g role="button" tabindex="0" data-group-node="${e(group.id)}" aria-label="Explore group ${e(group.title)}, ${group.items} items, ${group.links} connections" transform="translate(${p.x} ${p.y})"><rect x="-150" y="-52" width="300" height="104" rx="14"/><text class="connection-group-title" text-anchor="middle">${lines.map((line,i)=>`<tspan x="0" y="${-19+i*19}">${e(line)}</tspan>`).join('')}</text><text class="connection-group-count" y="31" text-anchor="middle">${group.items} items · ${group.links} connections</text><title>${e(group.title)}</title></g>`;}).join('');
-      svg.querySelectorAll<SVGGElement>('[data-group-node]').forEach(node=>{const action=()=>void navigate({mode:'graph',id:'',group:node.dataset.groupNode!,q:'',kind:''});node.onclick=action;node.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();action();}};});
       query('[data-map-note]').textContent=`Map: ${groups.length} of ${(data.groups||[]).length} loaded groups. Each group contains items joined by a path of connections. Select a group to explore it.`;
     }else{
       const visible=visibleConnectionItems(data.items,data.links,selected,place.id||place.group);points=new Map(connectionLayout(visible,data.links,place.id||place.group).map(p=>[p.id,p]));
@@ -85,10 +98,15 @@ export async function openConnectionExplorer(env:Env,source='') {
       const edges=[...related,...others].slice(0,500);
       query('[data-edges]').innerHTML=edges.map(link=>{const a=points.get(link.a)!,b=points.get(link.b)!;return `<line data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;}).join('');
       query('[data-nodes]').innerHTML=visible.map(item=>{const p=points.get(item.id)!,lines=titleLines(item.title,185);return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind]||'●'}</text><text class="connection-node-title">${lines.map((line,i)=>`<tspan x="-81" y="${-12+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(typeLabel(item.kind))} · ${item.degree??'—'} links</text><title>${e(typeLabel(item.kind)+' · '+item.title)}</title></g>`;}).join('');
-      svg.querySelectorAll<SVGGElement>('[data-node]').forEach(node=>{node.onclick=()=>select(node.dataset.node!);node.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();select(node.dataset.node!);}};node.onfocus=()=>{const p=points.get(node.dataset.node!)!;if(p.x<view.x+120||p.x>view.x+view.w-120||p.y<view.y+24||p.y>view.y+view.h-24){view.x=p.x-view.w/2;view.y=p.y-view.h/2;updateView();}};});
       query('[data-map-note]').textContent=`Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length>GRAPH_LIMIT||eligible.length>500?`Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. `:''}Drag to pan · Wheel/pinch to zoom · Select to highlight.`;
     }
     selection();
+    const nodes=mapNodes();if(!nodes.some(node=>nodeId(node)===focusedId))focusedId=nodes.some(node=>nodeId(node)===selected)?selected:nodes[0]?nodeId(nodes[0]):'';
+    for(const node of nodes){node.tabIndex=nodeId(node)===focusedId?0:-1;
+      node.onfocus=()=>{focusedId=nodeId(node);for(const peer of nodes)peer.tabIndex=peer===node?0:-1;reveal(focusedId);if(node.dataset.node)select(focusedId);};
+      node.onclick=()=>{node.focus({preventScroll:true});if(node.dataset.groupNode)exploreFocused();};
+    }
+    if(restoreFocus)focusMap();
   }
   function render(reset:boolean){
     query('[data-location]').textContent=place.mode==='overview'?'Workspace overview':place.mode==='items'?'Search results across the workspace':place.id?`Connections of ${data.items.find(item=>item.id===place.id)?.title||'selected item'}`:'Connected group';
@@ -113,19 +131,21 @@ export async function openConnectionExplorer(env:Env,source='') {
     try{const result=await env.api(route);if(version!==request||!active())return;
       listPage=reset?0:Math.floor(offset/50);
       data=reset?result:{...result,links:[...new Map([...data.links,...result.links].map(link=>[link.a+'|'+link.b,link])).values()],items:[...new Map([...data.items,...result.items].map(item=>[item.id,item])).values()],groups:[...(data.groups||[]),...(result.groups||[])]};render(reset||place.mode==='overview');
+      if(reset&&document.activeElement!==filter&&document.activeElement!==kind)focusMap(selected||focusedId);
     }catch(error){if(version===request&&active()){status.textContent=`Could not load connections: ${(error as Error).message}. Use Reset view to retry.`;}}
     finally{if(version===request&&active()){busy=false;more.disabled=false;host.setAttribute('aria-busy','false');}}
   }
-  function remember(){if(!busy)history[historyIndex].snapshot={data,selected,view:{...view},fitWidth,listPage,scroll:panel.scrollTop,width,height};}
-  async function navigate(next:Place,record=true){clearTimeout(timer);if(record){remember();history=history.slice(0,historyIndex+1);history.push({place:{...next}});historyIndex++;}place={...next};selected=place.id||place.group;filter.value=place.q;kind.value=place.kind;panel.scrollTop=0;await fetchPage(true);}
+  function remember(){if(!busy)history[historyIndex].snapshot={data,selected,focusedId,view:{...view},fitWidth,listPage,scroll:panel.scrollTop,width,height};}
+  async function navigate(next:Place,record=true){clearTimeout(timer);sequenceTime=0;if(record){remember();history=history.slice(0,historyIndex+1);history.push({place:{...next}});historyIndex++;}place={...next};selected=place.id||place.group;focusedId=selected;filter.value=place.q;kind.value=place.kind;panel.scrollTop=0;await fetchPage(true);}
   host.querySelectorAll<HTMLButtonElement>('[data-history]').forEach(button=>button.onclick=()=>{const index=historyIndex+Number(button.dataset.history);if(index<0||index>=history.length)return;
     remember();historyIndex=index;const entry=history[index],snapshot=entry.snapshot;
     if(!snapshot){void navigate(entry.place,false);return;}
-    clearTimeout(timer);++request;busy=false;place={...entry.place};filter.value=place.q;kind.value=place.kind;data=snapshot.data;selected=snapshot.selected;listPage=snapshot.listPage;render(false);
-    size();view={...snapshot.view,w:snapshot.view.w*width/snapshot.width,h:snapshot.view.h*height/snapshot.height};fitWidth=snapshot.fitWidth;updateView();panel.scrollTop=snapshot.scroll;more.disabled=false;host.setAttribute('aria-busy','false');
+    clearTimeout(timer);++request;busy=false;place={...entry.place};filter.value=place.q;kind.value=place.kind;data=snapshot.data;selected=snapshot.selected;focusedId=snapshot.focusedId;listPage=snapshot.listPage;render(false);
+    size();view={...snapshot.view,w:snapshot.view.w*width/snapshot.width,h:snapshot.view.h*height/snapshot.height};fitWidth=snapshot.fitWidth;updateView();panel.scrollTop=snapshot.scroll;more.disabled=false;host.setAttribute('aria-busy','false');focusMap(focusedId||selected);
   });
   query<HTMLButtonElement>('[data-overview]').onclick=()=>void navigate({mode:'overview',id:'',group:'',q:'',kind:''});
-  const search=()=>{clearTimeout(timer);++request;busy=false;more.disabled=true;timer=setTimeout(()=>void navigate({mode:filter.value.trim()||kind.value?'items':'overview',id:'',group:'',q:filter.value.trim(),kind:kind.value}),220);};filter.oninput=search;kind.onchange=search;
+  const runSearch=()=>navigate({mode:filter.value.trim()||kind.value?'items':'overview',id:'',group:'',q:filter.value.trim(),kind:kind.value});
+  const search=()=>{clearTimeout(timer);++request;busy=false;more.disabled=true;timer=setTimeout(()=>void runSearch(),220);};filter.oninput=search;kind.onchange=search;
   more.onclick=()=>{if(!busy)void fetchPage(false);};
   host.querySelectorAll<HTMLButtonElement>('[data-list-page]').forEach(button=>button.onclick=()=>{listPage+=Number(button.dataset.listPage);render(false);query<HTMLElement>('[data-list-title]').focus();});
   query<HTMLButtonElement>('[data-fit]').onclick=fit;
@@ -138,6 +158,23 @@ export async function openConnectionExplorer(env:Env,source='') {
   map.onpointerdown=event=>{if(event.button!==0)return;if((event.target as Element).closest('[data-node],[data-group-node]'))return;map.focus({preventScroll:true});map.setPointerCapture(event.pointerId);pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});};
   map.onpointermove=event=>{const old=pointers.get(event.pointerId);if(!old)return;const others=[...pointers.entries()].filter(([id])=>id!==event.pointerId);if(others.length){const other=others[0][1],before=Math.hypot(old.x-other.x,old.y-other.y),after=Math.hypot(event.clientX-other.x,event.clientY-other.y),rect=svg.getBoundingClientRect();if(before>0&&after>0)zoom(before/after,(event.clientX+other.x)/2-rect.left,(event.clientY+other.y)/2-rect.top);}else{view.x-=(event.clientX-old.x)*view.w/width;view.y-=(event.clientY-old.y)*view.h/height;updateView();}pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});};
   const end=(event:PointerEvent)=>{pointers.delete(event.pointerId);};map.onpointerup=end;map.onpointercancel=end;map.onlostpointercapture=end;
-  map.onkeydown=event=>{if(event.target!==map)return;const deltas:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(deltas[event.key]){event.preventDefault();view.x+=deltas[event.key][0]*view.w*.12;view.y+=deltas[event.key][1]*view.h*.12;updateView();}else if(['+','=','-','Home'].includes(event.key)){event.preventDefault();if(event.key==='Home')fit();else zoom(event.key==='-'?1.25:.8);}};
-  await fetchPage(true);if(active())filter.focus();
+  host.addEventListener('keydown',event=>{
+    if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
+    const target=event.target as Element,typing=!!target.closest('input,textarea,select,[contenteditable="true"]');
+    if(typing){if(target===filter&&event.key==='Escape'){event.preventDefault();focusMap();}else if(target===filter&&event.key==='Enter'){event.preventDefault();const value=filter.value.trim();clearTimeout(timer);void runSearch().then(()=>{if(active()&&filter.value.trim()===value&&document.activeElement===filter)focusMap();});}return;}
+    const bindings={left:'h',right:'l',up:'k',down:'j',search:'/',...env.keys?.()};
+    if(event.key==='/'||event.key===bindings.search){event.preventDefault();sequenceTime=0;filter.focus();filter.select();return;}
+    if(!map.contains(target))return;
+    const directions:Record<string,'left'|'right'|'up'|'down'>={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down'};
+    const direction=directions[event.key]||(['left','right','up','down'] as const).find(action=>bindings[action]===event.key);
+    if(direction){event.preventDefault();sequenceTime=0;if(event.shiftKey&&directions[event.key]){view.x+=(direction==='left'?-1:direction==='right'?1:0)*view.w*.12;view.y+=(direction==='up'?-1:direction==='down'?1:0)*view.h*.12;updateView();return;}
+      const next=connectionNeighbor([...points].map(([id,p])=>({id,...p})),focusedId,direction);focusMap(next||focusedId);return;}
+    if(event.key==='Enter'){event.preventDefault();if(!event.repeat)exploreFocused();return;}
+    if(event.key===' '){event.preventDefault();if(place.mode!=='overview')select(focusedId);return;}
+    if(event.key==='g'){event.preventDefault();if(!event.repeat){const now=Date.now();if(sequenceTime&&now-sequenceTime<900){const first=mapNodes()[0];if(first)focusMap(nodeId(first));sequenceTime=0;}else sequenceTime=now;}return;}
+    sequenceTime=0;
+    if(event.key==='G'||event.key==='Home'||event.key==='End'){event.preventDefault();const nodes=mapNodes(),node=event.key==='Home'?nodes[0]:nodes.at(-1);if(node)focusMap(nodeId(node));return;}
+    if(['+','=','-'].includes(event.key)){event.preventDefault();zoom(event.key==='-'?1.25:.8);}
+  });
+  await fetchPage(true);if(active()&&document.activeElement!==filter&&document.activeElement!==kind)focusMap(selected||focusedId);
 }

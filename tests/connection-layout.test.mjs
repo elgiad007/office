@@ -1,8 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {connectionLayout,connectionGroupLayout,connectionTitleLines,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from '../public/connection-layout.js';
+import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from '../public/connection-layout.js';
 const items=Array.from({length:1400},(_,i)=>({id:'n'+i,title:'Item '+i,kind:'tasks'}));
 const links=items.slice(1).map(item=>({a:'n0',b:item.id}));
+
+test('map movement follows spatial neighbors and stops at edges',()=>{
+ const grid=[{id:'a',x:0,y:0},{id:'b',x:320,y:0},{id:'c',x:0,y:124},{id:'d',x:320,y:124}];
+ assert.equal(connectionNeighbor(grid,'a','right'),'b');assert.equal(connectionNeighbor(grid,'a','down'),'c');
+ assert.equal(connectionNeighbor(grid,'d','left'),'c');assert.equal(connectionNeighbor(grid,'d','up'),'b');
+ assert.equal(connectionNeighbor(grid,'a','up'),undefined);assert.equal(connectionNeighbor(grid,'d','down'),undefined);
+ assert.equal(connectionNeighbor([],'missing','left'),undefined);
+});
 
 test('overview packs groups at full size whenever the viewport has room',()=>{
  for(const [count,width,height] of [[6,1028,680],[6,800,680],[4,350,540]]){

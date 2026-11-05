@@ -39,7 +39,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys() });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
-const connections = createConnections({ api, current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
+const connections = createConnections({ api, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
 class DraftCancelled extends Error {

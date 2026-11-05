@@ -1,5 +1,23 @@
 // Generated from frontend/connection-layout.ts by pnpm build. Do not edit.
 export const GRAPH_LIMIT = 160;
+export function connectionNeighbor(points, id, direction) {
+    const origin = points.find(point => point.id === id);
+    if (!origin)
+        return;
+    let best, score = Infinity;
+    for (const point of points) {
+        const dx = point.x - origin.x, dy = point.y - origin.y, horizontal = direction === 'left' || direction === 'right';
+        const forward = (horizontal ? dx : dy) * (direction === 'left' || direction === 'up' ? -1 : 1), across = Math.abs(horizontal ? dy : dx);
+        if (forward <= 0)
+            continue;
+        const distance = forward + across * 3;
+        if (distance < score) {
+            best = point.id;
+            score = distance;
+        }
+    }
+    return best;
+}
 export const GROUP_CARD = { width: 300, height: 104, gap: 20, padding: 16 };
 /** Choose the grid that needs the least scaling for the actual viewport. */
 export function connectionGroupLayout(ids, width, height) {

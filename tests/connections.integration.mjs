@@ -90,7 +90,7 @@ try{
    assert.equal(await page.locator('#detail').evaluate(panel=>panel.scrollHeight),contentHeight);
    const box=await page.locator('.connection-popover').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=viewport.width+1&&box.y>=0&&box.y+box.height<=viewport.height+1);
    assert.ok(await page.evaluate(({x,y,width,height})=>!!document.elementFromPoint(x+width/2,y+height/2)?.closest('.connection-popover'),box));
-   await page.keyboard.press('Escape');assert.equal(await count.evaluate(button=>button===document.activeElement),true);assert.equal(await count.getAttribute('aria-expanded'),'false');
+   await page.keyboard.press('Escape');assert.equal(await count.evaluate(button=>button===document.activeElement),true);await page.waitForFunction(()=>document.querySelector('.connection-count')?.getAttribute('aria-expanded')==='false');
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
    if(item.kind==='mail')await page.screenshot({path:`test-results/connections-header-mail-${viewport.width}.png`});
   }

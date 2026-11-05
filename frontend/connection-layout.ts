@@ -2,6 +2,16 @@ import type {ConnectionEdge,ConnectionItem} from './types.js';
 
 export const GRAPH_LIMIT=160;
 export interface GraphPoint {id:string;x:number;y:number}
+export function connectionNeighbor(points:GraphPoint[],id:string,direction:'left'|'right'|'up'|'down'):string|undefined {
+  const origin=points.find(point=>point.id===id);if(!origin)return;
+  let best:string|undefined,score=Infinity;
+  for(const point of points){const dx=point.x-origin.x,dy=point.y-origin.y,horizontal=direction==='left'||direction==='right';
+    const forward=(horizontal?dx:dy)*(direction==='left'||direction==='up'?-1:1),across=Math.abs(horizontal?dy:dx);
+    if(forward<=0)continue;const distance=forward+across*3;
+    if(distance<score){best=point.id;score=distance;}
+  }
+  return best;
+}
 export const GROUP_CARD={width:300,height:104,gap:20,padding:16};
 /** Choose the grid that needs the least scaling for the actual viewport. */
 export function connectionGroupLayout(ids:string[],width:number,height:number):GraphPoint[] {

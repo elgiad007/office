@@ -23,7 +23,7 @@ const server=createServer(async(req,res)=>{
  if(url.pathname==='/'){
   res.setHeader('content-type','text/html');res.end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/theme.css"></head><body><button id="launch">Connections</button><button id="replace">Replace dialog</button><dialog id="dialog" aria-labelledby="dialog-title"></dialog><script type="module">
    import {openConnectionExplorer} from '/connection-explorer.js';const dialog=document.querySelector('dialog');
-   const env={dialog,api:async route=>{const r=await fetch('/api.php?r='+route);return r.json();},modal:(title,body)=>{dialog.innerHTML='<div class="dialog-head"><h2 id="dialog-title">'+title+'</h2><button data-close>Close</button></div>'+body;dialog.querySelector('[data-close]').onclick=()=>dialog.close();if(!dialog.open)dialog.showModal();},open:async id=>{window.opened=id;},notice:message=>{throw Error(message);}};
+   const env={dialog,keys:()=>window.testKeys||{},api:async route=>{const r=await fetch('/api.php?r='+route);return r.json();},modal:(title,body)=>{dialog.innerHTML='<div class="dialog-head"><h2 id="dialog-title">'+title+'</h2><button data-close>Close</button></div>'+body;dialog.querySelector('[data-close]').onclick=()=>dialog.close();if(!dialog.open)dialog.showModal();},open:async id=>{window.opened=id;},notice:message=>{throw Error(message);}};
    document.querySelector('#launch').onclick=()=>openConnectionExplorer(env);
    window.replace=()=>{dialog.innerHTML='<button>Other dialog</button>';};
   </script></body></html>`);return;
@@ -39,6 +39,12 @@ try{
  page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',error=>errors.push(error.message));
  await page.goto(url);await page.locator('#launch').click();await page.locator('[data-group-node]').first().waitFor();
  assert.equal(await page.locator('[data-group-node]').count(),6);assert.equal(await page.locator('[data-zoom-level]').textContent(),'100%');
+ const focusedId=()=>page.evaluate(()=>document.activeElement?.getAttribute('data-group-node')||document.activeElement?.getAttribute('data-node'));
+ assert.equal(await focusedId(),'n0');await page.keyboard.press('j');assert.equal(await focusedId(),'group2');await page.keyboard.press('l');assert.equal(await focusedId(),'group3');await page.keyboard.press('k');assert.equal(await focusedId(),'group1');await page.keyboard.press('h');assert.equal(await focusedId(),'n0');
+ await page.evaluate(()=>window.testKeys={down:'J',right:'L'});await page.keyboard.press('J');assert.equal(await focusedId(),'group2');await page.keyboard.press('L');assert.equal(await focusedId(),'group3');await page.keyboard.press('ArrowUp');assert.equal(await focusedId(),'group1');
+ await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await focusedId(),'n0');await page.keyboard.press('G');assert.equal(await focusedId(),'group5');
+ await page.keyboard.press('/');assert.equal(await page.locator('[data-connection-filter]').evaluate(node=>node===document.activeElement),true);await page.keyboard.press('Escape');assert.equal(await focusedId(),'group5');assert.equal(await page.locator('dialog').isVisible(),true);
+ await page.keyboard.press('Home');assert.equal(await focusedId(),'n0');await page.evaluate(()=>window.testKeys={});
  const checkCards=async()=>assert.ok(await page.locator('svg').evaluate(svg=>{const map=svg.getBoundingClientRect(),cards=[...svg.querySelectorAll('[data-group-node] rect')].map(node=>node.getBoundingClientRect());return cards.every(card=>card.left>=map.left&&card.right<=map.right&&card.top>=map.top&&card.bottom<=map.bottom)&&cards.every((card,i)=>cards.every((other,j)=>i===j||card.right<=other.left||card.left>=other.right||card.bottom<=other.top||card.top>=other.bottom));}));
  await checkCards();await page.screenshot({path:'test-results/connection-overview-readable.png'});
  assert.ok(await page.locator('[data-group-node]').evaluateAll(nodes=>nodes.every(node=>{const rect=node.querySelector('rect').getBBox(),title=node.querySelector('.connection-group-title').getBBox();return title.x>=rect.x&&title.x+title.width<=rect.x+rect.width;})));
@@ -49,17 +55,20 @@ try{
  await page.screenshot({path:'test-results/connection-explorer-overview.png'});
  await page.locator('[data-group-node]').press('Enter');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
  assert.equal(await page.locator('[data-node]').count(),101);assert.equal(await page.locator('.connection-list-row').count(),50);
+ assert.equal(await focusedId(),'n0');await page.keyboard.press('l');assert.equal(await focusedId(),'n1');assert.equal(await page.locator('[data-node].selected').getAttribute('data-node'),'n1');
+ await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');await page.getByRole('button',{name:'Back in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();assert.equal(await focusedId(),'n1');
  await page.locator('[data-select="n1"]').first().click();await page.locator('[data-selection] h3').filter({hasText:'Project item 0001'}).waitFor();
  assert.equal(await page.locator('line.highlighted').count(),1);assert.ok(await page.locator('[data-node].dimmed').count()>0);
  const initial=await page.locator('svg').getAttribute('viewBox');await page.getByRole('button',{name:'Zoom in',exact:true}).click();assert.notEqual(await page.locator('svg').getAttribute('viewBox'),initial);
  await page.getByRole('button',{name:'Center selection',exact:true}).click();
- await page.locator('[data-connection-graph]').focus();const before=await page.locator('svg').getAttribute('viewBox');await page.keyboard.press('ArrowRight');assert.notEqual(await page.locator('svg').getAttribute('viewBox'),before);
+ await page.locator('[data-connection-graph]').focus();const before=await page.locator('svg').getAttribute('viewBox');await page.keyboard.press('Shift+ArrowRight');assert.notEqual(await page.locator('svg').getAttribute('viewBox'),before);
  const graph=await page.locator('[data-connection-graph]').boundingBox();await page.mouse.move(graph.x+10,graph.y+10);await page.mouse.down();await page.mouse.move(graph.x+100,graph.y+70);await page.mouse.up();assert.notEqual(await page.locator('svg').getAttribute('viewBox'),before);
  await page.locator('[data-connection-more]').click();await page.locator('[data-connection-status]').filter({hasText:'200 of 1200'}).waitFor();assert.equal(await page.locator('[data-node]').count(),160);assert.equal(await page.locator('.connection-list-row').count(),50);
  await page.locator('[data-selection] [data-explore]').click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();
  assert.ok(requests.some(query=>query.includes('id=n1')));await page.getByRole('button',{name:'Back in connections',exact:true}).click();await page.locator('[data-connection-status]').filter({hasText:'200 of 1200'}).waitFor();assert.equal(await page.locator('[data-node].selected').getAttribute('data-node'),'n1');
  await page.locator('[data-connection-filter]').fill('Project item 1199');await page.locator('[data-list-title]').filter({hasText:'Matching items'}).waitFor();await page.locator('[data-select="n1199"]').waitFor();
- await page.locator('[data-explore="n1199"]').click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.ok(requests.some(query=>query.includes('id=n1199')));
+ await page.locator('[data-connection-filter]').focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>document.activeElement?.getAttribute('data-node')==='n1199');
+ await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.ok(requests.some(query=>query.includes('id=n1199')));
  await page.locator('[data-connection-filter]').fill('Project item 0001');await page.waitForTimeout(260);await page.locator('[data-overview]').click();await page.locator('[data-group-node]').waitFor();await page.waitForTimeout(650);assert.equal(await page.locator('[data-group-node]').count(),1);
  await page.locator('[data-connection-kind]').selectOption('tasks');await page.locator('[data-list-title]').filter({hasText:'Matching items'}).waitFor();assert.equal(await page.locator('.connection-list-row').count(),50);assert.equal(await page.locator('[data-node][data-kind="documents"]').count(),0);
  await page.locator('[data-overview]').click();await page.locator('[data-group-node]').click();await page.locator('[data-node]').first().waitFor();

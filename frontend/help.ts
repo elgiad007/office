@@ -27,6 +27,11 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('Arrow keys','Move between cells','Sheets, focused cell','30 rows × 12 columns; item shortcuts still navigate records.');
   add(k.edit+' / Enter','Edit selected cell','Sheets, normal mode');add('Tab / Shift+Tab','Next / previous cell','Sheets, focused cell');
   add('/','Focus header search','Message headers, outside search field');add('n / p','Next / previous header match','Message headers, outside search field');add('Enter / Shift+Enter','Next / previous header match','Message headers search field');
+  add(`${k.left} / ${k.down} / ${k.up} / ${k.right}; Arrow keys`,'Navigate map cards','Connections map','Uses current movement bindings. Focused items are selected and kept in view.');
+  add('Enter / Space','Explore focused group or item / select item','Connections map','Enter fetches the focused item’s neighborhood; Open item in details opens its content.');
+  add(k.search==='/'?'/':`/ / ${k.search}`,'Search connected items','Connections window','Enter or Escape in search returns focus to the map. Typing fields retain their normal keys.');
+  add('gg / G; Home / End','First / last map card','Connections map');
+  add('Shift+Arrow keys; + / -','Pan / zoom the map','Connections map','Fit view remains available in the toolbar.');
   add('ArrowDown / ArrowUp','Choose matching folder','Quick Move search');add('Enter','Move to chosen folder','Quick Move');add('Escape','Cancel Quick Move','Quick Move','Cannot dismiss while a move is running.');
   add('Shift+F10 / Menu key','Open item action menu','List or nonediting content');add('ArrowDown / ArrowUp / Home / End','Focus next / previous / first / last action','Item action menu');add('Enter / Space','Run focused action','Item action menu');add('Escape / Tab','Close menu and return focus','Item action menu');
   add('Escape','Close mail disclosure, actions menu or narrow-screen folders','Mail','Returns focus to the relevant toggle.');
