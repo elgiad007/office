@@ -131,9 +131,10 @@ export interface ApiResponses {
   import: { count: number }; 'import-items': { count: number }; restore: { count: number };
   backup: unknown;
 }
-export interface ConnectionItem {id:string;kind:string;title:string;excerpt:string;meta:Record<string,string>}
+export interface ConnectionItem {id:string;kind:string;title:string;excerpt:string;meta:Record<string,string>;degree?:number}
 export interface ConnectionEdge {a:string;b:string;created:string}
-export interface ConnectionList {links:ConnectionEdge[];items:ConnectionItem[];more:boolean}
+export interface ConnectionGroup {id:string;title:string;items:number;links:number}
+export interface ConnectionList {links:ConnectionEdge[];items:ConnectionItem[];more:boolean;total?:number;groups?:ConnectionGroup[];itemTotal?:number;groupTotal?:number}
 export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${string}` | `history&${string}` | `connection-search&${string}` | `connections&${string}`;
 export type ApiResponse<R extends ApiRoute> = R extends keyof ApiResponses ? ApiResponses[R]
   : R extends `connection-search&${string}` ? {items:ConnectionItem[]}

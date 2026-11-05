@@ -133,7 +133,9 @@ Select an item and use command mode:
 - As you type, use Up/Down to choose a match, Tab to fill its exact ID, and Enter to create the connection. Escape dismisses suggestions while retaining command mode and the typed text. Escape with suggestions closed exits command mode. Ambiguous searches require selecting an exact item.
 - `:new linked mail`, `:new linked event`, or any other creation type opens a linked draft. Its first save creates the item and connection together. Discarding leaves no connection. An unsaved source must first be saved through the normal Save/Discard/Cancel flow; discarding the source cancels linked creation.
 - `:unlink [type] <name or ID>` searches only existing connections and removes the chosen connection. It does not delete either item.
-- `:links` opens the current item's connection list and graph. `:links all`, or **Connections** in the sidebar, opens the workspace view. Search filters by either endpoint's title. Graph nodes can be focused with a click or Enter/Space; open an item from the list. Lists load 100 edges per page, with **Load more connections**; the graph shows up to 80 items from the loaded connections.
+- `:links` opens a full-screen explorer centered on the current item's direct connections. `:links all`, or **Connections** in the sidebar, starts with connected groups and complete workspace counts. Group names use a member's title; groups represent connected components, not inferred topics. Select a group to browse its connections.
+- Drag the map to pan; wheel or pinch to zoom. Visible controls provide zoom, **Fit view**, **Center selection**, and **Reset view** (reloads the current location). With the map focused, arrow keys pan, `+`/`-` zoom, and Home fits the map. Tab between nodes and Enter/Space selects them. Selection highlights direct links and shows the full title, type, total connection count, and **Open item** / **Explore connections** actions in the details panel. Explore fetches the item's neighborhood from the server; Back/Forward retrace exploration. Details can be hidden for more map space.
+- **Find connected items** searches connected item titles or exact IDs across the whole workspace, independently of loaded pages. Item-type filters apply before search pagination. The overview loads 60 groups at a time, search loads 50 items, and neighborhoods load 100 connections. The list displays 50 rows per page. The map displays at most 160 loaded items and 500 lines, prioritizing selection and its neighbors; zooming out hides unselected labels. Displayed, loaded, and total counts remain explicit. Use the list, load more, or explore a smaller neighborhood to reach items outside the visible map. Graph responses omit item bodies; overview grouping uses identities and titles only.
 
 Every item's header shows a compact **Connections · count** label and **+ Link** action. Select the count to open a popover with linked items, unlink actions, and **View map**. The list floats over the content instead of occupying space below it. Escape closes the popover and returns focus to the count; arrow keys move through its actions. Unsaved drafts show disabled controls until saved. Opening a connection switches apps and reveals the target outside the current search, mail folder, or hidden calendar. Mail searches cover locally cached descriptions, not bodies that have never downloaded. Existing Markdown `[[wiki links]]` and their title-based backlinks continue to work separately.
 
@@ -169,6 +171,7 @@ Additional checks:
 ```sh
 php tests/backend.php
 php tests/connections.php
+php tests/connection-explorer.php
 php tests/attachments.php
 php tests/mail-sync.php
 php tests/mail-lock.php

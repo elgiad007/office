@@ -53,7 +53,8 @@ function connection_summary(array $row): array {
     $meta=json_decode($row['meta'],true,64,JSON_THROW_ON_ERROR);
     $text=trim(preg_replace('/\s+/u',' ',html_entity_decode(strip_tags($row['body']),ENT_QUOTES|ENT_HTML5,'UTF-8'))??'');
     return ['id'=>$row['id'],'kind'=>$row['kind'],'title'=>$row['title'],'excerpt'=>function_exists('mb_substr')?mb_substr($text,0,180):substr($text,0,180),
-        'meta'=>array_intersect_key($meta,array_flip(['from','to','start','location','due','email','company','phone','folder','account']))];
+        'meta'=>array_intersect_key($meta,array_flip(['from','to','start','location','due','email','company','phone','folder','account'])),
+        ...(isset($row['degree'])?['degree'=>(int)$row['degree']]:[])];
 }
 function connection_search(string $query,string $kind,string $exclude,int $limit=20): array {
     if($kind!==''&&!in_array($kind,KINDS,true))fail('Unknown item type.');
@@ -65,11 +66,49 @@ function connection_search(string $query,string $kind,string $exclude,int $limit
     foreach($args as $i=>$arg)$q->bindValue($i+1,$arg);$q->bindValue(count($args)+1,$limit,PDO::PARAM_INT);$q->execute();
     return array_map('connection_summary',$q->fetchAll());
 }
-function connection_list(string $id='',string $query='',int $offset=0): array {
+function connection_list(string $id='',string $query='',int $offset=0,string $kind='',string $group='',bool $lightweight=false): array {
     if($id!=='')get_record($id);
-    $q=db()->prepare("SELECT c.a,c.b,c.created FROM connections c JOIN records x ON x.id=c.a JOIN records y ON y.id=c.b WHERE (?='' OR c.a=? OR c.b=?) AND (?='' OR instr(lower(x.title),lower(?))>0 OR instr(lower(y.title),lower(?))>0) ORDER BY c.created DESC,c.a,c.b LIMIT 101 OFFSET ?");
-    foreach([$id,$id,$id,$query,$query,$query] as $i=>$arg)$q->bindValue($i+1,$arg);$q->bindValue(7,max(0,$offset),PDO::PARAM_INT);$q->execute();$links=$q->fetchAll();$more=count($links)>100;$links=array_slice($links,0,100);
-    $items=[];$record=db()->prepare('SELECT * FROM records WHERE id=?');
+    if($group!=='')get_record($group);
+    if($kind!==''&&!in_array($kind,KINDS,true))fail('Unknown item type.');
+    if(strlen($query)>500)fail('Search is too long.');
+    // UNION deduplicates visited records, including cycles, before paging edges.
+    $prefix=$group!==''?'WITH RECURSIVE members(id) AS (SELECT ? UNION SELECT CASE WHEN c.a=m.id THEN c.b ELSE c.a END FROM connections c JOIN members m ON c.a=m.id OR c.b=m.id) ':'';
+    $where="FROM connections c JOIN records x ON x.id=c.a JOIN records y ON y.id=c.b WHERE (?='' OR c.a=? OR c.b=?) AND (?='' OR instr(lower(x.title),lower(?))>0 OR instr(lower(y.title),lower(?))>0) AND (?='' OR x.kind=? OR y.kind=?)".($group!==''?' AND c.a IN (SELECT id FROM members)':'');
+    $args=array_merge($group!==''?[$group]:[],[$id,$id,$id,$query,$query,$query,$kind,$kind,$kind]);
+    $count=db()->prepare($prefix.'SELECT COUNT(*) '.$where);$count->execute($args);$total=(int)$count->fetchColumn();
+    $q=db()->prepare($prefix.'SELECT c.a,c.b,c.created '.$where.' ORDER BY c.created DESC,c.a,c.b LIMIT 101 OFFSET ?');
+    foreach($args as $i=>$arg)$q->bindValue($i+1,$arg);$q->bindValue(count($args)+1,max(0,$offset),PDO::PARAM_INT);$q->execute();$links=$q->fetchAll();$more=count($links)>100;$links=array_slice($links,0,100);
+    $fields=$lightweight?"id,kind,title,'' AS body,meta":'*';
+    $items=[];$record=db()->prepare("SELECT $fields, (SELECT COUNT(*) FROM connections WHERE a=records.id OR b=records.id) AS degree FROM records WHERE id=?");
     foreach($links as $link)foreach([$link['a'],$link['b']] as $key)if(!isset($items[$key])){$record->execute([$key]);$items[$key]=connection_summary($record->fetch());}
-    return ['links'=>$links,'items'=>array_values($items),'more'=>$more];
+    // Include the center even when an item has no connections or filters exclude every edge.
+    $center=$id!==''?$id:$group;
+    if($center!==''&&!isset($items[$center])){$record->execute([$center]);$items[$center]=connection_summary($record->fetch());}
+    return ['links'=>$links,'items'=>array_values($items),'more'=>$more,'total'=>$total];
+}
+
+/** Connected components use only identity and titles; message bodies never enter the overview. */
+function connection_overview(int $offset=0): array {
+    $edges=db()->query('SELECT a,b FROM connections')->fetchAll();$parents=[];$sizes=[];
+    $find=function(string $id)use(&$parents):string{ $root=$id;while($parents[$root]!==$root)$root=$parents[$root];while($parents[$id]!==$id){$next=$parents[$id];$parents[$id]=$root;$id=$next;}return $root;};
+    foreach($edges as $edge){foreach([$edge['a'],$edge['b']] as $id)if(!isset($parents[$id])){$parents[$id]=$id;$sizes[$id]=1;}
+        $a=$find($edge['a']);$b=$find($edge['b']);if($a!==$b){if($sizes[$a]<$sizes[$b])[$a,$b]=[$b,$a];$parents[$b]=$a;$sizes[$a]+=$sizes[$b];}}
+    $groups=[];
+    foreach($parents as $id=>$_){$root=$find($id);if(!isset($groups[$root]))$groups[$root]=['id'=>$root,'title'=>'','items'=>0,'links'=>0];$groups[$root]['items']++;}
+    foreach($edges as $edge)$groups[$find($edge['a'])]['links']++;
+    $titles=db()->query('SELECT id,title FROM records WHERE EXISTS (SELECT 1 FROM connections WHERE a=records.id OR b=records.id) ORDER BY title COLLATE NOCASE,id');
+    foreach($titles as $row){$root=$find($row['id']);if($groups[$root]['title']==='')$groups[$root]['title']=$row['title'];}
+    $groups=array_values($groups);usort($groups,fn($a,$b)=>($b['items']<=>$a['items'])?:strcmp($a['id'],$b['id']));
+    return ['links'=>[],'items'=>[],'groups'=>array_slice($groups,max(0,$offset),60),'more'=>max(0,$offset)+60<count($groups),'total'=>count($edges),'itemTotal'=>count($parents),'groupTotal'=>count($groups)];
+}
+
+/** Global connected-item search is independent of the currently loaded map. */
+function connection_explorer_search(string $query='',string $kind='',int $offset=0): array {
+    if($kind!==''&&!in_array($kind,KINDS,true))fail('Unknown item type.');
+    if(strlen($query)>500)fail('Search is too long.');
+    $where="FROM records WHERE EXISTS (SELECT 1 FROM connections WHERE a=records.id OR b=records.id) AND (?='' OR instr(lower(title),lower(?))>0 OR id=?) AND (?='' OR kind=?)";
+    $args=[$query,$query,$query,$kind,$kind];$count=db()->prepare('SELECT COUNT(*) '.$where);$count->execute($args);$total=(int)$count->fetchColumn();
+    $q=db()->prepare("SELECT id,kind,title,'' AS body,meta,(SELECT COUNT(*) FROM connections WHERE a=records.id OR b=records.id) AS degree ".$where.' ORDER BY title COLLATE NOCASE,id LIMIT 51 OFFSET ?');
+    foreach($args as $i=>$arg)$q->bindValue($i+1,$arg);$q->bindValue(6,max(0,$offset),PDO::PARAM_INT);$q->execute();$rows=$q->fetchAll();
+    return ['links'=>[],'items'=>array_map('connection_summary',array_slice($rows,0,50)),'more'=>count($rows)>50,'total'=>$total];
 }

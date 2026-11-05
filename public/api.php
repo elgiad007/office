@@ -50,7 +50,13 @@ try {
     }
     owner();
     if($route==='connection-search' && $method==='GET') { session_write_close();json_response(['items'=>connection_search((string)($_GET['q']??''),(string)($_GET['kind']??''),(string)($_GET['exclude']??''))]); }
-    if($route==='connections' && $method==='GET') { session_write_close();json_response(connection_list((string)($_GET['id']??''),(string)($_GET['q']??''),(int)($_GET['offset']??0))); }
+    if($route==='connections' && $method==='GET') {
+        session_write_close();
+        $mode=(string)($_GET['mode']??'');$offset=(int)($_GET['offset']??0);
+        if($mode==='overview')json_response(connection_overview($offset));
+        if($mode==='items')json_response(connection_explorer_search((string)($_GET['q']??''),(string)($_GET['kind']??''),$offset));
+        json_response(connection_list((string)($_GET['id']??''),(string)($_GET['q']??''),$offset,(string)($_GET['kind']??''),(string)($_GET['group']??''),$mode==='graph'));
+    }
     if($route==='connection' && $method==='POST') {
         $a=(string)($input['id']??'');$b=(string)($input['target']??'');
         if(($input['action']??'add')==='add')connection_add($a,$b);

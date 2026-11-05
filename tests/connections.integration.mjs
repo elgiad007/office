@@ -58,9 +58,10 @@ try{
  await openConnections();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor({state:'attached'});
  await run(':new linked event');await page.waitForURL('**/#calendar');await page.getByRole('button',{name:'Discard Draft',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Discard Draft',exact:true}).click();
  assert.equal((await api('connections&id='+source.id)).links.length,2);
- await run(':links all');await page.locator('.connections-view svg').waitFor();assert.equal(await page.locator('.connections-view [data-open]').count(),4);
+ await run(':links all');await page.locator('[data-group-node]').waitFor();assert.equal(await page.locator('[data-group-node]').count(),1);
+ await page.locator('[data-group-node]').press('Enter');await page.locator('[data-connection-status]').filter({hasText:'2 of 2 connections loaded'}).waitFor();assert.equal(await page.locator('.connection-list-row').count(),2);
  assert.ok((await page.locator('.connections-view svg').boundingBox()).height>200);assert.equal(await page.locator('[data-connection-more]').isVisible(),false);
- await page.locator('[data-node]').first().focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'Show loaded connections'}).click();
+ await page.locator('[data-node]').first().focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'Reset view'}).click();await page.locator('.connection-list-row').first().waitFor();
  await page.screenshot({path:'test-results/connections-graph.png'});await page.keyboard.press('Escape');
  const backup=await api('backup');assert.equal(backup.connections.length,2);
  const before=(await api('records&kind=tasks')).records.length;
@@ -94,7 +95,7 @@ try{
    if(item.kind==='mail')await page.screenshot({path:`test-results/connections-header-mail-${viewport.width}.png`});
   }
  }
- await openConnections();await page.locator('[data-connections-view]').click();await page.locator('.connections-view [data-open]').first().waitFor();assert.equal(await page.locator('.connections-view [data-open]').count(),2);await page.keyboard.press('Escape');
+ await openConnections();await page.locator('[data-connections-view]').click();await page.locator('.connections-view [data-open]').first().waitFor();assert.equal(await page.locator('.connection-list-row').count(),1);await page.keyboard.press('Escape');
  await openConnections();await page.locator('[data-connection-remove]').first().click();await page.locator('#notice').filter({hasText:'Connection removed.'}).waitFor();await page.locator('.connection-count').filter({hasText:'Connections · 0'}).waitFor();
  await page.locator('#main').click({position:{x:5,y:5}});await page.locator('.connection-count[aria-expanded="false"]').waitFor();
  await page.locator('[data-connections-add]').click();await page.locator('#command-input').waitFor();assert.equal(await page.locator('#command-input').inputValue(),':link ');await page.keyboard.press('Escape');await page.keyboard.press('Escape');
@@ -111,7 +112,7 @@ try{
  await page.locator('#cancel').click();assert.equal((await api('connections&id='+shared.id)).links.length,2);
  await remove();await page.locator('[data-hub-name]').fill('Preserved project context');
  await page.getByRole('button',{name:'View connections',exact:true}).click();await page.locator('.connections-view [data-open]').first().waitFor();
- assert.equal(await page.locator('.connections-view [data-open]').count(),4);
+ assert.equal(await page.locator('.connection-list-row').count(),2);
  await page.getByRole('button',{name:'Back to deletion',exact:true}).click();assert.equal(await page.locator('[data-hub-name]').inputValue(),'Preserved project context');
  await page.locator('#confirm').click();await page.locator('#notice').filter({hasText:'Item deleted.'}).waitFor();
  const hubs=(await api('records&kind=documents')).records.filter(row=>row.title==='Preserved project context');assert.equal(hubs.length,1);
