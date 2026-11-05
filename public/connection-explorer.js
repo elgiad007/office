@@ -1,7 +1,7 @@
 // Generated from frontend/connection-explorer.ts by pnpm build. Do not edit.
 import { escapeHtml as e } from './formats.js';
 import { itemTypes } from './item-types.js';
-import { connectionLayout, visibleConnectionItems, GRAPH_LIMIT } from './connection-layout.js';
+import { connectionLayout, connectionGroupLayout, connectionTitleLines, visibleConnectionItems, GRAPH_LIMIT, GROUP_CARD } from './connection-layout.js';
 const typeLabel = (kind) => itemTypes[kind]?.label || kind;
 const symbols = { mail: '✉', calendar: '▦', tasks: '✓', contacts: '♙', documents: '▤', wiki: '◇', sheets: '▦' };
 export async function openConnectionExplorer(env, source = '') {
@@ -24,6 +24,9 @@ export async function openConnectionExplorer(env, source = '') {
     const filter = query('[data-connection-filter]'), kind = query('[data-connection-kind]');
     const more = query('[data-connection-more]'), svg = query('svg'), map = query('[data-connection-graph]');
     const status = query('[data-connection-status]');
+    const textMeasure = document.createElement('canvas').getContext('2d');
+    const titleLines = (title, maxWidth) => { if (textMeasure)
+        textMeasure.font = `600 14px ${getComputedStyle(svg).fontFamily}`; return connectionTitleLines(title, 40, textMeasure ? text => textMeasure.measureText(text).width : undefined, maxWidth); };
     let place = { mode: source ? 'graph' : 'overview', id: source, group: '', q: '', kind: '' };
     let data = { links: [], items: [], more: false }, selected = source, request = 0, busy = false, listPage = 0, timer;
     let points = new Map(), width = 900, height = 600, view = { x: -100, y: -100, w: 900, h: 600 }, fitWidth = 900;
@@ -39,7 +42,7 @@ export async function openConnectionExplorer(env, source = '') {
         cleanup(); });
     observer.observe(dialog, { childList: true });
     const size = () => { const rect = svg.getBoundingClientRect(); width = Math.max(rect.width, 1); height = Math.max(rect.height, 1); };
-    const updateView = () => { svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`); const scale = width / view.w; svg.classList.toggle('connection-wide', scale < .6); query('[data-zoom-level]').textContent = `${Math.round(scale * 100)}%`; };
+    const updateView = () => { svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`); query('[data-zoom-level]').textContent = `${Math.round(width / view.w * 100)}%`; };
     function fit() {
         size();
         const values = [...points.values()];
@@ -49,8 +52,9 @@ export async function openConnectionExplorer(env, source = '') {
             updateView();
             return;
         }
-        const xs = values.map(p => p.x), ys = values.map(p => p.y), x = Math.min(...xs) - 140, y = Math.min(...ys) - 45, w = Math.max(...xs) - x + 140, h = Math.max(...ys) - y + 55;
-        const unit = Math.max(w / width, h / height, .65);
+        const overview = place.mode === 'overview', padX = overview ? GROUP_CARD.width / 2 + GROUP_CARD.padding : 140, padY = overview ? GROUP_CARD.height / 2 + GROUP_CARD.padding : 48;
+        const xs = values.map(p => p.x), ys = values.map(p => p.y), x = Math.min(...xs) - padX, y = Math.min(...ys) - padY, w = Math.max(...xs) - x + padX, h = Math.max(...ys) - y + padY;
+        const unit = Math.max(w / width, h / height, overview ? 1 : .65);
         view = { x: x + w / 2 - width * unit / 2, y: y + h / 2 - height * unit / 2, w: width * unit, h: height * unit };
         fitWidth = view.w;
         updateView();
@@ -61,7 +65,16 @@ export async function openConnectionExplorer(env, source = '') {
         view = { x: p.x - width / 2, y: p.y - height / 2, w: width, h: height };
         updateView();
     } }
-    const resize = new ResizeObserver(() => { const oldW = width, oldH = height; size(); view.w *= width / oldW; view.h *= height / oldH; updateView(); });
+    const resize = new ResizeObserver(() => { if (!active())
+        return; const oldW = width, oldH = height; size(); if (place.mode === 'overview') {
+        renderMap();
+        fit();
+    }
+    else {
+        view.w *= width / oldW;
+        view.h *= height / oldH;
+        updateView();
+    } });
     resize.observe(map);
     const panel = query('#connection-panel');
     const itemButtons = (item) => `<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
@@ -100,9 +113,10 @@ export async function openConnectionExplorer(env, source = '') {
     function renderMap() {
         if (place.mode === 'overview') {
             const groups = (data.groups || []).slice(0, GRAPH_LIMIT);
-            points = new Map(groups.map((group, i) => [group.id, { x: (i % 5) * 290, y: Math.floor(i / 5) * 140 }]));
+            size();
+            points = new Map(connectionGroupLayout(groups.map(group => group.id), width, height).map(p => [p.id, p]));
             query('[data-edges]').innerHTML = '';
-            query('[data-nodes]').innerHTML = groups.map(group => { const p = points.get(group.id); return `<g role="button" tabindex="0" data-group-node="${e(group.id)}" aria-label="Explore group ${e(group.title)}, ${group.items} items, ${group.links} connections" transform="translate(${p.x} ${p.y})"><rect x="-125" y="-38" width="250" height="92" rx="14"/><text text-anchor="middle">${e(group.title.slice(0, 28))}</text><text y="25" text-anchor="middle">${group.items} items · ${group.links} connections</text><title>${e(group.title)}</title></g>`; }).join('');
+            query('[data-nodes]').innerHTML = groups.map(group => { const p = points.get(group.id), lines = titleLines(group.title, 268); return `<g role="button" tabindex="0" data-group-node="${e(group.id)}" aria-label="Explore group ${e(group.title)}, ${group.items} items, ${group.links} connections" transform="translate(${p.x} ${p.y})"><rect x="-150" y="-52" width="300" height="104" rx="14"/><text class="connection-group-title" text-anchor="middle">${lines.map((line, i) => `<tspan x="0" y="${-19 + i * 19}">${e(line)}</tspan>`).join('')}</text><text class="connection-group-count" y="31" text-anchor="middle">${group.items} items · ${group.links} connections</text><title>${e(group.title)}</title></g>`; }).join('');
             svg.querySelectorAll('[data-group-node]').forEach(node => { const action = () => void navigate({ mode: 'graph', id: '', group: node.dataset.groupNode, q: '', kind: '' }); node.onclick = action; node.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 action();
@@ -116,7 +130,7 @@ export async function openConnectionExplorer(env, source = '') {
             const related = eligible.filter(link => link.a === selected || link.b === selected), others = eligible.filter(link => link.a !== selected && link.b !== selected);
             const edges = [...related, ...others].slice(0, 500);
             query('[data-edges]').innerHTML = edges.map(link => { const a = points.get(link.a), b = points.get(link.b); return `<line data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`; }).join('');
-            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-24" width="240" height="48" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind] || '●'}</text><text class="connection-node-title" x="-81" y="-2">${e(item.title.slice(0, 24))}${item.title.length > 24 ? '…' : ''}</text><text class="connection-node-subtitle" x="-81" y="15">${e(typeLabel(item.kind))} · ${item.degree ?? '—'} links</text><title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
+            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id), lines = titleLines(item.title, 185); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind] || '●'}</text><text class="connection-node-title">${lines.map((line, i) => `<tspan x="-81" y="${-12 + i * 17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(typeLabel(item.kind))} · ${item.degree ?? '—'} links</text><title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
             svg.querySelectorAll('[data-node]').forEach(node => { node.onclick = () => select(node.dataset.node); node.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 select(node.dataset.node);
@@ -170,7 +184,7 @@ export async function openConnectionExplorer(env, source = '') {
                 return;
             listPage = reset ? 0 : Math.floor(offset / 50);
             data = reset ? result : { ...result, links: [...new Map([...data.links, ...result.links].map(link => [link.a + '|' + link.b, link])).values()], items: [...new Map([...data.items, ...result.items].map(item => [item.id, item])).values()], groups: [...(data.groups || []), ...(result.groups || [])] };
-            render(reset);
+            render(reset || place.mode === 'overview');
         }
         catch (error) {
             if (version === request && active()) {

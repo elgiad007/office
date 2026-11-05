@@ -1,5 +1,46 @@
 // Generated from frontend/connection-layout.ts by pnpm build. Do not edit.
 export const GRAPH_LIMIT = 160;
+export const GROUP_CARD = { width: 300, height: 104, gap: 20, padding: 16 };
+/** Choose the grid that needs the least scaling for the actual viewport. */
+export function connectionGroupLayout(ids, width, height) {
+    if (!ids.length)
+        return [];
+    const { width: w, height: h, gap, padding } = GROUP_CARD;
+    let columns = 1, best = Infinity;
+    for (let count = 1; count <= ids.length; count++) {
+        const rows = Math.ceil(ids.length / count), scale = Math.max((count * (w + gap) - gap + padding * 2) / Math.max(1, width), (rows * (h + gap) - gap + padding * 2) / Math.max(1, height));
+        if (scale < best) {
+            best = scale;
+            columns = count;
+        }
+    }
+    return ids.map((id, i) => ({ id, x: (i % columns) * (w + gap), y: Math.floor(i / columns) * (h + gap) }));
+}
+/** Wrap titles without cutting surrogate pairs or letting long words escape cards. */
+export function connectionTitleLines(title, limit, measure, maxWidth = Infinity) {
+    let remaining = Array.from(title.trim().replace(/\s+/g, ' '));
+    const lines = [];
+    const fits = (chars) => chars.length <= limit && (!measure || measure(chars.join('')) <= maxWidth);
+    if (!fits(remaining)) {
+        let cut = Math.min(limit, remaining.length);
+        while (cut > 1 && !fits(remaining.slice(0, cut)))
+            cut--;
+        const space = remaining.slice(0, cut + 1).lastIndexOf(' ');
+        if (space > 0)
+            cut = space;
+        lines.push(remaining.slice(0, cut).join(''));
+        remaining = Array.from(remaining.slice(cut).join('').trimStart());
+    }
+    if (!fits(remaining)) {
+        let cut = Math.min(limit - 1, remaining.length);
+        while (cut > 0 && !fits([...remaining.slice(0, cut), '…']))
+            cut--;
+        lines.push(remaining.slice(0, cut).join('') + '…');
+    }
+    else
+        lines.push(remaining.join(''));
+    return lines;
+}
 /** Breadth-first layers keep neighbors together without a quadratic force simulation. */
 export function connectionLayout(items, links, center = '') {
     const ids = new Set(items.map(item => item.id)), adj = new Map(items.map(item => [item.id, []]));

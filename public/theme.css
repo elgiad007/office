@@ -59,10 +59,11 @@
 .connections-view rect { fill:var(--surface); stroke:var(--node-color,var(--accent)); stroke-width:2; vector-effect:non-scaling-stroke; }
 .connections-view text { fill:var(--text); stroke:none; font-size:12px; pointer-events:none; }
 .connections-view .connection-node-symbol { font-size:19px; }
-.connections-view .connection-node-subtitle { font-size:10px; }
+.connections-view .connection-node-title,.connections-view .connection-group-title { font-size:14px; font-weight:600; }
+.connections-view .connection-group-count { font-size:12px; }
+.connections-view .connection-node-subtitle { font-size:11px; }
 .connections-view [data-node].selected rect { fill:var(--wash); stroke:var(--accent); stroke-width:4; }
 .connections-view [data-node]:focus rect,.connections-view [data-group-node]:focus rect { stroke:var(--text); stroke-width:4; }
-.connections-view .connection-wide [data-node]:not(.selected):not(:focus) .connection-node-title,.connections-view .connection-wide [data-node]:not(.selected):not(:focus) .connection-node-subtitle { visibility:hidden; }
 .connection-panel { width:340px; max-width:38%; min-height:0; overflow:auto; border-left:1px solid var(--line); padding-left:16px; overflow-wrap:anywhere; }
 .connection-panel h3 { margin:8px 0; font-size:16px; }
 .connection-panel [data-selection] { padding-bottom:16px; border-bottom:1px solid var(--line); }

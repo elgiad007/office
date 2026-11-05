@@ -5,6 +5,7 @@ import {readFile,mkdir} from 'node:fs/promises';
 const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
 const requests=[],errors=[];
+let groupCount=6;
 const items=Array.from({length:1201},(_,i)=>({id:'n'+i,title:i?'Project item '+String(i).padStart(4,'0'):'Project hub',kind:i%2?'tasks':'documents',degree:i?1:1200,meta:{},excerpt:''}));
 const links=items.slice(1).map(item=>({a:'n0',b:item.id,created:'2026-11-04'}));
 const server=createServer(async(req,res)=>{
@@ -12,7 +13,7 @@ const server=createServer(async(req,res)=>{
  const url=new URL(req.url,'http://localhost');
  if(url.pathname==='/api.php'){
   requests.push(url.search);const mode=url.searchParams.get('mode'),id=url.searchParams.get('id'),offset=Number(url.searchParams.get('offset')||0),q=url.searchParams.get('q')||'',kind=url.searchParams.get('kind');let result;
-  if(mode==='overview')result={items:[],links:[],groups:[{id:'n0',title:'Project hub',items:1201,links:1200}],groupTotal:1,itemTotal:1201,total:1200,more:false};
+  if(mode==='overview')result={items:[],links:[],groups:Array.from({length:groupCount},(_,i)=>({id:i?'group'+i:'n0',title:i?'Workspace group '+i+' with a longer readable title':'Project hub',items:1201,links:1200})),groupTotal:groupCount,itemTotal:1201,total:1200,more:false};
   else if(mode==='items'){const found=items.filter(item=>item.title.toLowerCase().includes(q.toLowerCase())&&(!kind||item.kind===kind));result={items:found.slice(offset,offset+50),links:[],total:found.length,more:offset+50<found.length};}
   else{const found=id?links.filter(link=>link.a===id||link.b===id):links;const edges=found.slice(offset,offset+100),ids=new Set(edges.flatMap(link=>[link.a,link.b]));if(id)ids.add(id);result={items:items.filter(item=>ids.has(item.id)),links:edges,total:found.length,more:offset+100<found.length};}
   // An older search must never replace a newer navigation.
@@ -36,7 +37,14 @@ await mkdir('test-results',{recursive:true});let browser,page;
 try{
  browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
  page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',error=>errors.push(error.message));
- await page.goto(url);await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();
+ await page.goto(url);await page.locator('#launch').click();await page.locator('[data-group-node]').first().waitFor();
+ assert.equal(await page.locator('[data-group-node]').count(),6);assert.equal(await page.locator('[data-zoom-level]').textContent(),'100%');
+ const checkCards=async()=>assert.ok(await page.locator('svg').evaluate(svg=>{const map=svg.getBoundingClientRect(),cards=[...svg.querySelectorAll('[data-group-node] rect')].map(node=>node.getBoundingClientRect());return cards.every(card=>card.left>=map.left&&card.right<=map.right&&card.top>=map.top&&card.bottom<=map.bottom)&&cards.every((card,i)=>cards.every((other,j)=>i===j||card.right<=other.left||card.left>=other.right||card.bottom<=other.top||card.top>=other.bottom));}));
+ await checkCards();await page.screenshot({path:'test-results/connection-overview-readable.png'});
+ assert.ok(await page.locator('[data-group-node]').evaluateAll(nodes=>nodes.every(node=>{const rect=node.querySelector('rect').getBBox(),title=node.querySelector('.connection-group-title').getBBox();return title.x>=rect.x&&title.x+title.width<=rect.x+rect.width;})));
+ await page.setViewportSize({width:1200,height:1000});await page.waitForTimeout(150);assert.equal(await page.locator('[data-zoom-level]').textContent(),'100%');await checkCards();
+ await page.setViewportSize({width:1440,height:1000});groupCount=30;await page.locator('[data-reset-graph]').click();await page.locator('[data-group-node]').nth(29).waitFor();assert.ok(parseInt(await page.locator('[data-zoom-level]').textContent())<100);await checkCards();
+ groupCount=1;await page.locator('[data-reset-graph]').click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1 groups'}).waitFor();
  const box=await page.locator('dialog').boundingBox();assert.equal(box.width,1440);assert.equal(box.height,1000);assert.equal(box.x,0);assert.equal(box.y,0);
  await page.screenshot({path:'test-results/connection-explorer-overview.png'});
  await page.locator('[data-group-node]').press('Enter');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
