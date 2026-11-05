@@ -2,11 +2,23 @@ import type {ConnectionEdge,ConnectionItem} from './types.js';
 
 export const GRAPH_LIMIT=160;
 export interface GraphPoint {id:string;x:number;y:number}
-export function connectionNeighbor(points:GraphPoint[],id:string,direction:'left'|'right'|'up'|'down'):string|undefined {
+export function connectionNeighbor(points:GraphPoint[],id:string,direction:'left'|'right'|'up'|'down',singleRowKeys=false):string|undefined {
   const origin=points.find(point=>point.id===id);if(!origin)return;
+  const sameRow=(point:GraphPoint)=>Math.abs(point.y-origin.y)<.5;
+  if(singleRowKeys&&points.every(sameRow)){
+    if(direction==='down')direction='left';else if(direction==='up')direction='right';
+  }
+  if(direction==='left'||direction==='right'){
+    const right=direction==='right',row=points.filter(point=>sameRow(point)&&(right?point.x>origin.x:point.x<origin.x)).sort((a,b)=>right?a.x-b.x:b.x-a.x);
+    if(row.length)return row[0].id;
+    // At a row boundary, continue in reading order without wrapping the whole map.
+    const otherRows=points.filter(point=>right?point.y>origin.y+.5:point.y<origin.y-.5)
+      .sort((a,b)=>right?(a.y-b.y||a.x-b.x):(b.y-a.y||b.x-a.x));
+    return otherRows[0]?.id;
+  }
   let best:string|undefined,score=Infinity;
-  for(const point of points){const dx=point.x-origin.x,dy=point.y-origin.y,horizontal=direction==='left'||direction==='right';
-    const forward=(horizontal?dx:dy)*(direction==='left'||direction==='up'?-1:1),across=Math.abs(horizontal?dy:dx);
+  for(const point of points){const dx=point.x-origin.x,dy=point.y-origin.y;
+    const forward=dy*(direction==='up'?-1:1),across=Math.abs(dx);
     if(forward<=0)continue;const distance=forward+across*3;
     if(distance<score){best=point.id;score=distance;}
   }

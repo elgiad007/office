@@ -168,7 +168,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     const directions:Record<string,'left'|'right'|'up'|'down'>={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'up',ArrowDown:'down'};
     const direction=directions[event.key]||(['left','right','up','down'] as const).find(action=>bindings[action]===event.key);
     if(direction){event.preventDefault();sequenceTime=0;if(event.shiftKey&&directions[event.key]){view.x+=(direction==='left'?-1:direction==='right'?1:0)*view.w*.12;view.y+=(direction==='up'?-1:direction==='down'?1:0)*view.h*.12;updateView();return;}
-      const next=connectionNeighbor([...points].map(([id,p])=>({id,...p})),focusedId,direction);focusMap(next||focusedId);return;}
+      const next=connectionNeighbor([...points].map(([id,p])=>({id,...p})),focusedId,direction,!directions[event.key]);focusMap(next||focusedId);return;}
     if(event.key==='Enter'){event.preventDefault();if(!event.repeat)exploreFocused();return;}
     if(event.key===' '){event.preventDefault();if(place.mode!=='overview')select(focusedId);return;}
     if(event.key==='g'){event.preventDefault();if(!event.repeat){const now=Date.now();if(sequenceTime&&now-sequenceTime<900){const first=mapNodes()[0];if(first)focusMap(nodeId(first));sequenceTime=0;}else sequenceTime=now;}return;}

@@ -45,6 +45,8 @@ try{
  await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await focusedId(),'n0');await page.keyboard.press('G');assert.equal(await focusedId(),'group5');
  await page.keyboard.press('/');assert.equal(await page.locator('[data-connection-filter]').evaluate(node=>node===document.activeElement),true);await page.keyboard.press('Escape');assert.equal(await focusedId(),'group5');assert.equal(await page.locator('dialog').isVisible(),true);
  await page.keyboard.press('Home');assert.equal(await focusedId(),'n0');await page.evaluate(()=>window.testKeys={});
+ await page.keyboard.press('l');assert.equal(await focusedId(),'group1');await page.keyboard.press('l');assert.equal(await focusedId(),'group2');await page.keyboard.press('h');assert.equal(await focusedId(),'group1');
+ await page.evaluate(()=>window.testKeys={right:'L',left:'H'});await page.keyboard.press('L');assert.equal(await focusedId(),'group2');await page.keyboard.press('H');assert.equal(await focusedId(),'group1');await page.evaluate(()=>window.testKeys={});await page.keyboard.press('Home');
  const checkCards=async()=>assert.ok(await page.locator('svg').evaluate(svg=>{const map=svg.getBoundingClientRect(),cards=[...svg.querySelectorAll('[data-group-node] rect')].map(node=>node.getBoundingClientRect());return cards.every(card=>card.left>=map.left&&card.right<=map.right&&card.top>=map.top&&card.bottom<=map.bottom)&&cards.every((card,i)=>cards.every((other,j)=>i===j||card.right<=other.left||card.left>=other.right||card.bottom<=other.top||card.top>=other.bottom));}));
  await checkCards();await page.screenshot({path:'test-results/connection-overview-readable.png'});
  assert.ok(await page.locator('[data-group-node]').evaluateAll(nodes=>nodes.every(node=>{const rect=node.querySelector('rect').getBBox(),title=node.querySelector('.connection-group-title').getBBox();return title.x>=rect.x&&title.x+title.width<=rect.x+rect.width;})));
@@ -56,7 +58,10 @@ try{
  await page.locator('[data-group-node]').press('Enter');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
  assert.equal(await page.locator('[data-node]').count(),101);assert.equal(await page.locator('.connection-list-row').count(),50);
  assert.equal(await focusedId(),'n0');await page.keyboard.press('l');assert.equal(await focusedId(),'n1');assert.equal(await page.locator('[data-node].selected').getAttribute('data-node'),'n1');
- await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');await page.getByRole('button',{name:'Back in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();assert.equal(await focusedId(),'n1');
+ await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');
+ await page.keyboard.press('k');assert.equal(await focusedId(),'n0');await page.keyboard.press('j');assert.equal(await focusedId(),'n1');await page.keyboard.press('j');assert.equal(await focusedId(),'n1');
+ await page.evaluate(()=>window.testKeys={up:'K',down:'J'});await page.keyboard.press('K');assert.equal(await focusedId(),'n0');await page.keyboard.press('J');assert.equal(await focusedId(),'n1');await page.keyboard.press('ArrowUp');assert.equal(await focusedId(),'n1');await page.evaluate(()=>window.testKeys={});
+ await page.getByRole('button',{name:'Back in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();assert.equal(await focusedId(),'n1');
  await page.locator('[data-select="n1"]').first().click();await page.locator('[data-selection] h3').filter({hasText:'Project item 0001'}).waitFor();
  assert.equal(await page.locator('line.highlighted').count(),1);assert.ok(await page.locator('[data-node].dimmed').count()>0);
  const initial=await page.locator('svg').getAttribute('viewBox');await page.getByRole('button',{name:'Zoom in',exact:true}).click();assert.notEqual(await page.locator('svg').getAttribute('viewBox'),initial);

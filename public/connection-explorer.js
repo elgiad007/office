@@ -344,7 +344,7 @@ export async function openConnectionExplorer(env, source = '') {
                 updateView();
                 return;
             }
-            const next = connectionNeighbor([...points].map(([id, p]) => ({ id, ...p })), focusedId, direction);
+            const next = connectionNeighbor([...points].map(([id, p]) => ({ id, ...p })), focusedId, direction, !directions[event.key]);
             focusMap(next || focusedId);
             return;
         }

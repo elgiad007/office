@@ -38,7 +38,7 @@ export function helpEntries(k) {
     add('/', 'Focus header search', 'Message headers, outside search field');
     add('n / p', 'Next / previous header match', 'Message headers, outside search field');
     add('Enter / Shift+Enter', 'Next / previous header match', 'Message headers search field');
-    add(`${k.left} / ${k.down} / ${k.up} / ${k.right}; Arrow keys`, 'Navigate map cards', 'Connections map', 'Uses current movement bindings. Focused items are selected and kept in view.');
+    add(`${k.left} / ${k.down} / ${k.up} / ${k.right}; Arrow keys`, 'Navigate map cards', 'Connections map', `Left/right continue across row boundaries. In a single horizontal row, ${k.down} moves left and ${k.up} moves right. Focused items stay in view.`);
     add('Enter / Space', 'Explore focused group or item / select item', 'Connections map', 'Enter fetches the focused item’s neighborhood; Open item in details opens its content.');
     add(k.search === '/' ? '/' : `/ / ${k.search}`, 'Search connected items', 'Connections window', 'Enter or Escape in search returns focus to the map. Typing fields retain their normal keys.');
     add('gg / G; Home / End', 'First / last map card', 'Connections map');

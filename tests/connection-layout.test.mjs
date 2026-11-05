@@ -12,6 +12,22 @@ test('map movement follows spatial neighbors and stops at edges',()=>{
  assert.equal(connectionNeighbor([],'missing','left'),undefined);
 });
 
+test('horizontal boundaries continue to adjacent rows, including uneven rows',()=>{
+ const grid=[{id:'a',x:0,y:0},{id:'b',x:320,y:0},{id:'c',x:0,y:124},{id:'d',x:320,y:124},{id:'e',x:640,y:124}];
+ assert.equal(connectionNeighbor(grid,'b','right'),'c');assert.equal(connectionNeighbor(grid,'c','left'),'b');
+ assert.equal(connectionNeighbor(grid,'a','left'),undefined);assert.equal(connectionNeighbor(grid,'e','right'),undefined);
+ assert.equal(connectionNeighbor([...grid].reverse(),'b','right'),'c');
+});
+
+test('single-row movement bindings map down to left and up to right',()=>{
+ const row=[{id:'a',x:0,y:0},{id:'b',x:270,y:0},{id:'c',x:540,y:0}];
+ assert.equal(connectionNeighbor(row,'b','down',true),'a');assert.equal(connectionNeighbor(row,'b','up',true),'c');
+ assert.equal(connectionNeighbor(row,'a','down',true),undefined);assert.equal(connectionNeighbor(row,'c','up',true),undefined);
+ assert.equal(connectionNeighbor(row,'b','down'),undefined);assert.equal(connectionNeighbor(row,'b','up'),undefined);
+ assert.equal(connectionNeighbor([row[0]],'a','up',true),undefined);
+ const column=[{id:'a',x:0,y:0},{id:'b',x:0,y:76}];assert.equal(connectionNeighbor(column,'a','down',true),'b');
+});
+
 test('overview packs groups at full size whenever the viewport has room',()=>{
  for(const [count,width,height] of [[6,1028,680],[6,800,680],[4,350,540]]){
   const points=connectionGroupLayout(Array.from({length:count},(_,i)=>String(i)),width,height);
