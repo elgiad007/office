@@ -35,7 +35,7 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
   wiki:{name:'Wiki',singular:'page',empty:'No pages yet.',hint:'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].',icon:'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3'},
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
 };
-const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x'};
+const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L'};
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const lastSelectedItems=new Map<AppName,string>();
 function rememberSelection() {
@@ -1402,6 +1402,7 @@ document.addEventListener('keydown',event=>{
   if(action==='help'){event.preventDefault();help();return;}
   if(state.app==='settings')return;
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
+  if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}
   if(action==='completeTask'&&state.app==='tasks'&&!event.shiftKey){event.preventDefault();void attempt(completeTask);return;}
   if(action==='edit'||(state.app==='sheets'&&key==='Enter')){event.preventDefault();enterEdit();return;}

@@ -16,6 +16,7 @@ export function helpEntries(k) {
     add('g 1 … g 7', 'Switch application', 'Normal mode', '1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets. Sequence timeout: 900 ms.');
     add(k.search, 'Search current application');
     add('n / N', 'Next / previous item in search results', 'Normal mode', 'Keeps focus in the current pane, including mail bodies.');
+    add(k.connections || 'L', 'Open selected item connections', 'Normal mode', 'Remappable in Settings. Also available as :links or :l; add all for the workspace overview.');
     add(k.new, 'Create an item / compose');
     add(k.edit, 'Enter edit mode');
     add(k.select, 'Toggle current item selection');

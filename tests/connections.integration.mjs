@@ -38,6 +38,9 @@ try{
  const command=async text=>{await page.keyboard.press('Escape');await page.locator('#main').focus();await page.keyboard.press(':');await page.locator('#command-input').fill(text);};
  const run=async text=>{await command(text);await page.keyboard.press('Enter');};
  const openConnections=async()=>{await page.locator('.connection-count').filter({hasText:/Connections · \d/}).waitFor();await page.locator('.connection-count').click();await page.locator('.connection-popover:popover-open').waitFor();};
+ await run(':l');await page.locator('[data-connection-status]').filter({hasText:'0 of 0 connections loaded'}).waitFor();assert.equal(await page.locator('[data-node="'+source.id+'"]').evaluate(node=>node===document.activeElement),true);await page.keyboard.press('Escape');
+ await page.locator('#main').focus();await page.keyboard.press('L');await page.locator('[data-node="'+source.id+'"]').waitFor();await page.keyboard.press('Escape');
+ const search=page.locator('#search');await search.fill('L');await search.press('L');assert.equal(await page.locator('#dialog').isVisible(),false);await search.fill('');await page.keyboard.press('Escape');await page.locator('#items [data-id="'+source.id+'"]').click();
  await command(':link event forecast');await page.locator('#connection-suggestions [role="option"]').first().waitFor();
  assert.equal(await page.locator('#connection-suggestions [role="option"]').count(),2);
  const popup=await page.locator('#connection-suggestions').boundingBox();assert.ok(await page.evaluate(({x,y,width,height})=>!!document.elementFromPoint(x+width/2,y+height/2)?.closest('#connection-suggestions'),popup));
@@ -58,7 +61,7 @@ try{
  await openConnections();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor({state:'attached'});
  await run(':new linked event');await page.waitForURL('**/#calendar');await page.getByRole('button',{name:'Discard Draft',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Discard Draft',exact:true}).click();
  assert.equal((await api('connections&id='+source.id)).links.length,2);
- await run(':links all');await page.locator('[data-group-node]').waitFor();assert.equal(await page.locator('[data-group-node]').count(),1);
+ await run(':l all');await page.locator('[data-group-node]').waitFor();assert.equal(await page.locator('[data-group-node]').count(),1);
  await page.locator('[data-group-node]').press('Enter');await page.locator('[data-connection-status]').filter({hasText:'2 of 2 connections loaded'}).waitFor();assert.equal(await page.locator('.connection-list-row').count(),2);
  assert.ok((await page.locator('.connections-view svg').boundingBox()).height>200);assert.equal(await page.locator('[data-connection-more]').isVisible(),false);
  await page.locator('[data-node]').first().focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'Reset view'}).click();await page.locator('.connection-list-row').first().waitFor();
