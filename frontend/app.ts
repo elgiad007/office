@@ -108,7 +108,7 @@ const commandHandlers={
   sheets:()=>changeApp('sheets'),
   wiki:()=>changeApp('wiki'),
   settings:()=>changeApp('settings'),
-  sync:()=>syncAccounts(),
+  sync:(account?:string)=>syncAccounts(true,account),
   head:async()=>{if(state.app!=='mail'||!state.current)throw new CommandError('Select a mail message before using :head.');await viewMessageHeaders();},
   q:signOut,
   log:()=>activity.open(),
@@ -128,7 +128,7 @@ function openCommand(value=':') {
   input.id='command-input';input.setAttribute('aria-label','Command');input.autocomplete='off';input.spellcheck=false;input.value=value;
   document.querySelector<HTMLElement>('#notice')!.hidden=true;
   document.querySelector<HTMLElement>('#activity-status')!.prepend(input);input.focus();
-  commandSuggestions=connections.autocomplete(input);
+  commandSuggestions=connections.autocomplete(input,()=>state.accounts);
   if(value!==':')input.dispatchEvent(new Event('input'));
   input.addEventListener('blur',()=>{if(commandInput===input){closeCommand();if(editable(document.activeElement))setMode('insert');}});
   input.addEventListener('keydown',event=>{
@@ -1034,12 +1034,19 @@ async function importFile() {
     const result=await api('import-items',{records});await load();notice(`Imported ${result.count} items locally.`);
   });input.click();
 }
-async function syncAccounts(manual=true) {
+async function syncAccounts(manual=true,accountQuery?:string) {
+  let accounts=[...state.accounts];
+  if(accountQuery!==undefined){
+    const exact=accounts.find(account=>account.id===accountQuery);
+    accounts=exact?[exact]:accounts.filter(account=>account.label.trim().toLocaleLowerCase()===accountQuery.toLocaleLowerCase());
+    if(!accounts.length)throw new CommandError('No matching account. Use Tab to fill an account from the suggestions.');
+    if(accounts.length>1)throw new CommandError('Several accounts have that name. Use Tab to select the account you want.');
+  }
   if(state.syncing || document.hidden || (!manual && Date.now()-state.lastActivity>120000))return;
-  if(!state.accounts.length){if(manual){notice('Add an account in Settings to start syncing.');await changeApp('settings');}return;}
+  if(!accounts.length){if(manual){notice('Add an account in Settings to start syncing.');await changeApp('settings');}return;}
   if(state.dirty){if(manual)await commit();else return;}
+  if(state.syncing)return;
   state.syncing=true;busyButton(document.querySelector<HTMLButtonElement>('#sync-button')!,true);let errors=0;
-  const accounts=[...state.accounts];
   const queue=accounts.map(account=>({account,batch:0}));let next=0;
   const active=new Map<string,string>(),pendingHistory=new Set<string>();
   const showActive=()=>{const status=document.querySelector<HTMLElement>('#sync-status');if(status)status.textContent='Syncing '+[...active.values()].join('; ')+'…';};
@@ -1070,7 +1077,7 @@ async function syncAccounts(manual=true) {
   // The standard scan already refreshed Inbox/Archive/Trash. Only custom scopes
   // need another scan (or a larger requested download window).
   const scope=state.mailScope,scopeAccount=state.accounts.find(a=>a.id===scope?.account),scopeFolder=scopeAccount?.folders?.find(f=>f.id===scope?.folder);
-  if(state.app==='mail'&&scope&&!state.dirty&&(scope.limit>100||!['Inbox','Archive','Trash'].includes(scopeFolder?.role||''))){try{await syncOpenFolder(mailFolderEnv());}catch(cause) { const error=asError(cause);if(manual)notice(error.message,true);}}
+  if(state.app==='mail'&&scope&&(accountQuery===undefined||scope.account===accounts[0].id)&&!state.dirty&&(scope.limit>100||!['Inbox','Archive','Trash'].includes(scopeFolder?.role||''))){try{await syncOpenFolder(mailFolderEnv());}catch(cause) { const error=asError(cause);if(manual)notice(error.message,true);}}
   // Never replace an active editor with network data.
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }

@@ -230,6 +230,6 @@ Settings → List appearance configures the left and right fields and text sizes
 
 In normal mode, `:` opens the status-bar command line. Enter executes once; Escape cancels and returns focus. `:head` shows the selected mail message’s headers. `:q` saves pending edits and signs out to the password screen. `:log`, `:errors`, and `:warnings` open View activity with All levels, Errors, or Warnings selected. `:new` creates an item in the current application; `:new mail|event|task|contact|doc|page|sheet` switches application and creates one item. In Settings, specify the item type. Commands are unavailable while typing in editors, search, dialogs, or the login screen.
 
-Use `:sync` to manually sync all connected accounts, just like **Sync now**. It accepts no arguments and does nothing if a sync is already running.
+Use `:sync` to manually sync all connected accounts, just like **Sync now**, or `:sync <account name or ID>` to sync one account. Type a space after `:sync` to see suggestions. Use the arrow keys to choose, Tab to fill the selected account, and Enter to run the command.
 
 Navigate without creating an item using `:mail` (`:m`), `:calendar` (`:cal`), `:tasks` (`:t`), `:contacts` (`:con`), `:docs` (`:doc`, `:d`), `:sheets` (`:sh`), `:wiki` (`:w`), or `:settings` (`:set`). These commands save pending edits and wait for attachments before switching. They accept no arguments; aliases require an exact match. Help lists aliases alongside each canonical command and includes them in search.

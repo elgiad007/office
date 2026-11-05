@@ -1,6 +1,6 @@
 // Generated from frontend/connections.ts by pnpm build. Do not edit.
 import { openConnectionExplorer } from './connection-explorer.js';
-import { connectionQuery, CommandError } from './commands.js';
+import { connectionQuery, syncQuery, CommandError } from './commands.js';
 import { itemTypes } from './item-types.js';
 import { escapeHtml as e } from './formats.js';
 const label = (kind) => itemTypes[kind]?.label || kind;
@@ -86,7 +86,7 @@ export function createConnections(env) {
         }
         return (await env.api(`connection-search&q=${encodeURIComponent(query.query)}&kind=${encodeURIComponent(query.kind || '')}&exclude=${encodeURIComponent(id)}`)).items;
     }
-    function autocomplete(input) {
+    function autocomplete(input, accounts) {
         const list = document.createElement('div');
         list.id = 'connection-suggestions';
         list.className = 'connection-suggestions';
@@ -98,12 +98,13 @@ export function createConnections(env) {
         input.setAttribute('aria-autocomplete', 'list');
         input.setAttribute('aria-controls', list.id);
         input.setAttribute('aria-expanded', 'false');
-        let version = 0, timer, items = [], index = 0;
+        let version = 0, timer, index = 0, command = '', chosen = false;
+        let items = [];
         const hide = () => { version++; clearTimeout(timer); list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
         const accept = () => { if (!items[index])
-            return; const query = connectionQuery(input.value); input.value = ':' + query.name + ' ' + items[index].id; hide(); input.focus(); };
+            return; input.value = ':' + command + ' ' + items[index].id; hide(); input.focus(); };
         function render() {
-            list.innerHTML = items.length ? items.map((item, i) => `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}"><strong>${e(label(item.kind))} · ${e(item.title)}</strong><small>${e(detail(item))} · ${e(item.id)}</small><span>${e(item.excerpt)}</span></div>`).join('') : '<p role="status">No matching items.</p>';
+            list.innerHTML = items.length ? items.map((item, i) => `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt === undefined ? '' : `<span>${e(item.excerpt)}</span>`}</div>`).join('') : `<p role="status">No matching ${command === 'sync' ? 'accounts' : 'items'}.</p>`;
             list.hidden = false;
             input.setAttribute('aria-expanded', 'true');
             if (items.length) {
@@ -119,11 +120,26 @@ export function createConnections(env) {
         } };
         input.addEventListener('input', () => {
             hide();
-            if (!connectionQuery(input.value))
+            chosen = false;
+            index = 0;
+            const accountQuery = syncQuery(input.value);
+            if (accountQuery !== undefined) {
+                command = 'sync';
+                list.setAttribute('aria-label', 'Matching accounts');
+                const query = accountQuery.toLocaleLowerCase();
+                items = accounts().filter(account => account.label.toLocaleLowerCase().includes(query) || account.id.toLocaleLowerCase().includes(query))
+                    .map(account => ({ id: account.id, title: account.label, detail: account.type }));
+                render();
                 return;
+            }
+            const query = connectionQuery(input.value);
+            if (!query)
+                return;
+            command = query.name;
+            list.setAttribute('aria-label', 'Matching items');
             const request = version;
             timer = setTimeout(() => { void search(input.value).then(result => { if (request !== version || !input.isConnected)
-                return; items = result; index = 0; render(); }).catch(error => { if (request === version) {
+                return; items = result.map(item => ({ id: item.id, title: label(item.kind) + ' · ' + item.title, detail: detail(item), excerpt: item.excerpt })); index = 0; render(); }).catch(error => { if (request === version) {
                 items = [];
                 list.innerHTML = `<p role="status">${e(error.message)}</p>`;
                 list.hidden = false;
@@ -143,10 +159,13 @@ export function createConnections(env) {
                     event.preventDefault();
                     if (items.length) {
                         index = (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+                        chosen = true;
                         render();
                     }
                     return true;
                 }
+                if (event.key === 'Enter' && !event.repeat && command === 'sync' && chosen)
+                    accept();
                 if (event.key === 'Tab') {
                     event.preventDefault();
                     accept();

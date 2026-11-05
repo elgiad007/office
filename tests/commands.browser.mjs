@@ -3,13 +3,16 @@ export async function testCommands(page,url) {
   await page.goto('about:blank');
   let authenticated=true,creates=[],logout=0,saves=0,releaseCreate,createStarted,failLogout=false;
   const notices=[];
+  const synced=[];
+  const accounts=[{id:'work-mail',label:'Work Account',type:'imap'},{id:'work-calendar',label:'Work Account',type:'caldav'}];
   const records=[{id:'headers',kind:'mail',title:'Header fixture',body:'Body',revision:1,meta:{folder:'Inbox',read:true,raw:'Subject: Header fixture\r\n\r\nBody'}}];
   const routes=t=>t.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated,activity:true,csrf:'fixture',preferences:{}};
     else if(action==='google-settings')json={configured:false,client_id:'',redirect:''};
-    else if(action==='accounts')json={accounts:[]};
+    else if(action==='accounts')json={accounts};
+    else if(action==='sync'){synced.push(route.request().postDataJSON().id);json={more:false};}
     else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='activity'){if(route.request().method()==='POST')notices.push(route.request().postDataJSON());json={entries:['error','warning','info'].map((level,i)=>({id:i+1,time:'2026-11-03T00:00:00Z',level,phase:'diagnostic',operation:'fixture',message:level+' fixture',duration_ms:null}))};}
     else if(action==='records')json={records:records.filter(r=>r.kind===new URL(route.request().url()).searchParams.get('kind'))};
@@ -49,6 +52,27 @@ export async function testCommands(page,url) {
     }
     await run(':<img>');assert.equal(await page.locator('#notice').textContent(),'Unknown command: <img>');assert.equal(await page.locator('#notice img').count(),0);
     assert.equal(notices.length,0);
+    await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
+    synced.length=0;
+    await run(':sync Work Account');
+    await page.locator('#notice').filter({hasText:'Several accounts have that name'}).waitFor();
+    await run(':sync Missing Account');
+    await page.locator('#notice').filter({hasText:'No matching account'}).waitFor();
+    assert.deepEqual(synced,[]);
+    await page.keyboard.press(':');
+    await page.locator('#command-input').fill(':sync ');
+    assert.equal(await page.getByRole('listbox',{name:'Matching accounts'}).getByRole('option').count(),2);
+    await page.locator('#command-input').fill(':sync work-cal');
+    assert.equal(await page.getByRole('listbox',{name:'Matching accounts'}).getByRole('option').count(),1);
+    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('#command-input').inputValue(),':sync work-calendar');
+    await page.keyboard.press('Enter');
+    await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
+    assert.deepEqual(synced,['work-calendar']);
+    synced.length=0;
+    await run(':sync');
+    await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
+    assert.deepEqual(synced.sort(),['work-calendar','work-mail']);
     for(const [command,level,count] of [['errors','error',1],['warnings','warning',1],['log','',3]]){
       await run(':bogus');
       await run(':'+command);await page.locator('#activity-dialog[open]').waitFor();

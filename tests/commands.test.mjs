@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CommandError,resolveCommand,connectionQuery} from '../public/commands.js';
+import {CommandError,resolveCommand,connectionQuery,syncQuery} from '../public/commands.js';
 const navigation={mail:['m'],calendar:['cal'],tasks:['t'],contacts:['con'],docs:['doc','d'],sheets:['sh'],wiki:['w'],settings:['set']};
 test('connection commands preserve multiword queries and support every registered type',()=>{
  for(const [type,kind] of Object.entries({mail:'mail',event:'calendar',task:'tasks',contact:'contacts',doc:'documents',page:'wiki',sheet:'sheets'})){
@@ -29,8 +29,15 @@ test('commands normalize whitespace and validate every argument before dispatch'
  assert.deepEqual(resolveCommand(': new doc '),{name:'new',argument:'documents'});
  for(const type of ['mail','event','task','contact','doc','page','sheet'])assert.ok(resolveCommand(':new '+type).argument);
  for(const name of ['head','q','new','log','errors','warnings','sync'])assert.equal(resolveCommand(':'+name).name,name);
- for(const name of ['log','errors','warnings','sync'])assert.throws(()=>resolveCommand(':'+name+' extra'),{name:'Error',message:'Unknown parameter: extra'});
+ for(const name of ['log','errors','warnings'])assert.throws(()=>resolveCommand(':'+name+' extra'),{name:'Error',message:'Unknown parameter: extra'});
  for(const value of [':',':unknown',':__proto__',':new constructor',':head extra',':q extra',':new doc extra'])assert.throws(()=>resolveCommand(value));
+});
+test('sync accepts an optional account name and suggests accounts after a space',()=>{
+ assert.deepEqual(resolveCommand(':sync '),{name:'sync',argument:undefined});
+ assert.deepEqual(resolveCommand(': sync Work  Calendar '),{name:'sync',argument:'Work  Calendar'});
+ assert.equal(syncQuery(':sync'),undefined);
+ assert.equal(syncQuery(':sync '),'');
+ assert.equal(syncQuery(':sync Work Ca'),'Work Ca');
 });
 test('command errors report only the first offending token',()=>{
  for(const [input,message] of [[':','Unknown command'],[':frob','Unknown command: frob'],[':new banana','Unknown parameter: banana'],[':new bad extra','Unknown parameter: bad'],[':new doc extra more','Unknown parameter: extra'],[':head extra','Unknown parameter: extra'],[':<img>','Unknown command: <img>']]){

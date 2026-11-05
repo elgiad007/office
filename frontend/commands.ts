@@ -10,7 +10,7 @@ export const commandRegistry={
   sheets:{arguments:0,aliases:['sh'],action:'Switch to Sheets',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   wiki:{arguments:0,aliases:['w'],action:'Switch to Wiki',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   settings:{arguments:0,aliases:['set'],action:'Switch to Settings',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
-  sync:{arguments:0,action:'Sync all connected accounts',context:'Normal mode, including Settings',options:'No arguments; same general sync as Sync now. Does nothing if a sync is already running.'},
+  sync:{arguments:1,action:'Sync connected accounts',context:'Normal mode, including Settings',options:':sync [account name or ID]. Omit the account to sync all. Type a space after :sync for suggestions. Use ↑/↓ to choose, Tab to fill, and Enter to sync.'},
   head:{arguments:0,action:'View original message headers',context:'Selected mail message',options:'No arguments; locally cached headers.'},
   q:{arguments:0,action:'Sign out',context:'Normal mode',options:'No arguments; prompts for unsaved drafts, saves existing items and returns to the password screen.'},
   log:{arguments:0,action:'Open activity log',context:'Normal mode',options:'All levels; no arguments.'},
@@ -30,6 +30,9 @@ for(const name of Object.keys(registry) as CommandName[]){
 }
 export class CommandError extends Error {}
 export interface ResolvedCommand {name: keyof typeof registry; argument?: string; linked?: boolean; kind?: string}
+export function syncQuery(value: string): string | undefined {
+  return value.trimStart().replace(/^:/,'').trimStart().match(/^sync\s+([\s\S]*)$/)?.[1].trim();
+}
 export function connectionQuery(value: string): {name:'link'|'unlink';kind?: string;query:string} | null {
   const match=value.trimStart().replace(/^:/,'').trimStart().match(/^(link|unlink)(?:\s+(.*))?$/);
   if(!match)return null;
@@ -40,6 +43,7 @@ export function resolveCommand(value: string): ResolvedCommand {
   const [name,...args]=value.trim().replace(/^:/,'').trim().split(/\s+/);
   const command=Object.hasOwn(registry,name)?name as CommandName:aliases.get(name);
   if(!command)throw new CommandError('Unknown command'+(name?': '+name:''));
+  if(command==='sync')return {name:command,argument:syncQuery(value)||undefined};
   if(command==='link'||command==='unlink'){
     const query=connectionQuery(value)!;
     if(!query.query)throw new CommandError('Choose an item name or ID.');
