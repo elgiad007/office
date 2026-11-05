@@ -8,6 +8,7 @@ require dirname(__DIR__).'/app/google.php';
 require dirname(__DIR__).'/app/mail-folders.php';
 require dirname(__DIR__).'/app/mail-transfer.php';
 require dirname(__DIR__).'/app/mail-undo.php';
+require dirname(__DIR__).'/app/mail-empty-junk.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -215,6 +216,29 @@ try {
         $rows=db()->query('SELECT id,label,type,last_sync,error FROM accounts ORDER BY label')->fetchAll();
         foreach ($rows as &$row) $row['folders']=setting('mail-folders:'.$row['id'],[]);
         unset($row); json_response(['accounts'=>$rows]);
+    }
+    if ($route==='mail-empty-junk' && $method==='POST') {
+        if (($input['action']??'')==='preview') {
+            unset($_SESSION['empty_junk']);
+            session_write_close();
+            $preview=preview_empty_junk((string)($input['account']??''),(string)($input['folder']??''));
+            if (!empty($preview['authorize'])) json_response(['authorize'=>true]);
+            $count=count($preview['ids']);
+            $token=$count?bin2hex(random_bytes(24)):'';
+            if ($count) {
+                session_start();
+                owner();csrf();
+                $_SESSION['empty_junk']=$preview+['token'=>$token,'expires'=>time()+300];
+                session_write_close();
+            }
+            json_response(['count'=>$count,'name'=>$preview['name'],'token'=>$token]);
+        }
+        if (($input['action']??'')!=='empty') fail('Unknown Junk folder action.');
+        $preview=$_SESSION['empty_junk']??null;
+        if (!$preview || time()>$preview['expires'] || !is_string($input['token']??null) || !hash_equals($preview['token'],$input['token'])) fail('The confirmation expired. Review the Junk folder again.',409);
+        unset($_SESSION['empty_junk']);
+        session_write_close();
+        json_response(empty_junk($preview));
     }
     if ($route==='mail-junk-settings' && $method==='POST') {
         $a=account((string)($input['account']??''));

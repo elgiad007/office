@@ -23,6 +23,7 @@ function save_google_settings(array $input): void {
 }
 
 function start_google_connection(array $input): string {
+    $permanentDelete=false;
     if (!empty($input['id'])) {
         $a = account((string)$input['id']);
         if ($a['type'] !== 'google') fail('Not a Google account.');
@@ -31,6 +32,7 @@ function start_google_connection(array $input): string {
         $email = $a['config']['email'];
         $calendar = $a['config']['calendar'] ?? true;
         $label = $a['label'];
+        $permanentDelete=($input['permanentDelete']??false)===true;
     } else {
         $credentials = google_settings();
         if (!$credentials) fail('Configure Google integration in Settings once before connecting accounts.');
@@ -43,14 +45,19 @@ function start_google_connection(array $input): string {
     }
     $state = bin2hex(random_bytes(24));
     $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
-    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,
+    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,
         'credentials'=>encrypt_secret(['client_id'=>$credentials['client_id'],'client_secret'=>$credentials['client_secret']]),
         'state'=>$state,'verifier'=>$verifier,'time'=>time()];
     return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query([
         'client_id'=>$credentials['client_id'],'redirect_uri'=>$redirect,'response_type'=>'code',
-        'scope'=>'https://www.googleapis.com/auth/gmail.modify'.($calendar ? ' https://www.googleapis.com/auth/calendar.readonly' : ''),
+        'scope'=>($permanentDelete?'https://mail.google.com/':'https://www.googleapis.com/auth/gmail.modify').($calendar ? ' https://www.googleapis.com/auth/calendar.readonly' : ''),
         'login_hint'=>$email,'access_type'=>'offline','prompt'=>'consent','state'=>$state,
         'code_challenge'=>rtrim(strtr(base64_encode(hash('sha256',$verifier,true)), '+/', '-_'), '='),'code_challenge_method'=>'S256']);
+}
+
+function google_can_delete_mail(array $account): bool {
+    return ($account['config']['permanentDelete']??false)===true
+        && in_array('https://mail.google.com/',explode(' ',$account['credentials']['scope']??''),true);
 }
 
 /** Validate the grant and provider identity before changing any saved account. */
@@ -59,7 +66,9 @@ function finish_google_connection(array $oauth, array $tokens, array $profile): 
     if (!is_string($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) fail('Google did not confirm a valid Gmail address.');
     if (empty($tokens['access_token']) || empty($tokens['refresh_token'])) fail('No offline authorization received. Connect again and approve access.');
     $scopes = explode(' ', $tokens['scope'] ?? '');
-    if (!in_array('https://www.googleapis.com/auth/gmail.modify', $scopes, true)
+    $permanentDelete=($oauth['permanentDelete']??false)===true;
+    $mailScope=$permanentDelete?'https://mail.google.com/':'https://www.googleapis.com/auth/gmail.modify';
+    if (!in_array($mailScope, $scopes, true)
         || ($oauth['calendar'] && !in_array('https://www.googleapis.com/auth/calendar.readonly', $scopes, true))) fail('Required Google permissions were not approved. Connect again.');
     $db = db(); $db->exec('BEGIN IMMEDIATE');
     try {
@@ -72,7 +81,7 @@ function finish_google_connection(array $oauth, array $tokens, array $profile): 
             if ($row['id'] !== $id && strcasecmp(json_decode($row['config'], true)['email'], $email) === 0) fail('This Google account is already connected. Use Authorize on the existing account.',409);
         }
         $credentials = array_merge($tokens, decrypt_secret($oauth['credentials']), ['expires'=>time()+(int)($tokens['expires_in'] ?? 3600)]);
-        $config = ['email'=>$email,'redirect'=>$oauth['redirect'],'calendar'=>$oauth['calendar']];
+        $config = ['email'=>$email,'redirect'=>$oauth['redirect'],'calendar'=>$oauth['calendar'],'permanentDelete'=>$permanentDelete];
         if ($id) $db->prepare('UPDATE accounts SET config=?,secret=?,error=NULL WHERE id=?')->execute([json_encode($config),encrypt_secret($credentials),$id]);
         else {
             $id = bin2hex(random_bytes(16));

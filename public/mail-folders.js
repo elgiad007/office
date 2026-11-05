@@ -68,6 +68,15 @@ export function renderMailFolders(env) {
     const { state, e } = env, navigation = document.querySelector('#mail-folder-navigation'), controls = document.querySelector('.search-wrap'), host = document.querySelector('.shell');
     const scope = state.mailScope, account = state.accounts.find(a => a.id === scope?.account), folder = account?.folders?.find(f => f.id === scope.folder);
     navigation.insertAdjacentHTML('beforeend', `<div class="account-folders" aria-label="Account folders">${state.accounts.filter(a => ['imap', 'google'].includes(a.type)).map(a => `<details class="folder-account" ${state.folderOpen.has(a.id) ? 'open' : ''} data-account-tree="${e(a.id)}"><summary>${e(a.label)}${a.type === 'google' ? ' · Labels' : ''}</summary><div class="folder-tools"><button data-refresh-folders="${e(a.id)}">Refresh folders</button><button data-manage-folder="create" data-folder-account="${e(a.id)}">New ${a.type === 'google' ? 'label' : 'folder'}</button></div>${tree(a.folders || [], e, a.id) || '<p class="muted">Refresh folders to discover this account’s folders.</p>'}</details>`).join('')}</div>`);
+    const local = navigation.querySelector('.account-folders');
+    local.insertAdjacentHTML('afterbegin', '<button type="button" class="folder-link" data-local-junk aria-haspopup="menu">Local Junk</button>');
+    const localButton = local.querySelector('[data-local-junk]');
+    localButton.onclick = () => {
+        const select = navigation.querySelector('#mail-folder');
+        select.value = 'Local Junk';
+        select.dispatchEvent(new Event('change'));
+    };
+    bindEmptyJunk(env, localButton);
     controls.insertAdjacentHTML('beforeend', scope ? `<div class="folder-current"><strong>${e(account?.label || 'Account')} / ${e(folder?.name || scope.folder)}</strong><div class="folder-tools"><button id="folder-refresh">Refresh mail</button><button id="folder-more" ${''}>Load next batch</button>${folder && !folder.protected ? `<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>` : ''}</div><small>Headers sync in batches of 100. Open a message to download its contents.</small></div>` : '');
     host.querySelectorAll('[data-account-tree]').forEach(d => d.ontoggle = () => { if (d.open)
         state.folderOpen.add(d.dataset.accountTree);
@@ -95,6 +104,13 @@ export function renderMailFolders(env) {
         await reloadMail(env);
         await syncOpenFolder(env);
     }));
+    host.querySelectorAll('[data-open-folder]').forEach(button => {
+        const owner = state.accounts.find(a => a.id === button.dataset.folderAccount);
+        const id = button.dataset.openFolder;
+        const junk = owner?.type === 'google' ? id === 'SPAM' : owner?.folders?.some(f => f.id === id && f.role === 'Junk');
+        if (owner && junk)
+            bindEmptyJunk(env, button, owner, id);
+    });
     host.querySelectorAll('[data-open-folder]').forEach(b => { if (scope?.account === b.dataset.folderAccount && scope.folder === b.dataset.openFolder)
         b.setAttribute('aria-current', 'location'); });
     host.querySelectorAll('[data-manage-folder]').forEach(b => b.onclick = () => env.attempt(() => manageFolder(env, b.dataset.folderAccount, b.dataset.manageFolder)));
@@ -103,6 +119,75 @@ export function renderMailFolders(env) {
         refresh.onclick = () => env.attempt(() => syncOpenFolder(env));
     if (more)
         more.onclick = () => env.attempt(() => syncOpenFolder(env, true));
+}
+function bindEmptyJunk(env, button, account, folder = '') {
+    const title = account?.type === 'google' ? 'Empty Spam Folder' : 'Empty Junk Folder';
+    const open = (x, y) => {
+        const menu = document.createElement('div');
+        menu.className = 'item-context-menu folder-context-menu';
+        menu.popover = 'auto';
+        menu.setAttribute('role', 'menu');
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'danger';
+        item.setAttribute('role', 'menuitem');
+        item.textContent = title + '…';
+        menu.append(item);
+        button.insertAdjacentElement('afterend', menu);
+        menu.addEventListener('toggle', event => { if (event.newState === 'closed')
+            menu.remove(); });
+        menu.showPopover();
+        menu.style.left = Math.max(8, Math.min(x, innerWidth - menu.offsetWidth - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(y, innerHeight - menu.offsetHeight - 8)) + 'px';
+        item.focus();
+        item.onclick = () => {
+            menu.hidePopover();
+            button.focus();
+            void env.attempt(async () => {
+                await env.commit();
+                const result = await busy(env, () => env.api('mail-empty-junk', { action: 'preview', account: account?.id || '', folder }));
+                if (env.state.app !== 'mail')
+                    return;
+                if ('authorize' in result && account) {
+                    env.confirmation('Authorize permanent deletion', `Google requires full Gmail access to permanently delete spam from ${account.label}. Continue to Google to grant that permission for this account?`, async () => {
+                        const authorization = await env.api('google-connect', { id: account.id, permanentDelete: true });
+                        location.href = authorization.url;
+                    });
+                    return;
+                }
+                if (!('count' in result))
+                    throw Error('Could not prepare the folder for deletion.');
+                if (!result.count) {
+                    env.notice(result.name + ' is already empty.');
+                    return;
+                }
+                env.confirmation(title, `Permanently delete ${result.count} ${result.count === 1 ? 'message' : 'messages'} from ${result.name}? This also removes their Office connections and cannot be undone.`, async () => {
+                    await env.commit();
+                    let outcome;
+                    try {
+                        outcome = await busy(env, () => env.api('mail-empty-junk', { action: 'empty', token: result.token }));
+                    }
+                    finally {
+                        await reloadMail(env, true);
+                    }
+                    if (!('deleted' in outcome))
+                        throw Error('Could not confirm the folder was emptied.');
+                    const summary = `${outcome.deleted} permanently deleted.${outcome.skipped ? ` ${outcome.skipped} skipped because they changed or left the folder.` : ''}`;
+                    env.notice(outcome.unconfirmed ? `${summary} ${outcome.unconfirmed} unconfirmed. ${outcome.warning || ''}` : summary, !!outcome.unconfirmed);
+                });
+            });
+        };
+    };
+    button.setAttribute('aria-haspopup', 'menu');
+    button.oncontextmenu = event => { event.preventDefault(); event.stopPropagation(); open(event.clientX, event.clientY); };
+    button.onkeydown = event => {
+        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))
+            return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = button.getBoundingClientRect();
+        open(rect.left, rect.bottom);
+    };
 }
 async function manageFolder(env, accountId, action) {
     const { state, e } = env;

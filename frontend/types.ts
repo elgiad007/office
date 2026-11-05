@@ -120,6 +120,7 @@ export interface ApiResponses {
   save: MutationResult; delete: { ok: boolean; undoToken?: string }; 'mail-action': MailActionResult;
   'mail-undo': MutationResult;
   'mail-junk-settings': {rules: {type: 'sender' | 'domain'; target: string}[]; folder: string};
+  'mail-empty-junk': {authorize: true} | {count: number; name: string; token: string} | {deleted: number; skipped: number; unconfirmed: number; warning?: string};
   send: { ok: boolean };
   'mail-folders': { folders: MailFolder[] };
   'mail-folder-manage': { folders: MailFolder[] };

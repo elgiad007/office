@@ -5,6 +5,7 @@ putenv('OFFICE_DATA_DIR='.$testDir);
 require __DIR__.'/imap.php'; // Includes the scripted peer and verified MOVE regressions.
 require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/mail-folders.php';
+require dirname(__DIR__).'/app/mail-empty-junk.php';
 function make_account(string $id,string $type='imap'): array {
     db()->prepare('INSERT INTO accounts (id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute([$id,'Fixture',$type,'{}','']);
     return ['id'=>$id,'label'=>'Fixture','config'=>[]];
@@ -327,6 +328,25 @@ try {
     check(imap_junk_path($junk,$folders)==='Courrier indésirable','IMAP prefers the advertised Junk role over a named fallback');
     update_mail_block($junk['id'],'domain','example.com',true);
     check(mail_block_rules($junk['id'])===[],'removing a rule clears its account entry');
+    $listed=gmail_junk_ids(function($path){
+        parse_str(substr($path,1),$query);
+        check($query['labelIds']==='SPAM' && $query['includeSpamTrash']==='true','Gmail empty preview asks for live Spam membership');
+        return isset($query['pageToken'])?['messages'=>[['id'=>'second']]]:['messages'=>[['id'=>'first']],'nextPageToken'=>'next'];
+    });
+    check($listed===['first','second'],'Gmail empty preview includes subsequent pages');
+    $purge=make_account('imap-empty-junk');
+    $before=['account'=>$purge['id'],'folder'=>'Junk','type'=>'imap','validity'=>'100','ids'=>['1','2','4']];
+    foreach (['1','2','3','4'] as $uid) cache_remote($purge,mail_source('Junk','100',$uid),'mail','Junk '.$uid,'',['folder'=>'Junk','serverFolder'=>'Junk','uidValidity'=>'100','providerId'=>$uid]);
+    $ok="{tag} OK done\r\n";
+    fixture([
+        ['UID STORE 1,4 +FLAGS.SILENT (\\Deleted)',$ok],
+        ['UID EXPUNGE 1,4',$ok],
+        search_step('UID 1,4',['4']),
+    ],function($socket)use($before){
+        $result=empty_junk_batches($before,['1','3','4'],fn($batch)=>expunge_imap_junk($socket,$batch));
+        check($result['deleted']===1 && $result['skipped']===1 && $result['unconfirmed']===1,'targeted expunge skips arrivals and moved mail and reports partial completion');
+        check(count(mail_cache_rows($before['account']))===3,'cache removes only confirmed expunged messages');
+    });
     echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
     foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');

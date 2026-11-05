@@ -514,6 +514,8 @@ function inMailView(record) {
         return ['Recovery copies', 'Not in Inbox'].includes(folder);
     if (state.mailFolder === 'Suspected Junk')
         return folder === 'Inbox' && !!record.meta.junkReason && !record.meta.junkReviewed;
+    if (state.mailFolder === 'Local Junk')
+        return folder === 'Junk' && !record.meta.remote;
     return folder === state.mailFolder;
 }
 function matchingRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => (state.app !== 'calendar' || calendar.isVisible(r)) && (state.app !== 'mail' || inMailView(r)) && (!q || searchableText(r).includes(q))); }
@@ -896,7 +898,7 @@ function renderWorkspace(readerSnapshot) {
         bindMailViewControls();
         const folderNavigation = document.querySelector('#mail-folder-navigation');
         folderNavigation.innerHTML = '<div class="mail-folder-panel-head"><strong>Mail folders</strong><button data-action="close-mail-folders" aria-label="Close mail folders">✕</button></div>';
-        folderNavigation.insertAdjacentHTML('beforeend', `<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox', 'Drafts', 'Sent', 'Archive', 'Junk', 'Suspected Junk', 'Trash', 'Local mail', 'Recovery copies', 'Sending', 'Delivery uncertain'].map(folder => `<option ${state.mailFolder === folder ? 'selected' : ''}>${folder}</option>`).join('')}</select>`);
+        folderNavigation.insertAdjacentHTML('beforeend', `<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox', 'Drafts', 'Sent', 'Archive', 'Junk', 'Local Junk', 'Suspected Junk', 'Trash', 'Local mail', 'Recovery copies', 'Sending', 'Delivery uncertain'].map(folder => `<option ${state.mailFolder === folder ? 'selected' : ''}>${folder}</option>`).join('')}</select>`);
         document.querySelector('#mail-folder').onchange = event => void attempt(async () => {
             const select = event.target, folder = select.value;
             select.disabled = true;

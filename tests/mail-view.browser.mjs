@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export async function testMailView(page,url) {
-  let preferences={},writes=0,reads=0;
+  let preferences={},writes=0,reads=0,emptyRequests=0;
   const day=new Date(),date=(offset,hour)=>new Date(day.getFullYear(),day.getMonth(),day.getDate()+offset,hour).toISOString();
   const mail=(id,when,from,title)=>({id,kind:'mail',title,body:'Body '+id,revision:1,meta:{date:when,from,folder:'Inbox',read:true,remote:true,account:'view-account'}});
   let records=[mail('a',date(0,14),'Zed <z@example.com>','Zebra'),mail('b',date(0,13),'Amy <a@example.com>','Alpha'),mail('c',date(-1,12),'Beta <b@example.com>','Charlie'),mail('u','invalid','','Undated')];
@@ -9,12 +9,24 @@ export async function testMailView(page,url) {
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences};
-    else if(action==='accounts')json={accounts:[{id:'view-account',type:'imap',label:'View fixture'}]};
+    else if(action==='accounts')json={accounts:[{id:'view-account',type:'imap',label:'View fixture',folders:[{id:'Junk',name:'Junk',role:'Junk',protected:true}]}]};
     else if(action==='records'){reads++;json={records};}
     else if(action==='sync')json={count:0};
     else if(action==='preferences'){preferences=route.request().postDataJSON().preferences;writes++;json={ok:true};}
     else if(action==='activity')json={entries:[]};
     else if(action==='connections')json={links:[],items:[],more:false};
+    else if(action==='mail-empty-junk'){
+      const input=route.request().postDataJSON();
+      if(input.action==='preview'){
+        assert.equal(input.account,'view-account');assert.equal(input.folder,'Junk');
+        json={name:'View fixture / Junk',count:1,token:'fixture-confirmation'};
+      }else{
+        assert.equal(input.action,'empty');assert.equal(input.token,'fixture-confirmation');
+        emptyRequests++;
+        records=records.filter(row=>row.id!=='flagged');
+        json={deleted:1,skipped:0,unconfirmed:0};
+      }
+    }
     else if(action==='mail-action'){
       const input=route.request().postDataJSON(),record=records.find(r=>r.id===input.id);
       const folder={trash:'Trash',junk:'Junk','not-junk':'Inbox','block-domain':'Junk'}[input.action];
@@ -105,5 +117,22 @@ export async function testMailView(page,url) {
     await page.getByRole('button',{name:'Block Domain',exact:true}).click();
     await item('flagged').waitFor({state:'detached'});
     console.log('PASS Junk browser flow: review filter, mark as Junk, restore and confirm exact domain.');
+    await page.locator('#mail-folder').selectOption('Junk');
+    await item('flagged').waitFor();
+    await page.locator('[data-account-tree="view-account"] > summary').click();
+    const junkFolder=page.getByRole('button',{name:'Junk',exact:true});
+    const emptyMenu=page.getByRole('menuitem',{name:'Empty Junk Folder…',exact:true});
+    const confirmation=page.getByRole('dialog');
+    await junkFolder.click({button:'right'});
+    await emptyMenu.click();
+    await confirmation.getByText(/Permanently delete 1 message from View fixture \/ Junk/).waitFor();
+    await confirmation.getByRole('button',{name:'Cancel',exact:true}).click();
+    assert.equal(emptyRequests,0);
+    await junkFolder.focus();await page.keyboard.press('Shift+F10');
+    await emptyMenu.click();
+    await confirmation.getByRole('button',{name:'Empty Junk Folder',exact:true}).click();
+    await item('flagged').waitFor({state:'detached'});
+    assert.equal(emptyRequests,1);
+    console.log('PASS Empty Junk browser flow: folder context menu, cancellation, keyboard access, confirmation and refresh.');
   }finally{await page.setViewportSize({width:1440,height:1000});await page.unroute(routes);await page.goto('about:blank');}
 }
