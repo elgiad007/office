@@ -1,8 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from '../public/connection-layout.js';
+import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,connectionArrivalPoint,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from '../public/connection-layout.js';
 const items=Array.from({length:1400},(_,i)=>({id:'n'+i,title:'Item '+i,kind:'tasks'}));
 const links=items.slice(1).map(item=>({a:'n0',b:item.id}));
+
+test('arrival context reserves a clear side lane or a separate row on narrow maps',()=>{
+ const points=[{id:'current',x:0,y:0},{id:'peer',x:270,y:0},{id:'other',x:0,y:76}];
+ const side=connectionArrivalPoint(points,'current',1000);assert.equal(side.y,0);assert.ok(side.x+120<Math.min(...points.map(p=>p.x-120)));
+ const above=connectionArrivalPoint(points,'current',366);assert.equal(above.x,0);assert.ok(above.y+32<Math.min(...points.map(p=>p.y-60)));
+ assert.equal(connectionArrivalPoint(points,'current',500,100).y,0);
+ assert.equal(connectionArrivalPoint(points,'missing',1000),undefined);
+});
 
 test('map movement follows spatial neighbors and stops at edges',()=>{
  const grid=[{id:'a',x:0,y:0},{id:'b',x:320,y:0},{id:'c',x:0,y:124},{id:'d',x:320,y:124}];

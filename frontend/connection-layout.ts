@@ -2,6 +2,12 @@ import type {ConnectionEdge,ConnectionItem} from './types.js';
 
 export const GRAPH_LIMIT=160;
 export interface GraphPoint {id:string;x:number;y:number}
+/** Reserve a separate lane for navigation context, outside every actual map card. */
+export function connectionArrivalPoint(points:GraphPoint[],focal:string,width:number,height=Infinity):{x:number;y:number}|undefined {
+  const current=points.find(point=>point.id===focal);if(!current)return;
+  const side=width>=640||height!==Infinity&&Math.max(592/width,128/height)<=Math.max(272/width,248/height);
+  return side?{x:Math.min(...points.map(point=>point.x))-320,y:current.y}:{x:current.x,y:Math.min(...points.map(point=>point.y))-136};
+}
 export function connectionNeighbor(points:GraphPoint[],id:string,direction:'left'|'right'|'up'|'down',singleRowKeys=false):string|undefined {
   const origin=points.find(point=>point.id===id);if(!origin)return;
   const sameRow=(point:GraphPoint)=>Math.abs(point.y-origin.y)<.5;

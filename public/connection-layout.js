@@ -1,5 +1,13 @@
 // Generated from frontend/connection-layout.ts by pnpm build. Do not edit.
 export const GRAPH_LIMIT = 160;
+/** Reserve a separate lane for navigation context, outside every actual map card. */
+export function connectionArrivalPoint(points, focal, width, height = Infinity) {
+    const current = points.find(point => point.id === focal);
+    if (!current)
+        return;
+    const side = width >= 640 || height !== Infinity && Math.max(592 / width, 128 / height) <= Math.max(272 / width, 248 / height);
+    return side ? { x: Math.min(...points.map(point => point.x)) - 320, y: current.y } : { x: current.x, y: Math.min(...points.map(point => point.y)) - 136 };
+}
 export function connectionNeighbor(points, id, direction, singleRowKeys = false) {
     const origin = points.find(point => point.id === id);
     if (!origin)

@@ -66,6 +66,12 @@
 .connections-view .connection-node-subtitle { font-size:11px; }
 .connections-view [data-node].selected rect { fill:var(--wash); stroke:var(--accent); stroke-width:4; }
 .connections-view [data-node]:focus rect,.connections-view [data-group-node]:focus rect { stroke:var(--text); stroke-width:4; }
+.connections-view .connection-focal rect { fill:var(--wash); stroke:var(--accent); stroke-width:5; }
+.connections-view .connection-context-label { font-size:12px; font-weight:700; fill:var(--accent); }
+.connections-view .connection-navigation-line { stroke:var(--accent); stroke-width:2; stroke-dasharray:6 5; opacity:.6; }
+.connections-view .connection-origin { opacity:.6; cursor:pointer; }
+.connections-view .connection-origin:hover,.connections-view .connection-origin:focus { opacity:1; }
+.connections-view .connection-origin:focus rect { stroke:var(--text); stroke-width:4; }
 .connection-panel { width:340px; max-width:38%; min-height:0; overflow:auto; border-left:1px solid var(--line); padding-left:16px; overflow-wrap:anywhere; }
 .connection-panel h3 { margin:8px 0; font-size:16px; }
 .connection-panel [data-selection] { padding-bottom:16px; border-bottom:1px solid var(--line); }

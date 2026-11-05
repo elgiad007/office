@@ -1,14 +1,16 @@
 import {escapeHtml as e} from './formats.js';
 import {itemTypes,type ItemKind} from './item-types.js';
-import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
+import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,connectionArrivalPoint,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
 import type {ConnectionItem,ConnectionList,RequestApi} from './types.js';
 
 type Place={mode:'overview'|'graph'|'items';id:string;group:string;q:string;kind:string};
 type Camera={x:number;y:number;w:number;h:number};
-type HistoryEntry={place:Place;snapshot?:{data:ConnectionList;selected:string;focusedId:string;view:Camera;fitWidth:number;listPage:number;scroll:number;width:number;height:number}};
+type NavigationOrigin={id:string;title:string;kind:string;role:'item'|'group'|'overview'|'search'};
+type HistoryEntry={place:Place;from?:NavigationOrigin;snapshot?:{data:ConnectionList;selected:string;focusedId:string;view:Camera;fitWidth:number;listPage:number;scroll:number;width:number;height:number}};
 type Env={api:RequestApi;keys?:()=>Record<string,string>;dialog:HTMLDialogElement;modal:(title:string,body:string)=>void;open:(id:string)=>Promise<void>;notice:(message:string,error?:boolean)=>void};
 const typeLabel=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦'};
+const ORIGIN_ID='navigation-origin';
 
 export async function openConnectionExplorer(env:Env,source='') {
   const opener=document.activeElement as HTMLElement|null;
@@ -20,7 +22,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     <p class="connection-location" data-location></p>
     <div class="connection-workspace"><section class="connection-map-pane" aria-label="Connections map">
       <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span></div>
-      <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-edges></g><g data-nodes></g></svg></div>
+      <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-edges></g><g data-navigation-path></g><g data-nodes></g></svg></div>
       <p class="connection-map-note" data-map-note></p>
       <div class="connection-legend" aria-label="Item type legend">${Object.entries(itemTypes).map(([kind,type])=>`<span class="connection-type" data-kind="${kind}">${symbols[kind]} ${e(type.label)}</span>`).join('')}</div>
     </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
@@ -45,12 +47,14 @@ export async function openConnectionExplorer(env:Env,source='') {
   const size=()=>{const rect=svg.getBoundingClientRect();width=Math.max(rect.width,1);height=Math.max(rect.height,1);};
   const updateView=()=>{svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);query('[data-zoom-level]').textContent=`${Math.round(width/view.w*100)}%`;};
   function fit(){size();const values=[...points.values()];if(!values.length){view={x:-100,y:-100,w:width,h:height};fitWidth=view.w;updateView();return;}
-    const overview=place.mode==='overview',padX=overview?GROUP_CARD.width/2+GROUP_CARD.padding:140,padY=overview?GROUP_CARD.height/2+GROUP_CARD.padding:48;
+    const overview=place.mode==='overview',padX=overview?GROUP_CARD.width/2+GROUP_CARD.padding:140,padY=overview?GROUP_CARD.height/2+GROUP_CARD.padding:60;
     const xs=values.map(p=>p.x),ys=values.map(p=>p.y),x=Math.min(...xs)-padX,y=Math.min(...ys)-padY,w=Math.max(...xs)-x+padX,h=Math.max(...ys)-y+padY;
     const unit=Math.max(w/width,h/height,overview?1:.65);view={x:x+w/2-width*unit/2,y:y+h/2-height*unit/2,w:width*unit,h:height*unit};fitWidth=view.w;updateView();}
   function zoom(factor:number,px=width/2,py=height/2){size();const w=Math.max(width*.25,Math.min(Math.max(fitWidth*4,width*8),view.w*factor)),f=w/view.w;view={x:view.x+px/width*view.w*(1-f),y:view.y+py/height*view.h*(1-f),w,h:view.h*f};updateView();}
-  function centerSelection(){const p=points.get(selected);if(p){size();view={x:p.x-width/2,y:p.y-height/2,w:width,h:height};updateView();}}
-  const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{view.w*=width/oldW;view.h*=height/oldH;updateView();if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
+  function centerSelection(){const p=points.get(selected);if(p){size();const from=selected===(place.id||place.group)?points.get(ORIGIN_ID):undefined;
+    if(from){const left=Math.min(p.x,from.x)-136,right=Math.max(p.x,from.x)+136,top=Math.min(p.y,from.y)-64,bottom=Math.max(p.y,from.y)+48,unit=Math.max(1,(right-left)/width,(bottom-top)/height);view={x:(left+right)/2-width*unit/2,y:(top+bottom)/2-height*unit/2,w:width*unit,h:height*unit};}
+    else view={x:p.x-width/2,y:p.y-height/2,w:width,h:height};updateView();}}
+  const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{if(points.has(ORIGIN_ID)||(oldW>=640)!==(width>=640))renderMap();view.w*=width/oldW;view.h*=height/oldH;updateView();if(points.has(ORIGIN_ID)&&selected===(place.id||place.group))centerSelection();else if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
   const panel=query<HTMLElement>('#connection-panel');
   const itemButtons=(item:ConnectionItem)=>`<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
   const openItem=(id:string)=>{dialog.close();void env.open(id).catch(error=>env.notice(error.message,true));};
@@ -65,17 +69,17 @@ export async function openConnectionExplorer(env:Env,source='') {
     wireItems(section);
     const peers=new Set([selected]);for(const link of data.links)if(link.a===selected||link.b===selected){peers.add(link.a);peers.add(link.b);}
     svg.querySelectorAll<SVGGElement>('[data-node]').forEach(node=>{node.classList.toggle('selected',node.dataset.node===selected);node.classList.toggle('dimmed',!!item&&!peers.has(node.dataset.node!));node.setAttribute('aria-pressed',String(node.dataset.node===selected));});
-    svg.querySelectorAll<SVGLineElement>('line').forEach(line=>{const related=line.dataset.a===selected||line.dataset.b===selected;line.classList.toggle('highlighted',related);line.classList.toggle('dimmed',!!item&&!related);});
+    svg.querySelectorAll<SVGLineElement>('[data-edges] line').forEach(line=>{const related=line.dataset.a===selected||line.dataset.b===selected;line.classList.toggle('highlighted',related);line.classList.toggle('dimmed',!!item&&!related);});
     query<HTMLButtonElement>('[data-center]').disabled=!points.has(selected);
   }
   function select(id:string){const oldIds=[...points.keys()].join();selected=id;
     if(!points.has(id)&&place.mode!=='overview'){renderMap();fit();}else selection();
     if(oldIds!==[...points.keys()].join())status.textContent='Map updated to include the selected item. The list contains all loaded results.';
   }
-  const mapNodes=()=>[...svg.querySelectorAll<SVGGElement>('[data-node],[data-group-node]')];
-  const nodeId=(node:SVGGElement)=>node.dataset.node||node.dataset.groupNode!;
+  const mapNodes=()=>[...svg.querySelectorAll<SVGGElement>('[data-node],[data-group-node],[data-origin-node]')];
+  const nodeId=(node:SVGGElement)=>node.dataset.node||node.dataset.groupNode||node.dataset.originNode!;
   function reveal(id:string){const p=points.get(id);if(!p)return;
-    const halfW=place.mode==='overview'?GROUP_CARD.width/2:120,halfH=place.mode==='overview'?GROUP_CARD.height/2:32;
+    const halfW=place.mode==='overview'?GROUP_CARD.width/2:120,halfH=place.mode==='overview'?GROUP_CARD.height/2:id===ORIGIN_ID||id===(place.id||place.group)?60:32;
     if(p.x-halfW<view.x||p.x+halfW>view.x+view.w||p.y-halfH<view.y||p.y+halfH>view.y+view.h){view.x=p.x-view.w/2;view.y=p.y-view.h/2;updateView();}
   }
   function focusMap(preferred=focusedId){const nodes=mapNodes(),candidate=nodes.find(node=>nodeId(node)===preferred);
@@ -83,8 +87,30 @@ export async function openConnectionExplorer(env:Env,source='') {
     const node=candidate||visible||nodes[0];if(node)node.focus({preventScroll:true});else map.focus({preventScroll:true});
   }
   function exploreFocused(){const node=mapNodes().find(node=>nodeId(node)===focusedId);if(!node)return;
+    if(node.dataset.originNode){moveHistory(-1);return;}
     if(node.dataset.node&&place.mode==='graph'&&place.id===node.dataset.node&&selected===node.dataset.node){openItem(node.dataset.node);return;}
     void navigate({mode:'graph',id:node.dataset.node||'',group:node.dataset.groupNode||'',q:'',kind:''});
+  }
+  function navigationOrigin(next:Place):NavigationOrigin|undefined {
+    if(next.mode!=='graph')return;
+    if(next.mode===place.mode&&next.id===place.id&&next.group===place.group)return history[historyIndex].from;
+    if(place.mode==='graph'){
+      if(place.id){const item=data.items.find(item=>item.id===place.id);if(item)return {id:item.id,title:item.title,kind:item.kind,role:'item'};}
+      if(place.group){const prior=history[historyIndex].from,item=data.items.find(item=>item.id===place.group);return prior?.role==='group'&&prior.id===place.group?prior:{id:place.group,title:item?.title||'Connected group',kind:item?.kind||'',role:'group'};}
+    }
+    if(place.mode==='overview'&&next.group){const group=data.groups?.find(group=>group.id===next.group);if(group)return {id:group.id,title:group.title,kind:group.kind,role:'group'};}
+    return {id:'',title:place.mode==='items'?'Search results':'Workspace overview',kind:'',role:place.mode==='items'?'search':'overview'};
+  }
+  function renderArrival(){const layer=query<SVGGElement>('[data-navigation-path]');layer.innerHTML='';
+    if(place.mode!=='graph')return;
+    const focal=place.id||place.group,current=points.get(focal),from=history[historyIndex].from;
+    const focalNode=svg.querySelector<SVGGElement>(`[data-node="${CSS.escape(focal)}"]`);
+    if(focalNode){focalNode.classList.add('connection-focal');focalNode.setAttribute('aria-label','Current focal item. '+focalNode.getAttribute('aria-label'));focalNode.insertAdjacentHTML('beforeend','<text class="connection-context-label" x="-120" y="-44">Current</text>');}
+    if(!current||!from)return;
+    const position=connectionArrivalPoint([...points].map(([id,p])=>({id,...p})),focal,width,height)!;points.set(ORIGIN_ID,position);
+    const horizontal=position.y===current.y,lines=titleLines(from.title,185),description=from.role==='group'?'Group':from.role==='item'?typeLabel(from.kind):'View';
+    layer.innerHTML=`<line class="connection-navigation-line" aria-hidden="true" x1="${position.x+(horizontal?120:0)}" y1="${position.y+(horizontal?0:32)}" x2="${current.x-(horizontal?120:0)}" y2="${current.y-(horizontal?0:32)}"/><g class="connection-origin" data-origin-node="${ORIGIN_ID}" data-kind="${e(from.kind)}" role="button" tabindex="-1" aria-label="From ${e(description)}: ${e(from.title)}. Return to previous view." transform="translate(${position.x} ${position.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-context-label" x="-120" y="-44">From</text><text class="connection-node-symbol" x="-105" y="5">${symbols[from.kind]||'↶'}</text><text class="connection-node-title">${lines.map((line,i)=>`<tspan x="-81" y="${-12+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(description)} · Return</text><title>${e('From '+description+': '+from.title+' — Return to previous view')}</title></g>`;
+    query('[data-map-note]').textContent+=' Dashed line shows your navigation path.';
   }
   function renderMap(){
     const restoreFocus=map.contains(document.activeElement);
@@ -102,11 +128,11 @@ export async function openConnectionExplorer(env:Env,source='') {
       query('[data-nodes]').innerHTML=visible.map(item=>{const p=points.get(item.id)!,lines=titleLines(item.title,185);return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind]||'●'}</text><text class="connection-node-title">${lines.map((line,i)=>`<tspan x="-81" y="${-12+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(typeLabel(item.kind))} · ${item.degree??'—'} links</text><title>${e(typeLabel(item.kind)+' · '+item.title)}</title></g>`;}).join('');
       query('[data-map-note]').textContent=`Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length>GRAPH_LIMIT||eligible.length>500?`Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. `:''}Drag to pan · Wheel/pinch to zoom · Select to highlight.`;
     }
-    selection();
+    renderArrival();selection();
     const nodes=mapNodes();if(!nodes.some(node=>nodeId(node)===focusedId))focusedId=nodes.some(node=>nodeId(node)===selected)?selected:nodes[0]?nodeId(nodes[0]):'';
     for(const node of nodes){node.tabIndex=nodeId(node)===focusedId?0:-1;
       node.onfocus=()=>{focusedId=nodeId(node);for(const peer of nodes)peer.tabIndex=peer===node?0:-1;reveal(focusedId);if(node.dataset.node)select(focusedId);};
-      node.onclick=()=>{node.focus({preventScroll:true});if(node.dataset.groupNode)exploreFocused();};
+      node.onclick=()=>{node.focus({preventScroll:true});if(node.dataset.groupNode||node.dataset.originNode)exploreFocused();};
     }
     if(restoreFocus)focusMap();
   }
@@ -138,7 +164,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     finally{if(version===request&&active()){busy=false;more.disabled=false;host.setAttribute('aria-busy','false');}}
   }
   function remember(){if(!busy)history[historyIndex].snapshot={data,selected,focusedId,view:{...view},fitWidth,listPage,scroll:panel.scrollTop,width,height};}
-  async function navigate(next:Place,record=true){clearTimeout(timer);sequenceTime=0;if(record){remember();history=history.slice(0,historyIndex+1);history.push({place:{...next}});historyIndex++;}place={...next};selected=place.id||place.group;focusedId=selected;filter.value=place.q;kind.value=place.kind;panel.scrollTop=0;await fetchPage(true);}
+  async function navigate(next:Place,record=true){clearTimeout(timer);sequenceTime=0;if(record){const from=navigationOrigin(next);remember();history=history.slice(0,historyIndex+1);history.push({place:{...next},from});historyIndex++;}place={...next};selected=place.id||place.group;focusedId=selected;filter.value=place.q;kind.value=place.kind;panel.scrollTop=0;await fetchPage(true);}
   function moveHistory(delta:number){const index=historyIndex+delta;if(index<0||index>=history.length)return;
     remember();historyIndex=index;const entry=history[index],snapshot=entry.snapshot;
     if(!snapshot){void navigate(entry.place,false);return;}
@@ -158,7 +184,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   query<HTMLButtonElement>('[data-toggle-panel]').onclick=event=>{const button=event.currentTarget as HTMLButtonElement;panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));button.textContent=panel.hidden?'Show details':'Hide details';};
   map.addEventListener('wheel',event=>{event.preventDefault();const rect=svg.getBoundingClientRect();zoom(Math.exp(Math.max(-.35,Math.min(.35,event.deltaY*.002))),event.clientX-rect.left,event.clientY-rect.top);},{passive:false});
   const pointers=new Map<number,{x:number;y:number}>();
-  map.onpointerdown=event=>{if(event.button!==0)return;if((event.target as Element).closest('[data-node],[data-group-node]'))return;map.focus({preventScroll:true});map.setPointerCapture(event.pointerId);pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});};
+  map.onpointerdown=event=>{if(event.button!==0)return;if((event.target as Element).closest('[data-node],[data-group-node],[data-origin-node]'))return;map.focus({preventScroll:true});map.setPointerCapture(event.pointerId);pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});};
   map.onpointermove=event=>{const old=pointers.get(event.pointerId);if(!old)return;const others=[...pointers.entries()].filter(([id])=>id!==event.pointerId);if(others.length){const other=others[0][1],before=Math.hypot(old.x-other.x,old.y-other.y),after=Math.hypot(event.clientX-other.x,event.clientY-other.y),rect=svg.getBoundingClientRect();if(before>0&&after>0)zoom(before/after,(event.clientX+other.x)/2-rect.left,(event.clientY+other.y)/2-rect.top);}else{view.x-=(event.clientX-old.x)*view.w/width;view.y-=(event.clientY-old.y)*view.h/height;updateView();}pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});};
   const end=(event:PointerEvent)=>{pointers.delete(event.pointerId);};map.onpointerup=end;map.onpointercancel=end;map.onlostpointercapture=end;
   host.addEventListener('keydown',event=>{
@@ -181,7 +207,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     if(direction){event.preventDefault();sequenceTime=0;if(event.shiftKey&&directions[event.key]){view.x+=(direction==='left'?-1:direction==='right'?1:0)*view.w*.12;view.y+=(direction==='up'?-1:direction==='down'?1:0)*view.h*.12;updateView();return;}
       const next=connectionNeighbor([...points].map(([id,p])=>({id,...p})),focusedId,direction,!directions[event.key]);focusMap(next||focusedId);return;}
     if(event.key==='Enter'){event.preventDefault();if(!event.repeat)exploreFocused();return;}
-    if(event.key===' '){event.preventDefault();if(place.mode!=='overview')select(focusedId);return;}
+    if(event.key===' '){event.preventDefault();if(focusedId===ORIGIN_ID){if(!event.repeat)exploreFocused();}else if(place.mode!=='overview')select(focusedId);return;}
     if(event.key==='g'){event.preventDefault();if(!event.repeat){const now=Date.now();if(sequenceTime&&now-sequenceTime<900){const first=mapNodes()[0];if(first)focusMap(nodeId(first));sequenceTime=0;}else sequenceTime=now;}return;}
     sequenceTime=0;
     if(event.key==='G'||event.key==='Home'||event.key==='End'){event.preventDefault();const nodes=mapNodes(),node=event.key==='Home'?nodes[0]:nodes.at(-1);if(node)focusMap(nodeId(node));return;}
