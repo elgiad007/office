@@ -9,6 +9,7 @@ export async function testMailSelectionSync(page,url) {
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{}};
     else if(action==='accounts')json={accounts:[{id:'selection-sync',label:'Selection sync',type:'imap'}]};
     else if(action==='activity')json={entries:[]};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='sync'){
       if(removeId){messages=messages.filter(r=>r.id!==removeId);removeId=null;}
       json={count:1,more:false};

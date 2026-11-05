@@ -17,7 +17,12 @@ export async function testMailView(page,url) {
     else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='mail-action'){
       const input=route.request().postDataJSON(),record=records.find(r=>r.id===input.id);
-      assert.equal(input.action,'trash');record.meta.folder='Trash';record.revision++;json={record};
+      const folder={trash:'Trash',junk:'Junk','not-junk':'Inbox','block-domain':'Junk'}[input.action];
+      assert.ok(folder);
+      if(input.action==='block-domain')assert.equal(input.target,'example.com');
+      record.meta.folder=folder;
+      if(input.action==='not-junk')record.meta.junkReviewed=true;
+      record.revision++;json={record};
     }else throw Error('Unexpected view fixture API: '+action);
     await route.fulfill({json});
   });
@@ -77,5 +82,28 @@ export async function testMailView(page,url) {
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     const menu=await page.locator('.mail-view-menu').boundingBox();assert.ok(menu.x>=0&&menu.x+menu.width<=390);
     console.log('PASS mail list view: grouping/sorting, collapse and native keyboard activation, hidden selection/reader and sync, persistence, expanded navigation/range/delete order, collapse-all, paging and mobile menu.');
+    await page.setViewportSize({width:1440,height:1000});
+    records=[mail('flagged',date(0,14),'Sender <sender@example.com>','Flagged message'),mail('ordinary',date(0,13),'Other <other@example.com>','Ordinary message')];
+    records[0].meta.junkReason='Spam verdict in the message headers';
+    await page.reload();await item('flagged').waitFor();
+    await item('flagged').getByText('Suspected junk', {exact:false}).waitFor();
+    await page.locator('#mail-folder').selectOption('Suspected Junk');
+    assert.deepEqual(await order(),['flagged']);
+    await item('flagged').click({button:'right'});
+    await page.getByRole('menuitem',{name:'Mark as Junk',exact:true}).click();
+    await item('flagged').waitFor({state:'detached'});
+    await page.locator('#mail-folder').selectOption('Junk');
+    await item('flagged').click({button:'right'});
+    await page.getByRole('menuitem',{name:'Not Junk',exact:true}).click();
+    await item('flagged').waitFor({state:'detached'});
+    await page.locator('#mail-folder').selectOption('Suspected Junk');
+    assert.deepEqual(await order(),[]);
+    await page.locator('#mail-folder').selectOption('Inbox');
+    await item('flagged').click({button:'right'});
+    await page.getByRole('menuitem',{name:'Block Domain…',exact:true}).click();
+    await page.getByRole('dialog').getByText(/Block example\.com for this account/).waitFor();
+    await page.getByRole('button',{name:'Block Domain',exact:true}).click();
+    await item('flagged').waitFor({state:'detached'});
+    console.log('PASS Junk browser flow: review filter, mark as Junk, restore and confirm exact domain.');
   }finally{await page.setViewportSize({width:1440,height:1000});await page.unroute(routes);await page.goto('about:blank');}
 }

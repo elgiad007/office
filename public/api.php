@@ -216,6 +216,29 @@ try {
         foreach ($rows as &$row) $row['folders']=setting('mail-folders:'.$row['id'],[]);
         unset($row); json_response(['accounts'=>$rows]);
     }
+    if ($route==='mail-junk-settings' && $method==='POST') {
+        $a=account((string)($input['account']??''));
+        if (!in_array($a['type'],['google','imap'],true)) fail('Choose a mail account.');
+        session_write_close();
+        $operation=(string)($input['operation']??'list');
+        $read=fn()=>['rules'=>array_values(array_map(fn($rule)=>['type'=>$rule['type'],'target'=>$rule['target']],mail_block_rules($a['id']))),'folder'=>imap_folder_decode(setting('mail-junk-folder:'.$a['id'],''))];
+        if ($operation==='list') json_response($read());
+        json_response(with_account_mail_mutation($a['id'],function()use($a,$operation,$input,$read){
+            if (in_array($operation,['add','remove'],true)) {
+                update_mail_block($a['id'],(string)($input['type']??''),(string)($input['target']??''),$operation==='remove');
+            } elseif ($operation==='folder' && $a['type']==='imap') {
+                $name=trim((string)($input['folder']??''));
+                $path=$name===''?'':imap_folder_encode($name);
+                if ($path!=='') {
+                    $catalog=discover_mail_folders($a);
+                    $folder=mail_folder_find($catalog,$path);
+                    if (!in_array($folder['role'],['Custom folder','Junk'],true) || ($folder['protected'] && !in_array($folder['role'],['Junk'],true))) fail('Choose a Junk folder or an unprotected custom folder.');
+                }
+                set_setting('mail-junk-folder:'.$a['id'],$path);
+            } else fail('Unknown Junk settings operation.');
+            return $read();
+        }));
+    }
     if (in_array($route,['mail-folders','mail-folder-manage','mail-folder-sync'],true) && $method==='POST') {
         $a=account((string)($input['account']??'')); session_write_close();
         $operation=function() use($route,$a,$input) {
@@ -251,7 +274,11 @@ try {
         $batches=$input['batches']??1;if(!is_int($batches) || $batches<1 || $batches>4)fail('Choose between one and four sync batches.');
         $a=account((string)($input['id']??'')); session_write_close();
         try {
-            $operation=function() use (&$a,$repair,$batches) { return match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair,$batches),'caldav'=>sync_caldav($a) }; };
+            $operation=function() use (&$a,$repair,$batches) {
+                $count=match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair,$batches),'caldav'=>sync_caldav($a) };
+                if ($a['type']!=='caldav') apply_mail_blocks($a);
+                return $count;
+            };
             $count=$a['type']==='caldav'?with_account_mail_lock($a['id'],$operation):with_account_mail_sync($a['id'],$operation);
             db()->prepare('UPDATE accounts SET last_sync=?,error=NULL WHERE id=?')->execute([gmdate('c'),$a['id']]);
             $pending=setting('mail-pending:'.$a['id'],[]);
@@ -271,7 +298,7 @@ try {
     }
     if ($route==='mail-action' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$r],409);
-        $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard','move','label','unlabel'],true))fail('Unknown mail action.');
+        $action=(string)($input['action']??''); if (!in_array($action,['archive','trash','restore','read','unread','keep-local','discard','move','label','unlabel','junk','not-junk','block-sender','block-domain'],true))fail('Unknown mail action.');
         session_write_close();
         $result=with_account_mail_mutation((string)($r['meta']['account']??''),function() use ($r,$action,$input) {
             $current=get_record($r['id']);
@@ -294,7 +321,17 @@ try {
                 unset($undoBefore['meta']['rawBase64'],$undoBefore['meta']['raw'],$undoBefore['meta']['headersBase64']);
                 $undoToken=mail_undo_receipt(['before'=>$undoBefore],'pending');
             }
-            $record=$action==='move' && $destination!=='' && $destination!==$accountId
+            if (in_array($action,['junk','not-junk','block-sender','block-domain'],true)) {
+                if (str_starts_with($action,'block-')) {
+                    $type=substr($action,6);
+                    $target=mail_block_target($current['meta']['from']??'',$type);
+                    if ($current['kind']!=='mail' || empty($current['meta']['remote']) || $target===null || $target!==($input['target']??null)) fail('The sender changed or has no valid address.');
+                    if (in_array($current['meta']['folder']??'',['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'],true)) fail('Choose a message that can be moved.');
+                    update_mail_block($accountId,$type,$target);
+                    try { $record=move_mail_junk($current,false); }
+                    catch (HttpError $e) { fail('Block rule saved. '.$e->getMessage(),$e->getCode()?:400); }
+                } else $record=move_mail_junk($current,$action==='not-junk');
+            } else $record=$action==='move' && $destination!=='' && $destination!==$accountId
                 ?with_account_mail_mutation($destination,fn()=>transfer_remote_mail($current,account($destination),(string)($input['folder']??'')))
                 :(in_array($action,['move','label','unlabel'],true)?file_remote_mail($current,$action,(string)($input['folder']??''),$destination!=='')
                 :(in_array($action,['keep-local','discard'],true)?recovery_mail_action($current,$action,$input['connectionHubTitle']??null):remote_mail_action($current,$action,$undoBefore)));

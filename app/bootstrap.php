@@ -146,7 +146,7 @@ function mail_list_record(array $row): array {
     $row['bodyHash']=isset($row['meta']['bodyRawBase64'])?hash('sha256',$row['meta']['bodyRawBase64']):$row['contentHash'];
     $row['hasOriginal']=isset($row['meta']['rawBase64']) || isset($row['meta']['raw']);
     $row['summary']=true;
-    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts']);
+    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts'],$row['meta']['junkPending'],$row['meta']['junkAttempted']);
     return $row;
 }
 function get_record(string $id): array {

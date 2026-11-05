@@ -1,5 +1,11 @@
 import {asError} from './utils.js';
 import type {AppName, ConnectionDeletionChoices, MenuEnvironment, OfficeRecord} from './types.js';
+function blockTarget(row: OfficeRecord,action: string) {
+  const from=row.meta.from?.trim()||'';
+  const address=(from.match(/^[^<>]*<([^<>]+)>$/)?.[1]||from).trim().toLowerCase();
+  if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address)) return '';
+  return action==='block-domain'?address.split('@')[1]:address;
+}
 // Item menus share the application's persistence and provider operations.
 export function installItemMenus(env: MenuEnvironment) {
   const {state,e}=env;
@@ -20,7 +26,12 @@ export function installItemMenus(env: MenuEnvironment) {
       if(single&&r.meta.from)add('reply','Reply');
       if(ordinary){
         add('read','Mark as read');add('unread','Mark as unread');
-        if(rows.every(r=>r.meta.folder!=='Archive'))add('archive',local?'Archive locally':'Archive');
+        if(rows.every(r=>r.meta.folder==='Junk'||(r.meta.folder==='Inbox'&&r.meta.junkReason&&!r.meta.junkReviewed)))add('not-junk','Not Junk');
+        if(rows.every(r=>r.meta.folder!=='Junk'))add('junk','Mark as Junk');
+        if(single&&live&&blockTarget(r,'block-sender')){
+          add('block-sender','Block Sender…');add('block-domain','Block Domain…');
+        }
+        if(rows.every(r=>!['Archive','Junk'].includes(r.meta.folder||'')))add('archive',local?'Archive locally':'Archive');
       }
       if(live){
         if(new Set(rows.map(r=>r.meta.account)).size===1)add('file','Move / Labels…');
@@ -69,7 +80,7 @@ export function installItemMenus(env: MenuEnvironment) {
           if(reconciled.has(row.id)){count++;continue;}
           await env.waitForMailRead(row.id);
           if(id==='delete')await env.api('delete',{id:row.id,revision:row.revision,...choices[row.id]});
-          else if(row.meta.remote){const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:id});for(const related of result.removedIds||[])reconciled.add(related);}
+          else if(row.meta.remote||['junk','not-junk'].includes(id)){const result=await env.api('mail-action',{id:row.id,revision:row.revision,action:id,target:id.startsWith('block-')?blockTarget(row,id):undefined});for(const related of result.removedIds||[])reconciled.add(related);}
           else{
             const copy=structuredClone(row);
             // PHP encodes empty metadata as []; named array properties are lost in JSON.
@@ -80,14 +91,17 @@ export function installItemMenus(env: MenuEnvironment) {
             await env.api('save',copy);
           }
           count++;
-          if(['delete','trash','discard','archive'].includes(id))removed.push(row.id);
+          if(['delete','trash','discard','archive','junk','block-sender','block-domain'].includes(id)||(id==='not-junk'&&(row.meta.folder==='Junk'||state.mailFolder==='Suspected Junk')))removed.push(row.id);
         }
       }catch(cause) { const error=asError(cause);throw Error(`${count} of ${rows.length} items updated. ${error.message}`);}
       finally{await reload(removed);}
       env.notice(`${count} ${count===1?'item':'items'} updated.`);
     };
     if(['delete','discard','trash'].includes(id))await env.confirmDeletion(rows,id==='trash'?'Move to Trash':id==='delete'?(app==='mail'&&rows.length===1&&rows[0].meta.folder==='Drafts'?'Discard Draft':'Delete selected items'):'Discard copies',id==='trash'?`Move ${rows.length} selected message(s) to Trash?`:id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply,id==='trash');
-    else await apply();
+    else if(id==='block-sender'||id==='block-domain'){
+      const label=id==='block-sender'?'Sender':'Domain';
+      env.confirmation('Block '+label,`Block ${blockTarget(rows[0],id)} for this account and move this message to Junk?`,apply);
+    } else await apply();
   }
   async function open(row: HTMLElement,x: number,y: number) {
     const restore=env.capturePane();close();restoreOrigin=restore;const token=generation,app=state.app,id=row.dataset.id!;
@@ -139,5 +153,5 @@ export function installItemMenus(env: MenuEnvironment) {
   document.addEventListener('scroll',event=>{if(menu&&!menu.contains((event.target as HTMLElement)))close();},true);
   window.addEventListener('resize',()=>close());
   window.addEventListener('blur',()=>close());
-  return {close};
+  return {close,run};
 }

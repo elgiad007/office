@@ -50,7 +50,7 @@ export function renderMailListCopy(record, value, failure = '') {
         const attachment = slot.field === 'attachment';
         return `<span class="mail-list-cell mail-list-${side} mail-list-${slot.size} mail-field-${slot.field}" title="${e(text)}"${attachment && text ? ` role="img" aria-label="${e(text)}"` : ''}>${attachment ? (text ? (record.meta.hasAttachments === true ? '&#128206;' : '?') : '') : slot.field === 'date' && Number.isFinite(time) ? timestampLabel(parsed.toISOString(), text) : e(text)}</span>`;
     };
-    return `<span class="item-copy mail-list-copy">${layout.rows.map(row => row.left.field === 'none' && row.right.field === 'none' ? '' : `<span class="mail-list-line">${cell(row.left, 'left')}${cell(row.right, 'right')}</span>`).join('')}${failure ? `<small class="mail-action-failure" title="${e(failure)}">Mail action failed — restored</small>` : ''}</span>`;
+    return `<span class="item-copy mail-list-copy">${layout.rows.map(row => row.left.field === 'none' && row.right.field === 'none' ? '' : `<span class="mail-list-line">${cell(row.left, 'left')}${cell(row.right, 'right')}</span>`).join('')}${record.meta.junkReason && !record.meta.junkReviewed && record.meta.folder === 'Inbox' ? `<small class="mail-junk-flag" title="${e(record.meta.junkReason)}">Suspected junk · ${e(record.meta.junkReason)}</small>` : ''}${failure ? `<small class="mail-action-failure" title="${e(failure)}">Mail action failed — restored</small>` : ''}</span>`;
 }
 export function bindMailListSettings(container, value, onSave) {
     let layout = mailListLayout(value);

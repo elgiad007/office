@@ -1,5 +1,12 @@
 // Generated from frontend/item-menus.ts by pnpm build. Do not edit.
 import { asError } from './utils.js';
+function blockTarget(row, action) {
+    const from = row.meta.from?.trim() || '';
+    const address = (from.match(/^[^<>]*<([^<>]+)>$/)?.[1] || from).trim().toLowerCase();
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address))
+        return '';
+    return action === 'block-domain' ? address.split('@')[1] : address;
+}
 // Item menus share the application's persistence and provider operations.
 export function installItemMenus(env) {
     const { state, e } = env;
@@ -28,7 +35,15 @@ export function installItemMenus(env) {
             if (ordinary) {
                 add('read', 'Mark as read');
                 add('unread', 'Mark as unread');
-                if (rows.every(r => r.meta.folder !== 'Archive'))
+                if (rows.every(r => r.meta.folder === 'Junk' || (r.meta.folder === 'Inbox' && r.meta.junkReason && !r.meta.junkReviewed)))
+                    add('not-junk', 'Not Junk');
+                if (rows.every(r => r.meta.folder !== 'Junk'))
+                    add('junk', 'Mark as Junk');
+                if (single && live && blockTarget(r, 'block-sender')) {
+                    add('block-sender', 'Block Sender…');
+                    add('block-domain', 'Block Domain…');
+                }
+                if (rows.every(r => !['Archive', 'Junk'].includes(r.meta.folder || '')))
                     add('archive', local ? 'Archive locally' : 'Archive');
             }
             if (live) {
@@ -114,8 +129,8 @@ export function installItemMenus(env) {
                     await env.waitForMailRead(row.id);
                     if (id === 'delete')
                         await env.api('delete', { id: row.id, revision: row.revision, ...choices[row.id] });
-                    else if (row.meta.remote) {
-                        const result = await env.api('mail-action', { id: row.id, revision: row.revision, action: id });
+                    else if (row.meta.remote || ['junk', 'not-junk'].includes(id)) {
+                        const result = await env.api('mail-action', { id: row.id, revision: row.revision, action: id, target: id.startsWith('block-') ? blockTarget(row, id) : undefined });
                         for (const related of result.removedIds || [])
                             reconciled.add(related);
                     }
@@ -132,7 +147,7 @@ export function installItemMenus(env) {
                         await env.api('save', copy);
                     }
                     count++;
-                    if (['delete', 'trash', 'discard', 'archive'].includes(id))
+                    if (['delete', 'trash', 'discard', 'archive', 'junk', 'block-sender', 'block-domain'].includes(id) || (id === 'not-junk' && (row.meta.folder === 'Junk' || state.mailFolder === 'Suspected Junk')))
                         removed.push(row.id);
                 }
             }
@@ -147,6 +162,10 @@ export function installItemMenus(env) {
         };
         if (['delete', 'discard', 'trash'].includes(id))
             await env.confirmDeletion(rows, id === 'trash' ? 'Move to Trash' : id === 'delete' ? (app === 'mail' && rows.length === 1 && rows[0].meta.folder === 'Drafts' ? 'Discard Draft' : 'Delete selected items') : 'Discard copies', id === 'trash' ? `Move ${rows.length} selected message(s) to Trash?` : id === 'delete' ? (app === 'mail' ? `Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.` : `Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`) : `Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`, apply, id === 'trash');
+        else if (id === 'block-sender' || id === 'block-domain') {
+            const label = id === 'block-sender' ? 'Sender' : 'Domain';
+            env.confirmation('Block ' + label, `Block ${blockTarget(rows[0], id)} for this account and move this message to Junk?`, apply);
+        }
         else
             await apply();
     }
@@ -235,5 +254,5 @@ export function installItemMenus(env) {
         close(); }, true);
     window.addEventListener('resize', () => close());
     window.addEventListener('blur', () => close());
-    return { close };
+    return { close, run };
 }

@@ -1,9 +1,11 @@
 <?php
 declare(strict_types=1);
 
-const MAIL_FOLDERS = ['Inbox','Archive','Trash'];
+require_once __DIR__.'/mail-junk.php';
+
+const MAIL_FOLDERS = ['Inbox','Archive','Trash','Junk'];
 const IMAP_BODY_LIMIT = 1400000;
-const IMAP_HEADER_SECTION = 'HEADER.FIELDS (SUBJECT FROM TO DATE MESSAGE-ID)';
+const IMAP_HEADER_SECTION = 'HEADER.FIELDS (SUBJECT FROM TO DATE MESSAGE-ID X-SPAM-FLAG X-SPAM-STATUS)';
 const MAIL_SYNC_BATCH = 100;
 const IMAP_HEADER_BATCH = 25;
 const IMAP_FLAG_BATCH = 1000;
@@ -17,8 +19,9 @@ function gmail_header_download(array $a,string $id,array $msg,array $meta): arra
     $headers='';
     foreach ($msg['payload']['headers'] as $h) {
         if (!is_string($h['name']??null) || !is_string($h['value']??null)) fail('Invalid Gmail header.');
-        if (in_array(strtolower($h['name']),['subject','from','to','date','message-id'],true)) $headers.=$h['name'].': '.str_replace(["\r","\n"],' ',$h['value'])."\r\n";
+        if (in_array(strtolower($h['name']),['subject','from','to','date','message-id','x-spam-flag','x-spam-status'],true)) $headers.=$h['name'].': '.str_replace(["\r","\n"],' ',$h['value'])."\r\n";
     }
+    $meta['junkArrival']=gmail_junk_arrival($msg);
     return imap_header_download($a,'gmail:'.$id,$headers."\r\n",$meta,(int)($msg['sizeEstimate']??0));
 }
 function imap_download_sizes(mixed $s,array $ids): array {
@@ -56,6 +59,7 @@ function imap_flag_batches(array $ids): array {
 }
 function imap_header_download(array $a,string $source,string $headers,array $meta,int $size): array {
     $parsed=parse_eml($headers);
+    if ($reason=mail_junk_reason($headers)) $parsed['meta']['junkReason']=$reason;
     unset($parsed['meta']['hasAttachments']); // Headers alone cannot establish attachment presence.
     return ['kind'=>'mail','title'=>$parsed['title']?:'(Untitled)','body'=>'','meta'=>array_merge($parsed['meta'],$meta,[
         'headerOnly'=>true,'messageSize'=>$size,'headersBase64'=>base64_encode($headers),'remote'=>true,
@@ -85,6 +89,7 @@ function mail_deadline(float $deadline): void {
 }
 function mail_download(array $a,string $source,string $raw,array $meta): array {
     $p=parse_eml($raw);
+    if ($reason=mail_junk_reason($raw)) $p['meta']['junkReason']=$reason;
     return ['kind'=>'mail','title'=>$p['title']?:'(Untitled)','body'=>$p['body'],'meta'=>array_merge($p['meta'],$meta,['rawBase64'=>base64_encode($raw),'remote'=>true,'account'=>$a['id'],'accountLabel'=>$a['label'],'source'=>$source])];
 }
 /** Publish one complete account scan atomically. Downloads may be a recent window,
@@ -107,6 +112,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
                 if (isset($r['meta']['rawBase64'])) $hashes[hash('sha256',$r['meta']['rawBase64'])][]=$r['id'];
             }
         }
+        $rules=$downloads?mail_block_rules($a['id']):[];
         $incomingHashes=[];
         foreach ($downloads as $source=>$r) if (!isset($bySource[$source]) && isset($r['meta']['rawBase64'])) $incomingHashes[hash('sha256',$r['meta']['rawBase64'])][]=$source;
         foreach ($downloads as $source=>$r) {
@@ -125,6 +131,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
                     if(isset($old['meta']['mimeParts']))$r['meta']['hasAttachments']=$old['meta']['hasAttachments'];
                 }
             }
+            mail_junk_sync_meta($r['meta'],$old['meta']??null,$rules);
             validate_record($r);
             // Re-downloading unchanged mail must not invalidate an open reader.
             if (!$old || $old['kind']!==$r['kind'] || $old['title']!==$r['title'] || $old['body']!==$r['body'] || $old['meta']!==$r['meta']) save_record($r,true,false);
@@ -135,6 +142,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
             if (isset($downloads[$source]) || !isset($membership[$source])) continue;
             $meta=array_merge($r['meta'],$membership[$source],['source'=>$source]);
             unset($meta['recoveryFrom']);
+            if ($meta['folder']!=='Inbox') unset($meta['junkPending'],$meta['junkAttempted']);
             if ($meta!==$r['meta']) { $r['meta']=$meta; save_record($r,true,false); }
         }
         $keep=(setting('preferences',[])['keepRecoveryCopies']??true)!==false;
@@ -181,7 +189,7 @@ function imap_list_folders(array $list): array {
         $decode=static fn(string $v):string=>preg_replace('/\\\\(["\\\\])/','$1',substr($v,1,-1));
         $name=str_starts_with($m[3],'{')?$literal:(str_starts_with($m[3],'"')?$decode($m[3]):$m[3]);
         if (!is_string($name) || $name==='' || preg_match('/[\r\n\x00]/',$name)) fail('The IMAP server returned an invalid folder name. The previous mail view was kept.');
-        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'all'=>in_array('\\ALL',$flags,true),'trash'=>in_array('\\TRASH',$flags,true),'protected'=>(bool)array_intersect($flags,['\\ARCHIVE','\\TRASH','\\SENT','\\DRAFTS','\\JUNK','\\ALL','\\IMPORTANT','\\FLAGGED']),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
+        $folders[$name]=['archive'=>in_array('\\ARCHIVE',$flags,true),'all'=>in_array('\\ALL',$flags,true),'trash'=>in_array('\\TRASH',$flags,true),'junk'=>in_array('\\JUNK',$flags,true),'protected'=>(bool)array_intersect($flags,['\\ARCHIVE','\\TRASH','\\SENT','\\DRAFTS','\\JUNK','\\ALL','\\IMPORTANT','\\FLAGGED']),'delimiter'=>$m[2]==='NIL'?'':$decode($m[2])];
     }
     return $folders;
 }
@@ -240,6 +248,9 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
         if ($path!==null) $paths[$label]=$path;
     }
     if (count(array_unique($paths))!==count($paths)) fail('Inbox, Archive and Trash must use different server folders.');
+    $junk=imap_junk_path($a,$folders);
+    if ($junk!==null && !in_array($junk,$paths,true)) $paths['Junk']=$junk;
+    $arrivalField=mail_block_rules($a['id'])?' INTERNALDATE':'';
     if ($onlyPath!==null) {
         if (!isset($folders[$onlyPath])) fail('Folder no longer exists. Refresh the folder list.',409);
         $label=array_search($onlyPath,$paths,true);
@@ -332,7 +343,7 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
                 if(isset($headerChunks[$uid])){
                     if(!isset($headerResponses[$uid])){
                         $chunk=$headerChunks[$uid];
-                        $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS RFC822.SIZE'.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',32768);
+                        $response=imap_command($s,'UID FETCH '.implode(',',$chunk).' (UID FLAGS RFC822.SIZE'.$arrivalField.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',32768);
                         $headerResponses=imap_fetch_responses($response);
                         // Validate the whole batch before accepting any of its headers.
                         foreach($chunk as $requested){
@@ -342,21 +353,23 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
                         }
                     }
                     $response=$headerResponses[$uid];
-                }else $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',32768);
+                }else $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.$arrivalField.($gmail?' X-GM-MSGID':'').' BODY.PEEK['.IMAP_HEADER_SECTION.']<0.32768>)',32768);
                 $headers=imap_fetch_content($response,(string)$uid,IMAP_HEADER_SECTION);
                 if($headers===null)fail('Message headers changed during synchronization. The previous mail view was kept; retry sync.');
                 $meta=$membership[$source];$meta['read']=imap_fetch_flags($response,(string)$uid);
+                $meta['junkArrival']=imap_junk_arrival($response);
                 if($gmail)$meta['gmailMessageId']=imap_gmail_message_id($response,(string)$uid);
                 $downloads[$source]=imap_header_download($a,$source,$headers,$meta,$sizes[$uid]);
                 $repairIds=array_values(array_diff($repairIds,[$uid]));
                 if($sizes[$uid]>IMAP_BODY_LIMIT && function_exists('activity_step'))activity_step('IMAP: retained headers for an oversized message.','warning');
                 continue;
             }
-            $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.($gmail?' X-GM-MSGID':'').' BODY.PEEK[])');
+            $response=imap_command($s,'UID FETCH '.$uid.' (UID FLAGS'.$arrivalField.($gmail?' X-GM-MSGID':'').' BODY.PEEK[])');
             $raw=imap_fetch_content($response,$uid);
             if ($raw===null) fail('A message changed during synchronization. The previous mail view was kept; retry sync.');
             $source=mail_source($scan['path'],$scan['validity'],$uid);
             $meta=$membership[$source]; $meta['read']=imap_fetch_flags($response,$uid);$meta['messageSize']=$sizes[$uid];
+            $meta['junkArrival']=imap_junk_arrival($response);
             if ($gmail) $meta['gmailMessageId']=imap_gmail_message_id($response,$uid);
             $downloads[$source]=mail_download($a,$source,$raw,$meta);
             $repairIds=array_values(array_diff($repairIds,[$uid]));
@@ -415,8 +428,9 @@ function imap_fetch_flags(array $response,string $uid): bool {
 }
 function gmail_folder(array $labels): ?string {
     if (in_array('TRASH',$labels,true)) return 'Trash';
+    if (in_array('SPAM',$labels,true)) return 'Junk';
     if (in_array('INBOX',$labels,true)) return 'Inbox';
-    if (array_intersect(['SPAM','DRAFT'],$labels)) return null;
+    if (in_array('DRAFT',$labels,true)) return null;
     return 'Archive';
 }
 /** Callable transport makes pagination and failure behavior testable without accounts. */
@@ -424,7 +438,7 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
     $deadline=microtime(true)+45; $membership=[]; $recent=[]; $pending=false;$unknownCounts=[];$olderFolders=[];
     $known=[]; foreach(mail_cache_rows($a['id']) as $row)$known[mail_row_source($row)]=$row;
     $repairIds=$repair?array_map(fn($r)=>(string)$r['meta']['providerId'],array_values($known)):setting('gmail-repair:'.$a['id'],[]);
-    foreach (['Inbox'=>'in:inbox','Archive'=>'-in:inbox -in:trash -in:spam -in:drafts','Trash'=>'in:trash'] as $folder=>$query) {
+    foreach (['Inbox'=>'in:inbox','Archive'=>'-in:inbox -in:trash -in:spam -in:drafts','Trash'=>'in:trash','Junk'=>'in:spam'] as $folder=>$query) {
         $pageToken=''; $seen=[]; $ids=[];
         do {
             mail_deadline($deadline);
@@ -495,7 +509,8 @@ function sync_google_mail(array $a,callable $request,bool $repair=false): int {
         $folder=gmail_folder($msg['labelIds']); $source='gmail:'.$id;
         if ($folder===null) { unset($membership[$source]);$repairIds=array_values(array_diff($repairIds,[$id]));continue; }
         $meta=['folder'=>$folder,'providerId'=>$id,'labelIds'=>$msg['labelIds'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
-        $membership[$source]=$meta; $downloads[$source]=mail_download($a,$source,$raw,$meta);
+        $membership[$source]=$meta; $meta['junkArrival']=gmail_junk_arrival($msg);
+        $downloads[$source]=mail_download($a,$source,$raw,$meta);
         $repairIds=array_values(array_diff($repairIds,[$id]));
     }
     mail_deadline($deadline);

@@ -25,6 +25,13 @@ async function setup(c){const before=c.cookie;const result=await c.call('setup',
 try{
  const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
  const undoMail=(await a.call('save',{kind:'mail',title:'HTTP undo mail',body:'Complete local mail body',meta:{folder:'Archive',rawBase64:Buffer.from('Original EML').toString('base64')}})).record;
+ const localMail=(await a.call('save',{kind:'mail',title:'Local junk fixture',body:'Kept body',meta:{folder:'Archive'}})).record;
+ const junk=(await a.call('mail-action',{id:localMail.id,revision:localMail.revision,action:'junk'})).record;
+ assert.equal(junk.meta.folder,'Junk');assert.equal(junk.body,'Kept body');
+ await a.call('mail-action',{id:junk.id,revision:localMail.revision,action:'not-junk'},409);
+ const restoredJunk=(await a.call('mail-action',{id:junk.id,revision:junk.revision,action:'not-junk'})).record;
+ assert.equal(restoredJunk.meta.folder,'Inbox');assert.equal(restoredJunk.meta.junkReviewed,true);
+ await a.call('delete',{id:restoredJunk.id,revision:restoredJunk.revision});
  const undoHistory=await a.call('history&id='+undoMail.id);
  await a.call('delete',{id:undoMail.id,revision:undoMail.revision,undoable:true},403,'bad-token');
  const undoDeleted=await a.call('delete',{id:undoMail.id,revision:undoMail.revision,undoable:true});assert.match(undoDeleted.undoToken,/^[a-f0-9]{48}$/);
@@ -92,6 +99,12 @@ try{
  const ics='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:one\r\nSUMMARY:Meeting\r\nDTSTART;VALUE=DATE:20261029\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
  await a.call('import',{format:'ics',text:ics});assert.equal((await a.call('records&kind=calendar')).records[0].meta.rawIcs,ics);
  const account=await a.call('account-save',{type:'imap',label:'Fixture account',host:'imap.example.com',smtp:'smtp.example.com',email:'test@example.com',username:'test@example.com',password:'a-secret-never-exported'});
+ const rule={account:account.id,type:'domain',target:'Example.com'};
+ await a.call('mail-junk-settings',{...rule,operation:'add'},403,'bad-token');
+ await a.call('mail-junk-settings',{...rule,target:'*.example.com',operation:'add'},400);
+ await a.call('mail-junk-settings',{...rule,operation:'add'});
+ assert.equal((await a.call('mail-junk-settings',{account:account.id})).rules[0].target,'example.com');
+ assert.deepEqual((await a.call('mail-junk-settings',{...rule,operation:'remove'})).rules,[]);
  // Seed an isolated account cache, then exercise the authenticated HTTP routes.
  const seed="require getcwd().'/app/bootstrap.php';require getcwd().'/app/connectors.php';$a=account($argv[1]);foreach(['one','two'] as $id)cache_remote($a,'fixture:'.$id,'mail','Recovery '.$id,'Cached body',['folder'=>'Recovery copies','providerId'=>$id,'hasAttachments'=>false,'rawBase64'=>base64_encode('Original EML')]);attachment_store(remote_id($a['id'],'fixture:one'),['part'=>'2','name'=>'cached.txt','type'=>'text/plain'],'Cached file');";
  execFileSync(php,[...(extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite','-d','extension=openssl','-d','extension=curl']:[]),'-r',seed,'--',account.id],{env:{...process.env,OFFICE_DATA_DIR:a.dir},windowsHide:true});

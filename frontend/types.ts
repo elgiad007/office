@@ -17,6 +17,8 @@ export interface ItemMeta {
   providerId?: string;
   gmailMessageId?: string;
   from?: string;
+  junkReason?: string;
+  junkReviewed?: boolean;
   to?: string;
   date?: string;
   sentAt?: string;
@@ -117,6 +119,7 @@ export interface ApiResponses {
   setup: { csrf: string }; login: { csrf: string }; logout: { ok: boolean };
   save: MutationResult; delete: { ok: boolean; undoToken?: string }; 'mail-action': MailActionResult;
   'mail-undo': MutationResult;
+  'mail-junk-settings': {rules: {type: 'sender' | 'domain'; target: string}[]; folder: string};
   send: { ok: boolean };
   'mail-folders': { folders: MailFolder[] };
   'mail-folder-manage': { folders: MailFolder[] };

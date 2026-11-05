@@ -297,6 +297,36 @@ try {
     check(count(mail_cache_rows($staged['id']))===3,'validated new Inbox headers survive a later folder failure');
     check(get_record($archiveRow['id'])['meta']['folder']==='Archive' && get_record($archiveRow['id'])['meta']['read']===true,'early Inbox publication never reconciles absent Archive originals');
     check((bool)array_filter(activity_rows(),fn($entry)=>$entry['phase']==='mail-cache-ready'),'early Inbox publication emits a cache-ready event');
+    $junk=make_account('junk-fixture','google');
+    update_mail_block($junk['id'],'domain','Example.COM');
+    $rule=array_values(mail_block_rules($junk['id']))[0];
+    $transport=function(string $path)use($rule):array{
+        if (str_starts_with($path,'?')) {
+            parse_str(substr($path,1),$q);
+            return ['messages'=>array_map(fn($id)=>['id'=>$id],match($q['q']){
+                'in:inbox'=>['new','old','subdomain'],'in:spam'=>['spam'],default=>[]
+            })];
+        }
+        $id=explode('?',ltrim($path,'/'))[0];
+        return ['labelIds'=>[$id==='spam'?'SPAM':'INBOX'],'internalDate'=>($rule['since']+($id==='old'?-1:1))*1000,
+            'payload'=>['headers'=>[
+                ['name'=>'Subject','value'=>$id],
+                ['name'=>'From','value'=>$id==='subdomain'?'Sender <sender@sub.example.com>':'Sender <sender@example.com>'],
+                ['name'=>'X-Spam-Status','value'=>'Yes, score=6'],
+            ]]];
+    };
+    sync_google_mail($junk,$transport);
+    $row=fn($id)=>get_record(remote_id($junk['id'],'gmail:'.$id));
+    check($row('new')['meta']['junkPending']===[$rule['token']] && !isset($row('old')['meta']['junkPending']) && !isset($row('subdomain')['meta']['junkPending']),'blocks apply to new arrivals from the exact domain');
+    check($row('new')['meta']['headerOnly'] && isset($row('new')['meta']['junkReason']),'spam verdict is available without a body fetch');
+    check($row('spam')['meta']['folder']==='Junk','Gmail Spam maps to Junk in the standard scan');
+    move_mail_junk($row('new'),true);
+    sync_google_mail($junk,$transport);
+    check(!isset($row('new')['meta']['junkPending']) && $row('new')['meta']['junkReviewed'],'Not Junk clears queued moves and survives repeat sync');
+    $folders=imap_list_folders(['lines'=>['* LIST () "/" "Spam"','* LIST (\Junk) "/" "Courrier indésirable"'],'literals'=>[]]);
+    check(imap_junk_path($junk,$folders)==='Courrier indésirable','IMAP prefers the advertised Junk role over a named fallback');
+    update_mail_block($junk['id'],'domain','example.com',true);
+    check(mail_block_rules($junk['id'])===[],'removing a rule clears its account entry');
     echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
     foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');

@@ -16,6 +16,7 @@ export async function testMailSort(page,url) {
     if(action==='status')json={authenticated:true,csrf:'fixture',preferences:{}};
     else if(action==='accounts')json={accounts:[{id:'sort-account',type:'imap',label:'Sort fixture'}]};
     else if(action==='records')json={records};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='sync'){
       syncs++;records.reverse();records.forEach((r,i)=>r.updated=new Date(Date.UTC(2026,9,30,0,0,i)).toISOString());json={count:0};
     }else if(action==='mail-action'){

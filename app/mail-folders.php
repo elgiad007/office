@@ -31,6 +31,8 @@ function imap_folder_catalog(array $a,mixed $s): array {
         $path=imap_resolve_folder($folders,$a['config'][$role.'Folder']??ucfirst($role),$role,false,imap_is_gmail($a));
         if ($path!==null) { $protected[]=$path; $roles[$path]=ucfirst($role); }
     }
+    $junk=imap_junk_path($a,$folders);
+    if ($junk!==null && !isset($roles[$junk])) { $roles[$junk]='Junk'; $protected[]=$junk; }
     $result=[];
     foreach ($folders as $path=>$info) {
         $name=imap_folder_decode((string)$path);
@@ -44,7 +46,7 @@ function gmail_folder_catalog(array $response): array {
     foreach ($response['labels'] as $label) {
         if (!is_string($label['id']??null) || !is_string($label['name']??null) || !in_array($label['type']??'', ['system','user'],true)) fail('Invalid Gmail label.');
         if ($label['type']==='system' && !in_array($label['id'],['INBOX','SENT','TRASH','SPAM'],true)) continue;
-        $result[]=['id'=>$label['id'],'name'=>$label['name'],'delimiter'=>'/','protected'=>$label['type']==='system'];
+        $result[]=['id'=>$label['id'],'name'=>$label['name'],'delimiter'=>'/','protected'=>$label['type']==='system']+($label['id']==='SPAM'?['role'=>'Junk']:[]);
     }
     return $result;
 }
@@ -163,6 +165,7 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
     if($relevant){$cursor%=count($relevant);$relevant=array_merge(array_slice($relevant,$cursor),array_slice($relevant,0,$cursor));}
     $refresh=array_slice($relevant,0,$limit);
     $batchIds=array_unique(array_merge($recent,array_slice($bodyIds,0,$limit),$refresh));$batchPosition=0;$remaining=count($unknown);
+    $rules=mail_block_rules($a['id']);
     foreach ($batchIds as $id) {
         if(microtime(true)>$deadline-10){$pending=true;break;}
         $batchPosition++;
@@ -177,11 +180,15 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
             if (!is_string($msg['raw']??null)) fail('Invalid Gmail content.');
             $raw=base64_decode(strtr($msg['raw'],'-_','+/'),true); if ($raw===false) fail('Invalid Gmail encoding.');
             if (strlen($raw)>IMAP_BODY_LIMIT) $r=gmail_header_download($a,(string)$id,$request('/'.rawurlencode((string)$id).'?format=metadata'),$meta);
-            else $r=mail_download($a,'gmail:'.$id,$raw,$meta);
+            else {
+                $meta['junkArrival']=gmail_junk_arrival($msg);
+                $r=mail_download($a,'gmail:'.$id,$raw,$meta);
+            }
             $r['id']=$cached[$id]['id']??remote_id($a['id'],'gmail:'.$id);
         } elseif ($new) { $r=gmail_header_download($a,(string)$id,$msg,$meta);$r['id']=remote_id($a['id'],'gmail:'.$id); }
         elseif (isset($cached[$id])) { $r=$cached[$id]; $r['meta']=array_merge($r['meta'],$meta); unset($r['meta']['recoveryFrom']); }
         else continue;
+        mail_junk_sync_meta($r['meta'],$cached[$id]['meta']??null,$rules);
         $updates[]=$r;
     }
     mail_deadline($deadline);
@@ -202,26 +209,36 @@ function sync_mail_folder(array $a,string $id,int $limit): int {
     }
     fail('Choose a mail account.');
 }
-function file_remote_mail(array $r,string $action,string $folder,bool $quickMove=false): array {
+function file_remote_mail(array $r,string $action,string $folder,bool $quickMove=false,bool $junkAction=false): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote']) || in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('Choose a synchronized message.');
     $a=account($r['meta']['account']);
-    mail_folder_find(setting('mail-folders:'.$a['id'],[]),$folder);
+    if (!$junkAction) mail_folder_find(setting('mail-folders:'.$a['id'],[]),$folder);
     if ($a['type']==='google') {
         $token=google_token($a);
-        $labels=gmail_folder_catalog(google_json('https://gmail.googleapis.com/gmail/v1/users/me/labels',$token));
-        if (mail_folder_find($labels,$folder)['protected'] && (!$quickMove || !in_array($folder,['INBOX','TRASH','SPAM'],true))) fail('Choose a custom label. Use the standard mail actions for Inbox and Trash.');
+        if ($junkAction) $folder=$folder==='Junk'?'SPAM':'INBOX';
+        else {
+            $labels=gmail_folder_catalog(google_json('https://gmail.googleapis.com/gmail/v1/users/me/labels',$token));
+            if (mail_folder_find($labels,$folder)['protected'] && (!$quickMove || !in_array($folder,['INBOX','TRASH','SPAM'],true))) fail('Choose a custom label. Use the standard mail actions for Inbox and Trash.');
+        }
         $body=$action==='unlabel'?['removeLabelIds'=>[$folder]]:['addLabelIds'=>[$folder]];
         if ($action==='move') $body['removeLabelIds']=array_values(array_diff($quickMove?['INBOX','TRASH','SPAM']:['INBOX','TRASH'],[$folder]));
         $msg=google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($r['meta']['providerId']).'/modify',$token,'POST',$body);
         if (!is_array($msg['labelIds']??null) || (in_array($folder,$msg['labelIds'],true)===($action==='unlabel'))) fail('Label action could not be confirmed. Sync before retrying.');
+        if ($junkAction && array_intersect($body['removeLabelIds'],$msg['labelIds'])) fail('Junk move could not be confirmed. Sync before retrying.');
         $r['meta']['labelIds']=$msg['labelIds']; $r['meta']['folder']=gmail_folder($msg['labelIds'])??'Custom folder'; $r['meta']['read']=!in_array('UNREAD',$msg['labelIds'],true);
     } elseif ($a['type']==='imap') {
         if ($action!=='move') fail('IMAP supports moving messages; labels are available for Gmail.');
         $path=$r['meta']['serverFolder']??null; $uid=(string)($r['meta']['providerId']??'');
         if ($path===null || !ctype_digit($uid)) fail('Repair / resync this message before moving it.');
-        if ($path===$folder) return $r;
-        $r=with_imap_folders($a,function($s) use($a,$r,$path,$uid,$folder) {
-            $destination=mail_folder_find(imap_folder_catalog($a,$s),$folder);
+        if (!$junkAction && $path===$folder) return $r;
+        $r=with_imap_folders($a,function($s) use($a,$r,$path,$uid,$folder,$junkAction) {
+            $catalog=imap_folder_catalog($a,$s);
+            if ($junkAction) {
+                $matches=array_values(array_filter($catalog,fn($f)=>$f['role']===$folder));
+                if (count($matches)!==1) fail('Set an existing Junk folder for this IMAP account in Settings → Mail.');
+                $folder=$matches[0]['id'];
+            }
+            $destination=mail_folder_find($catalog,$folder);
             $cap=imap_command($s,'CAPABILITY');
             if (!preg_match('/\b(?:MOVE|IMAP4REV2)\b/i',implode('',$cap['lines']))) fail('This IMAP server does not support MOVE.');
             $validity=imap_validity(imap_command($s,'SELECT '.imap_quote($path)));
