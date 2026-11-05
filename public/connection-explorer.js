@@ -94,7 +94,43 @@ export async function openConnectionExplorer(env, source = '') {
     resize.observe(map);
     const panel = query('#connection-panel');
     const itemButtons = (item) => `<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
-    const openItem = (id) => { dialog.close(); void env.open(id).catch(error => env.notice(error.message, true)); };
+    let openingItem = false;
+    const openItem = async (id) => {
+        if (openingItem)
+            return;
+        openingItem = true;
+        const title = data.items.find(item => item.id === id)?.title || 'selected item', loading = document.createElement('dialog');
+        loading.className = 'connection-opening-dialog';
+        loading.tabIndex = -1;
+        loading.setAttribute('aria-labelledby', 'connection-opening-title');
+        loading.setAttribute('aria-describedby', 'connection-opening-message');
+        loading.innerHTML = `<div class="connection-opening-card"><span class="connection-opening-spinner" aria-hidden="true"></span><h2 id="connection-opening-title">Opening ${e(title)}…</h2><p id="connection-opening-message" role="status">Redirecting to the selected item. Please wait.</p></div>`;
+        loading.addEventListener('cancel', event => event.preventDefault());
+        loading.addEventListener('keydown', event => { event.preventDefault(); event.stopPropagation(); });
+        dialog.close();
+        document.body.append(loading);
+        loading.showModal();
+        loading.focus({ preventScroll: true });
+        let failure;
+        try {
+            await env.open(id);
+        }
+        catch (error) {
+            failure = error instanceof Error ? error : new Error(String(error));
+        }
+        finally {
+            loading.close();
+            loading.remove();
+            openingItem = false;
+            const target = !failure ? document.querySelector('#selected-item') : null;
+            if (target)
+                target.focus({ preventScroll: true });
+            else if (opener?.isConnected)
+                opener.focus({ preventScroll: true });
+        }
+        if (failure)
+            env.notice(failure.message, true);
+    };
     function wireItems(root) {
         root.querySelectorAll('[data-select]').forEach(button => button.onclick = () => select(button.dataset.select));
         root.querySelectorAll('[data-open]').forEach(button => button.onclick = () => openItem(button.dataset.open));

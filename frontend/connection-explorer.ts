@@ -57,7 +57,24 @@ export async function openConnectionExplorer(env:Env,source='') {
   const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{if(points.has(ORIGIN_ID)||(oldW>=640)!==(width>=640))renderMap();view.w*=width/oldW;view.h*=height/oldH;updateView();if(points.has(ORIGIN_ID)&&selected===(place.id||place.group))centerSelection();else if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
   const panel=query<HTMLElement>('#connection-panel');
   const itemButtons=(item:ConnectionItem)=>`<button data-explore="${e(item.id)}">Explore connections</button><button class="wiki-link" data-open="${e(item.id)}">Open item</button>`;
-  const openItem=(id:string)=>{dialog.close();void env.open(id).catch(error=>env.notice(error.message,true));};
+  let openingItem=false;
+  const openItem=async(id:string)=>{
+    if(openingItem)return;openingItem=true;
+    const title=data.items.find(item=>item.id===id)?.title||'selected item',loading=document.createElement('dialog');
+    loading.className='connection-opening-dialog';loading.tabIndex=-1;loading.setAttribute('aria-labelledby','connection-opening-title');loading.setAttribute('aria-describedby','connection-opening-message');
+    loading.innerHTML=`<div class="connection-opening-card"><span class="connection-opening-spinner" aria-hidden="true"></span><h2 id="connection-opening-title">Opening ${e(title)}…</h2><p id="connection-opening-message" role="status">Redirecting to the selected item. Please wait.</p></div>`;
+    loading.addEventListener('cancel',event=>event.preventDefault());
+    loading.addEventListener('keydown',event=>{event.preventDefault();event.stopPropagation();});
+    dialog.close();document.body.append(loading);loading.showModal();loading.focus({preventScroll:true});
+    let failure:Error|undefined;
+    try{await env.open(id);}catch(error){failure=error instanceof Error?error:new Error(String(error));}
+    finally{
+      loading.close();loading.remove();openingItem=false;
+      const target=!failure?document.querySelector<HTMLElement>('#selected-item'):null;
+      if(target)target.focus({preventScroll:true});else if(opener?.isConnected)opener.focus({preventScroll:true});
+    }
+    if(failure)env.notice(failure.message,true);
+  };
   function wireItems(root:Element){
     root.querySelectorAll<HTMLButtonElement>('[data-select]').forEach(button=>button.onclick=()=>select(button.dataset.select!));
     root.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(button=>button.onclick=()=>openItem(button.dataset.open!));
