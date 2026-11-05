@@ -194,12 +194,17 @@ export async function openConnectionExplorer(env:Env,source='') {
   async function archiveConnections(button:HTMLButtonElement){
     if(mutating)return;mutating=true;clearTimeout(timer);++request;busy=false;more.disabled=true;host.setAttribute('aria-busy','true');filter.value=place.q;kind.value=place.kind;
     host.querySelectorAll<HTMLButtonElement>('[data-archive-action]').forEach(button=>button.disabled=true);
-    const action=button.dataset.archiveAction!,scope=button.dataset.archiveScope!;status.textContent=action==='archive'?'Archiving connections…':'Restoring connections…';
+    const action=button.dataset.archiveAction!,scope=button.dataset.archiveScope!,targetId=button.dataset.archiveId!,targetGroup=data.groups?.find(group=>group.id===targetId);status.textContent=action==='archive'?'Archiving connections…':'Restoring connections…';
     try{
       const result=await env.api('connection',{action,scope,id:button.dataset.archiveId!,target:button.dataset.archiveTarget||'',visibility});
       invalidateHistory();env.changed?.();
       if(!active())return;
+      if(action==='restore'&&visibility==='archived'){visibility='active';visibilityControl.value='active';}
       if(scope==='group'&&action==='archive'&&visibility==='active')await navigate({mode:'overview',id:'',group:'',q:'',kind:''});else await fetchPage(true);
+      if(action==='restore'&&active()){
+        const restoredGroup=place.mode==='overview'?data.groups?.find(group=>group.id===targetId)||data.groups?.find(group=>targetGroup&&group.title===targetGroup.title&&group.kind===targetGroup.kind):undefined;
+        focusMap(restoredGroup?.id||(scope==='item'?targetId:selected||focusedId));
+      }
       if(active()){const message=`${action==='archive'?'Archived':'Restored'} ${result.changed??0} connections.`;status.textContent=message+' '+status.textContent;env.notice(message);}
     }catch(error){if(active())status.textContent=`Could not ${action==='archive'?'archive':'restore'} connections: ${(error as Error).message}`;}
     finally{mutating=false;if(active()){if(!busy){more.disabled=false;host.setAttribute('aria-busy','false');}host.querySelectorAll<HTMLButtonElement>('[data-archive-action]').forEach(button=>button.disabled=false);}}
