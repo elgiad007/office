@@ -40,6 +40,7 @@ try{
  page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',error=>errors.push(error.message));
  await page.goto(url);await page.locator('#launch').click();await page.locator('[data-group-node]').first().waitFor();
  assert.equal(await page.locator('[data-group-node]').count(),6);assert.equal(await page.locator('[data-zoom-level]').textContent(),'100%');
+ for(const direction of ['-1','1']){const button=page.locator(`[data-history="${direction}"]`);assert.equal(await button.isDisabled(),true);assert.equal(await button.evaluate(node=>getComputedStyle(node).cursor),'default');}
  assert.equal(await page.locator('[data-group-node="n0"]').getAttribute('data-kind'),'documents');assert.match(await page.locator('[data-group-node="n0"]').getAttribute('aria-label'),/Document/);
  assert.equal(await page.locator('[data-group-node="n0"] .connection-group-symbol').textContent(),'▤');assert.equal(await page.locator('[data-connection-list] [role="img"][aria-label="Document"]').count(),1);
  const focusedId=()=>page.evaluate(()=>document.activeElement?.getAttribute('data-group-node')||document.activeElement?.getAttribute('data-node'));
@@ -61,6 +62,7 @@ try{
  await page.screenshot({path:'test-results/connection-explorer-overview.png'});
  await page.locator('[data-group-node]').press('Enter');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
  assert.equal(await page.locator('[data-node]').count(),101);assert.equal(await page.locator('.connection-list-row').count(),50);
+ assert.equal(await page.locator('[data-history="-1"]').isDisabled(),false);assert.equal(await page.locator('[data-history="-1"]').evaluate(node=>getComputedStyle(node).cursor),'pointer');assert.equal(await page.locator('[data-history="1"]').evaluate(node=>getComputedStyle(node).cursor),'default');
  assert.equal(await focusedId(),'n0');await page.keyboard.press('l');assert.equal(await focusedId(),'n1');assert.equal(await page.locator('[data-node].selected').getAttribute('data-node'),'n1');
  await page.keyboard.press('Enter');await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');
  await page.keyboard.press('k');assert.equal(await focusedId(),'n0');await page.keyboard.press('j');assert.equal(await focusedId(),'n1');await page.keyboard.press('j');assert.equal(await focusedId(),'n1');
