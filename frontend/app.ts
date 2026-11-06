@@ -1038,11 +1038,18 @@ async function viewMessageHeaders() {
   const record=original.summary?(await api(`record&id=${encodeURIComponent(original.id)}`)).record:original;
   if(state.current?.id!==original.id||state.app!=='mail')return;
   const headers=messageHeaders(record.meta);
-  document.querySelector<HTMLDetailsElement>('#detail [data-mail-disclosure="metadata"]')!.open=false;
+  const metadata=document.querySelector<HTMLDetailsElement>('#detail [data-mail-disclosure="metadata"]')!;
+  const returnFocus=document.activeElement as HTMLElement;
+  const fromDetails=metadata.open;
+  metadata.open=false;
   modal('Message headers',headers?'<div class="message-headers-tools"><label>Search headers <input type="search" data-header-search aria-describedby="header-search-help" autocomplete="off" spellcheck="false"></label><span data-header-count role="status"></span><button data-header-previous disabled>Previous</button><button data-header-next disabled>Next</button><button data-header-copy>Copy all headers</button></div><p id="header-search-help" class="recurrence-note">/ focuses search; n / p move between matches. In search, Enter / Shift+Enter move between matches.</p><p data-header-status role="status"></p><pre class="message-headers" tabindex="0" aria-label="Original message headers"></pre>':'<p>Original message headers are unavailable for this message.</p>');
-  if(headers)setupHeaderViewer(dialog,headers);
+  if(headers)setupHeaderViewer(dialog,headers,keys());
   dialog.addEventListener('close',()=>{
-    if(state.current?.id===original.id)document.querySelector<HTMLElement>('#detail [data-mail-disclosure="metadata"] > summary')?.focus();
+    if(state.current?.id===original.id){
+      const target=fromDetails||!returnFocus?.isConnected
+        ?document.querySelector<HTMLElement>('#detail [data-mail-disclosure="metadata"] > summary'):returnFocus;
+      target?.focus();
+    }
   },{once:true});
 }
 async function fullMailRecord(record: OfficeRecord) {

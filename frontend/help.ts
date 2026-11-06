@@ -31,7 +31,11 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   for(const [name,entry] of Object.entries(commandRegistry))add(':'+name,entry.action,entry.context,entry.options+('aliases' in entry?' Aliases: '+entry.aliases.map(alias=>':'+alias).join(', ')+'.':''));
   add('Arrow keys','Move between cells','Sheets, focused cell','30 rows × 12 columns; item shortcuts still navigate records.');
   add(k.edit+' / Enter','Edit selected cell','Sheets, normal mode');add('Tab / Shift+Tab','Next / previous cell','Sheets, focused cell');
-  add('/','Focus header search','Message headers, outside search field');add('n / p','Next / previous header match','Message headers, outside search field');add('Enter / Shift+Enter','Next / previous header match','Message headers search field');
+  add('/; Ctrl+F / Cmd+F','Focus header search','Message headers');add('n / p','Next / previous header match','Message headers, outside search field');add('Enter / Shift+Enter','Next / previous header match','Message headers search field');
+  add(`${k.down} / ${k.up}; ArrowDown / ArrowUp`,'Scroll down / up','Focused message header text');
+  add(`${k.pageDown} / ${k.pageUp}; Ctrl+D / Ctrl+U`,'Half page down / up','Focused message header text');
+  add('PageDown / PageUp; Ctrl+B','Page down / up','Focused message header text','Ctrl+B goes up one page.');
+  add('gg / G; Home / End','Go to top / bottom','Focused message header text');
   add(`${k.left} / ${k.down} / ${k.up} / ${k.right}; Arrow keys`,'Navigate map cards','Connections map',`Left/right continue across row boundaries. In a single horizontal row, ${k.down} moves left and ${k.up} moves right. Focused items stay in view.`);
   add('Enter / Space','Explore or open focused item / select item','Connections map','Enter explores groups and item neighborhoods. When the selected item is already the neighborhood center, Enter opens its content, just like Open item.');
   add(k.search==='/'?'/':`/ / ${k.search}`,'Search connected items','Connections window','Enter or Escape in search returns focus to the map. Typing fields retain their normal keys.');

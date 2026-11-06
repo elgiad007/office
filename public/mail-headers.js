@@ -1,4 +1,5 @@
 // Generated from frontend/mail-headers.ts by pnpm build. Do not edit.
+import { createKeyboardScroller, vimScrollDirection } from './keyboard-scroll.js';
 /** Keep the original field order, repeated fields and folding; never include a MIME body. */
 export function messageHeaders(meta) {
     const encoded = meta.rawBase64 || meta.headersBase64;
@@ -12,7 +13,7 @@ export function headerMatches(source, query) {
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return Array.from(source.matchAll(new RegExp(escaped, 'gi')), match => match.index);
 }
-export function setupHeaderViewer(dialog, headers) {
+export function setupHeaderViewer(dialog, headers, keys) {
     const content = dialog.querySelector('.message-headers');
     const input = dialog.querySelector('[data-header-search]');
     const count = dialog.querySelector('[data-header-count]');
@@ -20,8 +21,10 @@ export function setupHeaderViewer(dialog, headers) {
     const next = dialog.querySelector('[data-header-next]');
     const copy = dialog.querySelector('[data-header-copy]');
     const status = dialog.querySelector('[data-header-status]');
+    const scroll = createKeyboardScroller(content);
     let matches = [], active = 0;
     const select = (step = 0) => {
+        scroll.cancel();
         if (matches.length) {
             matches[active]?.classList.remove('active');
             active = (active + step + matches.length) % matches.length;
@@ -60,10 +63,30 @@ export function setupHeaderViewer(dialog, headers) {
             status.textContent = 'Could not copy headers. Select the headers and copy them manually.';
         }
     };
+    const scrollKeys = { ArrowDown: 'down', ArrowUp: 'up', PageDown: 'page-down', PageUp: 'page-up', Home: 'start', End: 'end', G: 'end',
+        [keys.down]: 'down', [keys.up]: 'up', [keys.pageDown]: 'half-page-down', [keys.pageUp]: 'half-page-up' };
+    let lastG = 0;
     const keyboard = (event) => {
-        if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing)
+        if (event.altKey || event.isComposing)
             return;
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'f') {
+            event.preventDefault();
+            input.focus();
+            input.select();
+            return;
+        }
         const target = event.target;
+        if (target === content) {
+            const direction = vimScrollDirection(event);
+            if (direction) {
+                event.preventDefault();
+                lastG = 0;
+                scroll(direction);
+                return;
+            }
+        }
+        if (event.ctrlKey || event.metaKey)
+            return;
         if (target === input) {
             if (event.key === 'Enter') {
                 event.preventDefault();
@@ -81,9 +104,32 @@ export function setupHeaderViewer(dialog, headers) {
             event.preventDefault();
             select(event.key === 'n' ? 1 : -1);
         }
+        else if (target === content) {
+            if (event.key === 'g') {
+                event.preventDefault();
+                if (event.repeat)
+                    return;
+                const now = performance.now();
+                if (lastG && now - lastG <= 900) {
+                    scroll('start');
+                    lastG = 0;
+                }
+                else
+                    lastG = now;
+                return;
+            }
+            const direction = Object.hasOwn(scrollKeys, event.key) ? scrollKeys[event.key] : undefined;
+            if (direction) {
+                event.preventDefault();
+                scroll(direction);
+            }
+        }
+        lastG = 0;
     };
+    content.addEventListener('blur', () => { lastG = 0; });
     dialog.addEventListener('keydown', keyboard);
-    dialog.addEventListener('close', () => dialog.removeEventListener('keydown', keyboard), { once: true });
+    dialog.addEventListener('close', () => { scroll.cancel(); dialog.removeEventListener('keydown', keyboard); }, { once: true });
     content.textContent = headers;
     select();
+    content.focus();
 }
