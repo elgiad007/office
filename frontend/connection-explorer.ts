@@ -116,7 +116,7 @@ export async function openConnectionExplorer(env:Env,source='') {
     const visible=nodes.find(node=>{const p=points.get(nodeId(node))!;return p.x>=view.x&&p.x<=view.x+view.w&&p.y>=view.y&&p.y<=view.y+view.h;});
     const node=candidate||visible||nodes[0];if(node)node.focus({preventScroll:true});else map.focus({preventScroll:true});
   }
-  function exploreFocused(){const node=mapNodes().find(node=>nodeId(node)===focusedId);if(!node)return;
+  function exploreNode(node=mapNodes().find(node=>nodeId(node)===focusedId)){if(!node)return;
     if(node.dataset.originNode){moveHistory(-1);return;}
     if(node.dataset.node&&place.mode==='graph'&&place.id===node.dataset.node&&selected===node.dataset.node){openItem(node.dataset.node);return;}
     void navigate({mode:'graph',id:node.dataset.node||'',group:node.dataset.groupNode||'',q:'',kind:''});
@@ -155,14 +155,14 @@ export async function openConnectionExplorer(env:Env,source='') {
       const related=eligible.filter(link=>link.a===selected||link.b===selected),others=eligible.filter(link=>link.a!==selected&&link.b!==selected);
       const edges=[...related,...others].slice(0,500);
       query('[data-edges]').innerHTML=edges.map(link=>{const a=points.get(link.a)!,b=points.get(link.b)!;return `<line class="${link.archived?'connection-archived-edge':''}" data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;}).join('');
-      query('[data-nodes]').innerHTML=visible.map(item=>{const p=points.get(item.id)!;return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind,item.title,`${typeLabel(item.kind)} · ${item.degree??'—'} ${visibility==='archived'?'archived links':'links'}`)}<title>${e(typeLabel(item.kind)+' · '+item.title)}</title></g>`;}).join('');
-      query('[data-map-note]').textContent=`Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length>GRAPH_LIMIT||eligible.length>500?`Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. `:''}Drag to pan · Wheel/pinch to zoom · Select to highlight.`;
+      query('[data-nodes]').innerHTML=visible.map(item=>{const p=points.get(item.id)!;return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Explore ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind,item.title,`${typeLabel(item.kind)} · ${item.degree??'—'} ${visibility==='archived'?'archived links':'links'}`)}<title>${e(typeLabel(item.kind)+' · '+item.title)}</title></g>`;}).join('');
+      query('[data-map-note]').textContent=`Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length>GRAPH_LIMIT||eligible.length>500?`Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. `:''}Drag to pan · Wheel/pinch to zoom · Click or press Enter to explore.`;
     }
     renderArrival();selection();
     const nodes=mapNodes();if(!nodes.some(node=>nodeId(node)===focusedId))focusedId=nodes.some(node=>nodeId(node)===selected)?selected:nodes[0]?nodeId(nodes[0]):'';
     for(const node of nodes){node.tabIndex=nodeId(node)===focusedId?0:-1;
       node.onfocus=()=>{focusedId=nodeId(node);for(const peer of nodes)peer.tabIndex=peer===node?0:-1;reveal(focusedId);if(node.dataset.node)select(focusedId);};
-      node.onclick=()=>{node.focus({preventScroll:true});if(node.dataset.groupNode||node.dataset.originNode)exploreFocused();};
+      node.onclick=()=>{node.focus({preventScroll:true});exploreNode(node);};
     }
     if(restoreFocus)focusMap();
   }
@@ -257,8 +257,8 @@ export async function openConnectionExplorer(env:Env,source='') {
     const direction=directions[event.key]||(['left','right','up','down'] as const).find(action=>bindings[action]===event.key);
     if(direction){event.preventDefault();sequenceTime=0;if(event.shiftKey&&directions[event.key]){view.x+=(direction==='left'?-1:direction==='right'?1:0)*view.w*.12;view.y+=(direction==='up'?-1:direction==='down'?1:0)*view.h*.12;updateView();return;}
       const next=connectionNeighbor([...points].map(([id,p])=>({id,...p})),focusedId,direction,!directions[event.key]);focusMap(next||focusedId);return;}
-    if(event.key==='Enter'){event.preventDefault();if(!event.repeat)exploreFocused();return;}
-    if(event.key===' '){event.preventDefault();if(focusedId===ORIGIN_ID){if(!event.repeat)exploreFocused();}else if(place.mode!=='overview')select(focusedId);return;}
+    if(event.key==='Enter'){event.preventDefault();if(!event.repeat)exploreNode();return;}
+    if(event.key===' '){event.preventDefault();if(focusedId===ORIGIN_ID){if(!event.repeat)exploreNode();}else if(place.mode!=='overview')select(focusedId);return;}
     if(event.key==='g'){event.preventDefault();if(!event.repeat){const now=Date.now();if(sequenceTime&&now-sequenceTime<900){const first=mapNodes()[0];if(first)focusMap(nodeId(first));sequenceTime=0;}else sequenceTime=now;}return;}
     sequenceTime=0;
     if(event.key==='G'||event.key==='Home'||event.key==='End'){event.preventDefault();const nodes=mapNodes(),node=event.key==='Home'?nodes[0]:nodes.at(-1);if(node)focusMap(nodeId(node));return;}

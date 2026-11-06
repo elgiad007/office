@@ -200,8 +200,7 @@ export async function openConnectionExplorer(env, source = '') {
         else
             map.focus({ preventScroll: true });
     }
-    function exploreFocused() {
-        const node = mapNodes().find(node => nodeId(node) === focusedId);
+    function exploreNode(node = mapNodes().find(node => nodeId(node) === focusedId)) {
         if (!node)
             return;
         if (node.dataset.originNode) {
@@ -274,8 +273,8 @@ export async function openConnectionExplorer(env, source = '') {
             const related = eligible.filter(link => link.a === selected || link.b === selected), others = eligible.filter(link => link.a !== selected && link.b !== selected);
             const edges = [...related, ...others].slice(0, 500);
             query('[data-edges]').innerHTML = edges.map(link => { const a = points.get(link.a), b = points.get(link.b); return `<line class="${link.archived ? 'connection-archived-edge' : ''}" data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`; }).join('');
-            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind, item.title, `${typeLabel(item.kind)} · ${item.degree ?? '—'} ${visibility === 'archived' ? 'archived links' : 'links'}`)}<title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
-            query('[data-map-note]').textContent = `Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length > GRAPH_LIMIT || eligible.length > 500 ? `Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. ` : ''}Drag to pan · Wheel/pinch to zoom · Select to highlight.`;
+            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Explore ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind, item.title, `${typeLabel(item.kind)} · ${item.degree ?? '—'} ${visibility === 'archived' ? 'archived links' : 'links'}`)}<title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
+            query('[data-map-note]').textContent = `Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length > GRAPH_LIMIT || eligible.length > 500 ? `Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. ` : ''}Drag to pan · Wheel/pinch to zoom · Click or press Enter to explore.`;
         }
         renderArrival();
         selection();
@@ -287,8 +286,7 @@ export async function openConnectionExplorer(env, source = '') {
             node.onfocus = () => { focusedId = nodeId(node); for (const peer of nodes)
                 peer.tabIndex = peer === node ? 0 : -1; reveal(focusedId); if (node.dataset.node)
                 select(focusedId); };
-            node.onclick = () => { node.focus({ preventScroll: true }); if (node.dataset.groupNode || node.dataset.originNode)
-                exploreFocused(); };
+            node.onclick = () => { node.focus({ preventScroll: true }); exploreNode(node); };
         }
         if (restoreFocus)
             focusMap();
@@ -548,14 +546,14 @@ export async function openConnectionExplorer(env, source = '') {
         if (event.key === 'Enter') {
             event.preventDefault();
             if (!event.repeat)
-                exploreFocused();
+                exploreNode();
             return;
         }
         if (event.key === ' ') {
             event.preventDefault();
             if (focusedId === ORIGIN_ID) {
                 if (!event.repeat)
-                    exploreFocused();
+                    exploreNode();
             }
             else if (place.mode !== 'overview')
                 select(focusedId);
