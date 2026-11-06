@@ -1,6 +1,17 @@
 // Generated from frontend/mail-reader.ts by pnpm build. Do not edit.
 import { escapeHtml as e } from './formats.js';
 const modes = new Map(), imageConsent = new Set(), originalColors = new Set();
+const imageConsentPrefix = 'office:mail-images:';
+function hasImageConsent(id) {
+    if (imageConsent.has(id))
+        return true;
+    try {
+        return localStorage.getItem(imageConsentPrefix + id) === '1';
+    }
+    catch {
+        return false;
+    }
+}
 let readerSize;
 let moreOpening;
 let moreCleanup;
@@ -9,7 +20,7 @@ export function mailDisplayControls(record, prefs) {
     if (record.meta.headerOnly || !record.meta.hasHtml)
         return '';
     const mode = displayMode(record, prefs);
-    return `<div class="mail-view-controls" role="group" aria-label="Email display"><button data-mail-mode="html" aria-pressed="${mode === 'html'}">HTML</button><button data-mail-mode="text" aria-pressed="${mode === 'text'}">Text only</button>${mode === 'html' ? `<button data-mail-colors aria-pressed="${originalColors.has(record.id)}">Original colors</button><button data-mail-images ${imageConsent.has(record.id) ? 'disabled' : ''}>${imageConsent.has(record.id) ? 'External images enabled' : 'Load images'}</button><small>External images may report that you opened this email.</small>` : ''}</div>`;
+    return `<div class="mail-view-controls" role="group" aria-label="Email display"><button data-mail-mode="html" aria-pressed="${mode === 'html'}">HTML</button><button data-mail-mode="text" aria-pressed="${mode === 'text'}">Text only</button>${mode === 'html' ? `<button data-mail-colors aria-pressed="${originalColors.has(record.id)}">Original colors</button><button data-mail-images ${hasImageConsent(record.id) ? 'disabled' : ''}>${hasImageConsent(record.id) ? 'External images enabled' : 'Load images'}</button><small>External images may report that you opened this email.</small>` : ''}</div>`;
 }
 export function mailBody(record, prefs) {
     if (record.meta.headerOnly === true) {
@@ -22,7 +33,7 @@ export function mailBody(record, prefs) {
     const mode = hasHtml ? displayMode(record, prefs) : 'text';
     const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     const accent = ['green', 'blue', 'plum'].includes(document.documentElement.dataset.accent) ? document.documentElement.dataset.accent : 'green';
-    return mode === 'html' ? `<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id) ? '&colors=original' : ''}${imageConsent.has(record.id) ? '&images=1' : ''}"></iframe>` : `<div class="mail-body">${e(record.body)}</div>`;
+    return mode === 'html' ? `<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id) ? '&colors=original' : ''}${hasImageConsent(record.id) ? '&images=1' : ''}"></iframe>` : `<div class="mail-body">${e(record.body)}</div>`;
 }
 let bridgeCleanup;
 export function bindMailReader(panel, record, render, navigation = {}) {
@@ -139,5 +150,12 @@ export function bindMailReader(panel, record, render, navigation = {}) {
     panel.querySelectorAll('[data-mail-mode]').forEach(button => button.onclick = () => { modes.set(record.id, button.dataset.mailMode); render(); });
     const images = panel.querySelector('[data-mail-images]');
     if (images)
-        images.onclick = () => { imageConsent.add(record.id); render(); };
+        images.onclick = () => {
+            imageConsent.add(record.id);
+            try {
+                localStorage.setItem(imageConsentPrefix + record.id, '1');
+            }
+            catch { /* Keep the in-page choice. */ }
+            render();
+        };
 }

@@ -13,7 +13,7 @@ export async function testMailHtml(page,url) {
   assert.equal(imported.status(),200);
   assert.equal((await page.request.post(url+'api.php?r=import-items',{headers,data:{records:[{kind:'mail',title:'HTML navigation next item',body:'Older plain message',meta:{folder:'Inbox',read:true,date:'2000-01-01T12:00:00Z'}}]}})).status(),200);
   const marginCases=[
-    ['CSS','<html><head><style>body{margin:24px 12px 18px 9px}</style></head><body><div>Sender margins</div></body></html>',['24px','12px','18px','9px']],
+    ['CSS','<html><head><style>body{margin:24px 12px 18px 9px}</style></head><body><div>Sender margins</div><img alt="Other remote logo" src="https://mail-images.invalid/other.png"></body></html>',['24px','12px','18px','9px']],
     ['inline','<html><body style="margin:27px 13px 19px 8px"><div>Sender margins</div></body></html>',['27px','13px','19px','8px']],
   ];
   for(const [name,body] of marginCases){
@@ -161,11 +161,19 @@ export async function testMailHtml(page,url) {
     await page.setViewportSize({width:390,height:844});
     await openMailMore(page);await page.getByRole('button',{name:'HTML',exact:true}).click();
     await frame.getByText('Styled newsletter',{exact:true}).waitFor();
+    await frame.getByAltText('Remote logo').evaluate(img=>img.decode());
+    await openMailMore(page);
+    assert.equal(await page.getByRole('button',{name:'External images enabled',exact:true}).isDisabled(),true);
+    await page.locator('#detail [data-mail-disclosure="more"] summary').click();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     await page.screenshot({path:'test-results/mail-html-mobile.png',fullPage:true});
     await page.setViewportSize({width:1440,height:1000});
     await page.request.post(url+'api.php?r=preferences',{headers,data:{preferences:{...status.preferences,mailDisplay:'html',keys:{...status.preferences?.keys,down:'J',up:'K'}}}});
     await page.reload();await page.locator('#mail-folder').selectOption('all');await page.locator('.item').filter({hasText:'HTML reader verification'}).click();
+    await frame.getByText('Styled newsletter',{exact:true}).waitFor();
+    await page.locator('.item').filter({hasText:'Sender margin CSS'}).click();
+    assert.equal(await frame.getByAltText('Other remote logo').getAttribute('src'),null);
+    await page.locator('.item').filter({hasText:'HTML reader verification'}).click();
     await frame.getByText('Styled newsletter',{exact:true}).waitFor();
     await frame.locator('body').evaluate(node=>{const div=document.createElement('div');div.style.height='3000px';node.append(div);node.tabIndex=-1;node.focus();});
     const remappedId=await page.locator('#selected-item').getAttribute('data-id');
