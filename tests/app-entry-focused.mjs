@@ -24,5 +24,5 @@ try {
   page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push(error.message));
   await testAppEntry(page,'http://127.0.0.1:'+server.address().port+'/');
   assert.deepEqual(errors,[]);
-  console.log('PASS app entry: seven apps, initial selection/focus, per-app session restoration, missing items, empty lists, reload reset.');
+  console.log('PASS app entry: selection and focus restoration, empty lists, reload, slow Mail, rapid switching, and retry.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

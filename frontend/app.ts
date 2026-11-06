@@ -37,6 +37,8 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
 const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L'};
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const lastSelectedItems=new Map<AppName,string>();
+let appEntryVersion=0;
+const appEntryVisible=()=>!!document.querySelector('#main[data-app-entry]');
 function rememberSelection() {
   if(state.current)lastSelectedItems.set(state.app,state.current.id);
 }
@@ -110,7 +112,7 @@ const commandHandlers={
   mail:async(accountQuery?:string)=>{
     if(accountQuery===undefined){await changeApp('mail');return;}
     const scope=accountInboxScope(resolveAccount(mailAccounts(),accountQuery));
-    await changeApp('mail',false,scope);
+    if(!await changeApp('mail',false,scope))return;
     if(state.app==='mail'&&state.mailScope===scope){
       try{await syncOpenFolder(mailFolderEnv());}
       finally{if(state.mailScope===scope&&document.activeElement===document.body)focusList();}
@@ -132,7 +134,8 @@ const commandHandlers={
   new:async(type?: string,title?: string)=>{
     const target=type as AppName | undefined;
     if(!target&&!apps[state.app])throw new CommandError('Specify an item type for :new in Settings.');
-    if(target&&target!==state.app)await changeApp(target);
+    if(target&&(target!==state.app||appEntryVisible())){if(!await changeApp(target))return;}
+    if(appEntryVisible())return;
     await createRecord({title});
   },
 };
@@ -323,6 +326,7 @@ function authView(status: Status) {
   document.querySelector<HTMLFormElement>('#auth-form')!.onsubmit=async event=>{event.preventDefault(); const button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!; busyButton(button,true); try { const r=await api(setup?'setup':'login',Object.fromEntries(new FormData(event.target as HTMLFormElement))); state.csrf=r.csrf; await boot(); } catch(cause) { const error=asError(cause); document.querySelector<HTMLElement>('#auth-error')!.textContent=error.message; } finally { busyButton(button,false); } };
 }
 async function boot() {
+  appEntryVersion++;
   document.querySelector<HTMLElement>('#sync-status')!.hidden=true;
   lastMailDelete=undefined;
   try { const status=await api('status'); state.csrf=status.csrf;activity.configure(!!status.authenticated&&!!status.activity); if (!status.authenticated) { authView(status); return; }
@@ -517,9 +521,11 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   }
   return snapshot;
 }
-async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,keepSidebar=false}={},initialRecords?: OfficeRecord[]) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,keepSidebar=false,entryVersion}: {selectFirst?: boolean;preserveSelection?: boolean;enteringApp?: boolean;revealMail?: boolean;keepSidebar?: boolean;entryVersion?: number}={},initialRecords?: OfficeRecord[]) {
+  const versionAtStart=appEntryVersion;
   renderSendStatus();
   await waitForAttachments();
+  if(versionAtStart!==appEntryVersion||(appEntryVisible()&&entryVersion!==appEntryVersion))return;
   // A background refresh must never replace an in-memory draft.
   if(isUnsavedDraft() || (preserveSelection && state.dirty))return;
   if(state.app!=='mail')displayedMailId=null;
@@ -534,10 +540,15 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   document.querySelector<HTMLElement>('#mail-folder-navigation')!.hidden=state.app!=='mail';
   document.querySelector<HTMLElement>('#mail-folders-toggle')!.hidden=state.app!=='mail';
   if(state.app!=='mail')setMailFolderPanel(false);
-  if (state.app==='settings') { state.current=null; renderSettings(); return; }
+  if(entryVersion!==undefined&&!document.hidden){
+    // Let the loading screen paint before a fast response triggers rendering.
+    await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+    if(entryVersion!==appEntryVersion)return;
+  }
+  if (state.app==='settings') { state.current=null; renderSettings(entryVersion); return; }
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
-  do{version=mailDeleteVersion+mailReadVersion;records=initialRecords??(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;initialRecords=undefined;if(state.app!==app)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
+  do{version=mailDeleteVersion+mailReadVersion;records=initialRecords??(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;initialRecords=undefined;if(state.app!==app||versionAtStart!==appEntryVersion)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   if(isUnsavedDraft() || (preserveSelection && state.dirty))return;
   if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
   const contentFocused=preserveSelection&&activePane()==='content'&&!editable(document.activeElement as HTMLElement);
@@ -596,7 +607,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
   restoreMailListViewport(listViewport);
   if(contentFocused&&!document.activeElement?.closest('#detail'))restorePane('content');
-  if(enteringApp){setMode('normal');if(!keepSidebar)focusList();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}
+  if(enteringApp){setMode('normal');if(!keepSidebar||!document.activeElement?.closest('.sidebar'))focusList();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}
 }
 function renderAppHeader() {
   const toolbar=document.querySelector<HTMLElement>('#app-toolbar')!;
@@ -940,7 +951,9 @@ async function commit(explicit=false): Promise<void> {
 }
 async function openConnectedRecord(id:string){
   await waitForAttachments();await leaveEditor();
+  const version=appEntryVersion;
   const record=(await api(`record&id=${encodeURIComponent(id)}`)).record;
+  if(version!==appEntryVersion)return;
   if(!apps[record.kind])throw new CommandError('This item type is not available in this version.');
   rememberSelection();
   state.app=record.kind;state.current=null;state.search='';state.sheet=0;state.cell='A1';setMode('normal');location.hash=record.kind;
@@ -948,18 +961,44 @@ async function openConnectedRecord(id:string){
     state.mailScope=null;
     state.mailFolder=record.meta.folder==='Not in Inbox'?'Recovery copies':record.meta.folder==='Custom folder'?'all':record.meta.folder||'Archive';
   }
-  await load(record.id,{selectFirst:record.kind!=='mail',revealMail:record.kind==='mail'});
-  const opened=state.current as OfficeRecord | null;
-  if(record.kind==='mail'&&opened?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
-  if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
-  focusList();
-  document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
+  const opened=await showAppEntry(record.kind,async entryVersion=>{
+    await load(record.id,{selectFirst:record.kind!=='mail',revealMail:record.kind==='mail',entryVersion});
+    if(entryVersion!==appEntryVersion)return;
+    if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
+    focusList();
+    document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
+  });
+  if(opened&&record.kind==='mail'&&(state.current as OfficeRecord|null)?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
 }
 async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope) {
   await waitForAttachments();await leaveEditor();rememberSelection();
   if(name==='mail'&&(state.app!=='mail'||mailScope)){state.mailFolder='Inbox';state.mailScope=mailScope??null;}
   state.app=name;state.current=null;state.search='';state.sheet=0;state.cell='A1';state.mode='normal';location.hash=name;
-  await load(undefined,{enteringApp:true,keepSidebar});
+  return showAppEntry(name,entryVersion=>load(undefined,{enteringApp:true,keepSidebar,entryVersion}));
+}
+async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>) {
+  const version=++appEntryVersion;
+  const main=document.querySelector<HTMLElement>('#main')!;
+  const controls=document.querySelectorAll<HTMLElement>('#app-toolbar,#mail-toolbar,#mail-folder-navigation,#mail-folders-toggle');
+  controls.forEach(control=>{control.inert=true;});
+  main.dataset.appEntry='';
+  const label=apps[name]?.name||'Settings';
+  main.innerHTML=`<div class="app-entry-screen" role="status"><span class="app-entry-spinner" aria-hidden="true"></span><p>Loading ${e(label)}…</p></div>`;
+  try {
+    await open(version);
+    if(version!==appEntryVersion)return false;
+    delete main.dataset.appEntry;
+    controls.forEach(control=>{control.inert=false;});
+    return true;
+  } catch(cause) {
+    if(version!==appEntryVersion)return false;
+    const focusRetry=document.activeElement===document.body||main.contains(document.activeElement);
+    main.innerHTML=`<div class="app-entry-screen"><div role="alert"><h2>Couldn’t load ${e(label)}</h2><p>${e(asError(cause).message)}</p></div><button type="button">Try again</button></div>`;
+    const retry=main.querySelector('button')!;
+    retry.onclick=()=>{void attempt(()=>showAppEntry(name,open));};
+    if(focusRetry)retry.focus({preventScroll:true});
+    throw cause;
+  }
 }
 function updateMailListItem(id: string) {
   const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
@@ -1130,7 +1169,7 @@ async function syncAccounts(manual=true,accountQuery?:string) {
   // The standard scan already refreshed Inbox/Archive/Trash/Junk. Only custom scopes
   // need another scan (or a larger requested download window).
   const scope=state.mailScope,scopeAccount=state.accounts.find(a=>a.id===scope?.account),scopeFolder=scopeAccount?.folders?.find(f=>f.id===scope?.folder);
-  if(state.app==='mail'&&scope&&(accountQuery===undefined||scope.account===accounts[0].id)&&!state.dirty&&(scope.limit>100||!['Inbox','Archive','Trash','Junk'].includes(scopeFolder?.role||''))){try{await syncOpenFolder(mailFolderEnv());}catch(cause) { const error=asError(cause);if(manual)notice(error.message,true);}}
+  if(!appEntryVisible()&&state.app==='mail'&&scope&&(accountQuery===undefined||scope.account===accounts[0].id)&&!state.dirty&&(scope.limit>100||!['Inbox','Archive','Trash','Junk'].includes(scopeFolder?.role||''))){try{await syncOpenFolder(mailFolderEnv());}catch(cause) { const error=asError(cause);if(manual)notice(error.message,true);}}
   // Never replace an active editor with network data.
   if(state.app==='settings')renderSettings();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }
@@ -1145,6 +1184,7 @@ async function handleClick(event: MouseEvent) {
   const button=(event.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button)return;
   await attempt(async()=>{
     if(button.dataset.app!){await changeApp(button.dataset.app! as AppName,event.detail===0&&document.activeElement===button);return;}
+    if(appEntryVisible()&&button.dataset.action!=='logout')return;
     if(button.dataset.id!){await clickRecord(button.dataset.id!,event);return;}
     if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
@@ -1426,7 +1466,8 @@ try {
   const savedPage=sessionStorage.getItem(settingsPageKey);
   if(savedPage&&settingsPages.some(([id])=>id===savedPage))settingsPage=savedPage;
 } catch {/* Storage may be unavailable. */}
-function renderSettings() {
+function renderSettings(entryVersion?: number) {
+  if(state.app!=='settings'||(appEntryVisible()&&entryVersion!==appEntryVersion))return;
   renderAppHeader();
   const p=state.prefs;
   const linkLimit=p.linkAutocomplete?.limit??20;
@@ -1645,6 +1686,7 @@ document.addEventListener('keydown',event=>{
   if((event.target as HTMLElement).closest('#mail-actions-menu'))return;
   if((event.target as HTMLElement).closest('[data-mail-disclosure]'))return;
   const target=event.target as HTMLElement;
+  if(appEntryVisible()&&!['g',':'].includes(event.key)&&!(keySequence==='g'&&/^[1-7]$/.test(event.key)))return;
   if(event.key==='Escape'&&document.querySelector<HTMLElement>('.shell')!?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();event.preventDefault();return;}
   const inSidebar=!!target.closest('.sidebar');
   if(inSidebar&&event.key!==':'&&event.key!=='g'&&!(keySequence==='g'&&/^[1-7]$/.test(event.key))){
