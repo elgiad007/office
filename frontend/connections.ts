@@ -85,7 +85,7 @@ export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string
           .map(account=>({id:account.id,title:account.label,detail:account.type}));
         render();return;
       }
-      const query=connectionQuery(input.value);if(!query)return;
+      const query=connectionQuery(input.value);if(!query||query.name==='link'&&!query.query)return;
       command=query.name;list.setAttribute('aria-label','Matching items');const request=version;
       timer=setTimeout(()=>{void search(input.value).then(result=>{if(request!==version||!input.isConnected)return;items=result.map(item=>({id:item.id,title:label(item.kind)+' · '+item.title,detail:detail(item),excerpt:item.excerpt,kind:query.name==='link'?item.kind:undefined}));index=0;render();}).catch(error=>{if(request===version){items=[];list.innerHTML=`<p role="status">${e(error.message)}</p>`;list.hidden=false;input.setAttribute('aria-expanded','true');}});},150);
     });

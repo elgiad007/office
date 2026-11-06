@@ -154,7 +154,7 @@ export function createConnections(env) {
                 return;
             }
             const query = connectionQuery(input.value);
-            if (!query)
+            if (!query || query.name === 'link' && !query.query)
                 return;
             command = query.name;
             list.setAttribute('aria-label', 'Matching items');

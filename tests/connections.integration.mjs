@@ -41,7 +41,28 @@ try{
  await run(':l');await page.locator('[data-connection-status]').filter({hasText:'0 of 0 connections loaded'}).waitFor();assert.equal(await page.locator('[data-node="'+source.id+'"]').evaluate(node=>node===document.activeElement),true);await page.keyboard.press('Escape');
  await page.locator('#main').focus();await page.keyboard.press('L');await page.locator('[data-node="'+source.id+'"]').waitFor();await page.keyboard.press('Escape');
  const search=page.locator('#search');await search.fill('L');await search.press('L');assert.equal(await page.locator('#dialog').isVisible(),false);await search.fill('');await page.keyboard.press('Escape');await page.locator('#items [data-id="'+source.id+'"]').click();
- await command(':link event forecast');await page.locator('#connection-suggestions [role="option"]').first().waitFor();
+ const linkSearches=[];
+ page.on('request',request=>{
+  const params=new URL(request.url()).searchParams;
+  if(params.get('r')==='connection-search')linkSearches.push(params.get('q'));
+ });
+ await command(':link');
+ const commandInput=page.locator('#command-input');
+ const suggestionList=page.locator('#connection-suggestions');
+ for(const value of [':link',':link   ',':link event ']){
+  await commandInput.fill(value);
+  await page.waitForTimeout(250);
+  assert.equal(await suggestionList.isVisible(),false);
+  assert.deepEqual(linkSearches,[]);
+ }
+ await commandInput.pressSequentially('f');
+ await suggestionList.getByRole('option').first().waitFor();
+ assert.deepEqual(linkSearches,['f']);
+ await commandInput.press('Backspace');
+ await page.waitForTimeout(250);
+ assert.equal(await suggestionList.isVisible(),false);
+ assert.deepEqual(linkSearches,['f']);
+ await commandInput.fill(':link event forecast');await page.locator('#connection-suggestions [role="option"]').first().waitFor();
  assert.equal(await page.locator('#connection-suggestions [role="option"]').count(),2);
  const popup=await page.locator('#connection-suggestions').boundingBox();assert.ok(await page.evaluate(({x,y,width,height})=>!!document.elementFromPoint(x+width/2,y+height/2)?.closest('#connection-suggestions'),popup));
  await page.keyboard.press('Escape');assert.equal(await page.locator('#command-input').inputValue(),':link event forecast');assert.equal(await page.locator('#mode').textContent(),'COMMAND');assert.equal(await page.locator('#connection-suggestions').isVisible(),false);
