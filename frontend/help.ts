@@ -8,7 +8,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add(k.left+' / '+k.right,'Focus the pane to the left / right','Normal mode','Move between the application sidebar, item list, and selected content.');
   add(k.down+' / '+k.up+'; ArrowDown / ArrowUp','Focus next / previous sidebar entry','Application sidebar','Navigate apps, mail accounts, and visible folders. The Mail folder dropdown uses arrow keys to choose a folder.');
   add('Enter / Space','Activate the focused sidebar entry','Application sidebar','Enter opens an app, folder, or the focused account’s Inbox. Space expands or collapses account groups. Use the Mail folders button on narrow screens.');
-  add('Backspace','Open the parent mail folder','Mail sidebar','At a top-level folder, or when there is no selectable parent, opens the account’s Inbox.');
+  add('Backspace','Go up a folder or return to app selection','Mail sidebar','Opens the nearest selectable parent, then the account’s Inbox. From the Inbox, focuses the Mail app button and leaves the Inbox open.');
   add('ArrowDown / ArrowRight; ArrowUp / ArrowLeft','Next / previous item','Item lists','Down or Right moves to the next item; Up or Left moves to the previous item.');
   add('Ctrl+f / Ctrl+b','Page down / up','Focused list or nonediting content','Scrolls the focused pane, including HTML mail. Repeating the key continues scrolling.');
   add('Ctrl+d / Ctrl+u','Half page down / up','Focused list or nonediting content','Uses half the pane height. Editors and typing fields retain their native shortcuts.');

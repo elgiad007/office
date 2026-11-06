@@ -2510,7 +2510,13 @@ function handleSidebarKey(event, target) {
     if (key === 'Backspace' && state.app === 'mail') {
         event.preventDefault();
         if (!event.repeat)
-            void attempt(() => backOutOfMailFolder(mailFolderEnv()));
+            void attempt(() => {
+                const parent = backOutOfMailFolder(mailFolderEnv());
+                if (parent)
+                    return parent;
+                setMailFolderPanel(false);
+                focusSidebar('[data-app="mail"]');
+            });
         return;
     }
     if (key === k.left || key === k.right) {

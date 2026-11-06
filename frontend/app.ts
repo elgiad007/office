@@ -1444,7 +1444,12 @@ function handleSidebarKey(event: KeyboardEvent,target: HTMLElement) {
   }
   if(key==='Backspace'&&state.app==='mail'){
     event.preventDefault();
-    if(!event.repeat)void attempt(()=>backOutOfMailFolder(mailFolderEnv()));
+    if(!event.repeat)void attempt(()=>{
+      const parent=backOutOfMailFolder(mailFolderEnv());
+      if(parent)return parent;
+      setMailFolderPanel(false);
+      focusSidebar('[data-app="mail"]');
+    });
     return;
   }
   if(key===k.left||key===k.right){
