@@ -30,6 +30,7 @@ export async function testMailSend(page,url) {
     await route.fulfill({json});
   });
   const body=page.locator('[name="body"]'),sendButton=page.locator('#detail [data-action="send"]');
+  const progress=page.getByRole('dialog',{name:'Sending message…'});
   const compose=async(save=true)=>{
     await page.getByRole('button',{name:'+ Compose',exact:true}).click();await body.waitFor();
     await page.getByLabel('To (one recipient)',{exact:true}).fill('recipient@example.com');
@@ -48,6 +49,7 @@ export async function testMailSend(page,url) {
     await page.goto(url+'#mail');await page.reload();await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
     await page.locator('#main').focus();await page.keyboard.press('Control+Enter');assert.equal(sends.length,0,'Received mail cannot be sent');
     await compose(false);await page.keyboard.press('Control+Enter');await page.locator('#confirm:focus').waitFor();
+    assert.equal(await progress.count(),0,'Progress starts after confirmation');
     assert.equal(sends.length,0);assert.equal(sequence,0,'Opening confirmation does not save a new draft');
     await page.keyboard.press('Control+Enter');assert.equal(sends.length,0,'Shortcut does not send through a modal');
     await page.locator('#cancel').click();await page.waitForFunction(()=>!document.querySelector('#detail [data-action="send"]').disabled);
@@ -59,14 +61,21 @@ export async function testMailSend(page,url) {
     assert.equal(await settings(),true,'Confirmation defaults to enabled');
     await settings(false);await page.reload();
     assert.equal(await page.getByLabel('Confirm before sending',{exact:true}).isChecked(),false,'Checkbox persists across reload');
-    await page.getByRole('button',{name:'Mail',exact:true}).click();await compose();
+    await page.getByRole('button',{name:'Mail',exact:true}).click();
+    const folder=page.locator('#mail-folder');
+    await folder.selectOption('Archive');await compose();
     holdSend=true;await page.keyboard.press('Control+Enter');
     await page.waitForFunction(()=>document.querySelector('#detail [data-action="send"]').disabled);
     while(!releaseSend)await new Promise(resolve=>setTimeout(resolve,10));
+    await progress.waitFor();
+    assert.equal(await folder.inputValue(),'Drafts','Composer stays open while delivery is pending');
+    await page.keyboard.press('Escape');
+    assert.equal(await progress.isVisible(),true,'Escape cannot dismiss a pending send');
     await page.keyboard.press('Control+Enter');await page.keyboard.press('Control+Enter');
     await page.evaluate(()=>document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,repeat:true,bubbles:true,cancelable:true})));
     assert.equal(sends.length,2,'Repeated shortcuts cannot create duplicate sends');assert.equal(await page.locator('#dialog[open]').count(),0);
-    holdSend=false;releaseSend();await sent();
+    holdSend=false;releaseSend();await progress.waitFor({state:'detached'});await sent();
+    assert.equal(await folder.inputValue(),'Archive','Sending returns to the original folder');
     await compose();await sendButton.click();await sent();assert.equal(sends.length,3,'Button also skips disabled confirmation');
     await compose();await body.focus();await page.keyboard.press('Alt+Enter');assert.equal(sends.length,3,'Alt+Enter no longer sends');
     await page.keyboard.press('Control+Shift+Enter');assert.equal(sends.length,3,'Extra modifiers do not send');
@@ -76,8 +85,10 @@ export async function testMailSend(page,url) {
     await page.locator('#notice').filter({hasText:'Choose a sending account first.'}).waitFor();assert.equal(sends.length,3);
     await page.getByLabel('Send using',{exact:true}).selectOption('send-account');await body.fill('Unsaved after error');rejectSave=true;
     await page.keyboard.press('Control+Enter');await page.locator('#notice').filter({hasText:'Draft save failed for test'}).waitFor();assert.equal(sends.length,3);
+    assert.equal(await progress.count(),0,'Progress closes if saving fails');
     rejectSave=false;failSend=true;await body.focus();await page.keyboard.press('Control+Enter');
     await page.locator('#notice').filter({hasText:'Delivery uncertain for test'}).waitFor();assert.equal(sends.length,4);
+    assert.equal(await progress.count(),0,'Progress closes if delivery fails');
     await page.locator('#main').focus();await page.keyboard.press('Control+Enter');assert.equal(sends.length,4,'Uncertain delivery is not resent');
     failSend=false;await settings(true);await page.getByRole('button',{name:'Mail',exact:true}).click();await compose();
     await page.keyboard.press('Control+Enter');await page.locator('#confirm').waitFor();

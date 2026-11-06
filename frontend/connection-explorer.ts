@@ -1,5 +1,6 @@
 import {connectionShape} from './connection-shapes.js';
 import {escapeHtml as e} from './formats.js';
+import {showProgressDialog} from './utils.js';
 import {itemTypes,type ItemKind} from './item-types.js';
 import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,connectionArrivalPoint,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
 import type {ConnectionItem,ConnectionList,ConnectionVisibility,RequestApi} from './types.js';
@@ -85,16 +86,13 @@ export async function openConnectionExplorer(env:Env,source='') {
   let openingItem=false;
   const openItem=async(id:string)=>{
     if(openingItem)return;openingItem=true;
-    const title=data.items.find(item=>item.id===id)?.title||'selected item',loading=document.createElement('dialog');
-    loading.className='connection-opening-dialog';loading.tabIndex=-1;loading.setAttribute('aria-labelledby','connection-opening-title');loading.setAttribute('aria-describedby','connection-opening-message');
-    loading.innerHTML=`<div class="connection-opening-card"><span class="connection-opening-spinner" aria-hidden="true"></span><h2 id="connection-opening-title">Opening ${e(title)}…</h2><p id="connection-opening-message" role="status">Redirecting to the selected item. Please wait.</p></div>`;
-    loading.addEventListener('cancel',event=>event.preventDefault());
-    loading.addEventListener('keydown',event=>{event.preventDefault();event.stopPropagation();});
-    dialog.close();document.body.append(loading);loading.showModal();loading.focus({preventScroll:true});
+    const title=data.items.find(item=>item.id===id)?.title||'selected item';
+    dialog.close();
+    const closeProgress=showProgressDialog('connection-opening',`Opening ${title}…`,'Redirecting to the selected item. Please wait.');
     let failure:Error|undefined;
     try{await env.open(id);}catch(error){failure=error instanceof Error?error:new Error(String(error));}
     finally{
-      loading.close();loading.remove();openingItem=false;
+      closeProgress();openingItem=false;
       const target=!failure?document.querySelector<HTMLElement>('#selected-item'):null;
       if(target)target.focus({preventScroll:true});else if(opener?.isConnected)opener.focus({preventScroll:true});
     }

@@ -3,8 +3,7 @@ import { openHelp } from './help.js';
 import { createKeyboardScroller, vimScrollDirection } from './keyboard-scroll.js';
 import { CommandError, resolveCommand } from './commands.js';
 import { createConnections } from './connections.js';
-import { asError } from './utils.js';
-import { isPresent } from './utils.js';
+import { asError, isPresent, showProgressDialog } from './utils.js';
 import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
 import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
@@ -2114,6 +2113,7 @@ async function sendMail() {
         return;
     sendingMail = true;
     busyButton(document.querySelector('#detail [data-action="send"]'), true);
+    let closeProgress, returnedToFolder = false;
     try {
         await waitForAttachments();
         if (state.app !== 'mail' || state.current !== record)
@@ -2137,6 +2137,7 @@ async function sendMail() {
         }
         if (state.app !== 'mail' || state.current !== record)
             return;
+        closeProgress = showProgressDialog('mail-sending', 'Sending message…', 'Waiting for the mail provider to accept your message.');
         await commit(true);
         if (state.app !== 'mail' || state.current !== record)
             return;
@@ -2144,11 +2145,11 @@ async function sendMail() {
             await api('send', { id: record.id, revision: record.revision, account: record.meta.sendAccount });
             if (state.app === 'mail' && state.current?.id === record.id && !state.dirty && !state.savePromise) {
                 returnFromMailDraft(record.id);
+                returnedToFolder = true;
                 await load(state.current?.id);
             }
             else
                 mailDraftOrigins.delete(record.id);
-            notice('Message accepted by the provider.');
         }
         finally {
             if (state.app === 'mail' && state.current?.id === record.id && !state.dirty && !state.savePromise)
@@ -2156,9 +2157,13 @@ async function sendMail() {
         }
     }
     finally {
+        closeProgress?.();
+        if (returnedToFolder)
+            focusList();
         sendingMail = false;
         busyButton(document.querySelector('#detail [data-action="send"]'), false);
     }
+    notice('Message accepted by the provider.');
 }
 async function deleteSelectedMail() {
     if (state.app !== 'mail')

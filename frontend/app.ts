@@ -2,8 +2,7 @@ import {openHelp} from './help.js';
 import {createKeyboardScroller, vimScrollDirection, type ScrollDirection} from './keyboard-scroll.js';
 import {CommandError,resolveCommand} from './commands.js';
 import {createConnections} from './connections.js';
-import {asError} from './utils.js';
-import {isPresent} from './utils.js';
+import {asError,isPresent,showProgressDialog} from './utils.js';
 import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, ConnectionDeletionChoices, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
 
 interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; removedIds?: string[]; error?: string; code?: string; connectionCounts?: Record<string,number>}
@@ -1183,6 +1182,7 @@ async function sendMail() {
   const form=document.querySelector<HTMLFormElement>('#record-form')!;
   if(!form||!form.reportValidity())return;
   sendingMail=true;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,true);
+  let closeProgress: (()=>void)|undefined,returnedToFolder=false;
   try{
     await waitForAttachments();
     if(state.app!=='mail'||state.current!==record)return;
@@ -1201,19 +1201,22 @@ async function sendMail() {
       if(!confirmed)return;
     }
     if(state.app!=='mail'||state.current!==record)return;
+    closeProgress=showProgressDialog('mail-sending','Sending message…','Waiting for the mail provider to accept your message.');
     await commit(true);
     if(state.app!=='mail'||state.current!==record)return;
     try{
       await api('send',{id:record.id,revision:record.revision,account:record.meta.sendAccount});
-      if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise){returnFromMailDraft(record.id);await load(state.current?.id);}
+      if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise){returnFromMailDraft(record.id);returnedToFolder=true;await load(state.current?.id);}
       else mailDraftOrigins.delete(record.id);
-      notice('Message accepted by the provider.');
     }finally{
       if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise)await load();
     }
   }finally{
+    closeProgress?.();
+    if(returnedToFolder)focusList();
     sendingMail=false;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,false);
   }
+  notice('Message accepted by the provider.');
 }
 async function deleteSelectedMail() {
   if(state.app!=='mail')return;

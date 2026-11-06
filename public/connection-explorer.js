@@ -1,6 +1,7 @@
 // Generated from frontend/connection-explorer.ts by pnpm build. Do not edit.
 import { connectionShape } from './connection-shapes.js';
 import { escapeHtml as e } from './formats.js';
+import { showProgressDialog } from './utils.js';
 import { itemTypes } from './item-types.js';
 import { connectionLayout, connectionGroupLayout, connectionTitleLines, connectionNeighbor, connectionArrivalPoint, visibleConnectionItems, GRAPH_LIMIT, GROUP_CARD } from './connection-layout.js';
 const typeLabel = (kind) => itemTypes[kind]?.label || kind;
@@ -132,18 +133,9 @@ export async function openConnectionExplorer(env, source = '') {
         if (openingItem)
             return;
         openingItem = true;
-        const title = data.items.find(item => item.id === id)?.title || 'selected item', loading = document.createElement('dialog');
-        loading.className = 'connection-opening-dialog';
-        loading.tabIndex = -1;
-        loading.setAttribute('aria-labelledby', 'connection-opening-title');
-        loading.setAttribute('aria-describedby', 'connection-opening-message');
-        loading.innerHTML = `<div class="connection-opening-card"><span class="connection-opening-spinner" aria-hidden="true"></span><h2 id="connection-opening-title">Opening ${e(title)}…</h2><p id="connection-opening-message" role="status">Redirecting to the selected item. Please wait.</p></div>`;
-        loading.addEventListener('cancel', event => event.preventDefault());
-        loading.addEventListener('keydown', event => { event.preventDefault(); event.stopPropagation(); });
+        const title = data.items.find(item => item.id === id)?.title || 'selected item';
         dialog.close();
-        document.body.append(loading);
-        loading.showModal();
-        loading.focus({ preventScroll: true });
+        const closeProgress = showProgressDialog('connection-opening', `Opening ${title}…`, 'Redirecting to the selected item. Please wait.');
         let failure;
         try {
             await env.open(id);
@@ -152,8 +144,7 @@ export async function openConnectionExplorer(env, source = '') {
             failure = error instanceof Error ? error : new Error(String(error));
         }
         finally {
-            loading.close();
-            loading.remove();
+            closeProgress();
             openingItem = false;
             const target = !failure ? document.querySelector('#selected-item') : null;
             if (target)
