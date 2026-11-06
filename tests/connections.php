@@ -20,6 +20,12 @@ check(count(connection_search('100%','',''))===1&&count(connection_search('100_'
 check(connection_search('secret mime','','')===[],'raw MIME is not searched');
 check(connection_search($a['id'],'','')[0]['id']===$a['id'],'exact IDs resolve');
 $local=save_record(['kind'=>'mail','title'=>'Replacement','body'=>'','meta'=>['folder'=>'Local mail']]);
+$setUpdated=db()->prepare('UPDATE records SET updated=? WHERE id=?');
+$setUpdated->execute(['2026-01-02T00:00:00Z',$c['id']]);
+$setUpdated->execute(['2026-01-01T00:00:00Z',$local['id']]);
+check(array_column(connection_search('','mail','',1,'modified-desc'),'id')===[$c['id']],'typed suggestions limit after sorting by newest modified');
+check(array_column(connection_search('','mail','',1,'modified-asc'),'id')===[$local['id']],'typed suggestions can show oldest modified first');
+check(array_column(connection_search('','mail','',1,'title-desc'),'id')===[$local['id']],'typed suggestions can sort by title before limiting');
 connection_add($c['id'],$a['id']);
 db()->beginTransaction();connection_retarget($c['id'],$local['id']);db()->prepare('DELETE FROM records WHERE id=?')->execute([$c['id']]);db()->commit();
 check(count(connection_rows($local['id']))===1,'verified replacements preserve links');

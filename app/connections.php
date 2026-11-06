@@ -86,13 +86,21 @@ function connection_set_archived(string $id,string $target,string $scope,bool $a
     }else fail('Unknown archive scope.');
     $q=db()->prepare($prefix.'UPDATE connections SET archived='.(int)$archived.' WHERE '.$where.' AND ('.$filter.') AND archived<>'.(int)$archived);$q->execute($args);return $q->rowCount();
 }
-function connection_search(string $query,string $kind,string $exclude,int $limit=20): array {
+function connection_search(string $query,string $kind,string $exclude,int $limit=20,?string $sort=null): array {
     if($kind!==''&&!in_array($kind,KINDS,true))fail('Unknown item type.');
     if(strlen($query)>500)fail('Search is too long.');
     $pattern='%'.str_replace(['\\','%','_'],['\\\\','\\%','\\_'],$query).'%';
     // Only human-facing fields are searchable: exclude raw MIME, credentials and attachment data.
-    $sql="SELECT * FROM records WHERE id<>? AND (?='' OR kind=?) AND (id=? OR title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR json_extract(meta,'$.from') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.to') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.location') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.email') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.company') LIKE ? ESCAPE '\\') ORDER BY CASE WHEN id=? THEN 0 WHEN title=? COLLATE NOCASE THEN 1 WHEN title LIKE ? ESCAPE '\\' THEN 2 ELSE 3 END,updated DESC,id LIMIT ?";
-    $q=db()->prepare($sql);$args=[$exclude,$kind,$kind,$query,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$query,$query,$pattern];
+    $order=match($sort){
+        null=>"CASE WHEN id=? THEN 0 WHEN title=? COLLATE NOCASE THEN 1 WHEN title LIKE ? ESCAPE '\\' THEN 2 ELSE 3 END,updated DESC",
+        'modified-asc'=>'updated ASC',
+        'title-asc'=>'title COLLATE NOCASE ASC',
+        'title-desc'=>'title COLLATE NOCASE DESC',
+        default=>'updated DESC',
+    };
+    $sql="SELECT * FROM records WHERE id<>? AND (?='' OR kind=?) AND (id=? OR title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR json_extract(meta,'$.from') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.to') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.location') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.email') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.company') LIKE ? ESCAPE '\\') ORDER BY $order,id LIMIT ?";
+    $q=db()->prepare($sql);$args=[$exclude,$kind,$kind,$query,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern];
+    if($sort===null)array_push($args,$query,$query,$pattern);
     foreach($args as $i=>$arg)$q->bindValue($i+1,$arg);$q->bindValue(count($args)+1,$limit,PDO::PARAM_INT);$q->execute();
     return array_map('connection_summary',$q->fetchAll());
 }

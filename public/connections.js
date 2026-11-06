@@ -65,7 +65,7 @@ export function createConnections(env) {
         };
         render();
     };
-    async function search(value) {
+    async function search(value, suggestions = false) {
         const query = connectionQuery(value);
         if (!query)
             return [];
@@ -84,7 +84,7 @@ export function createConnections(env) {
             const text = query.query.toLocaleLowerCase();
             return all.filter(item => (!query.kind || item.kind === query.kind) && (item.id === query.query || (item.title + ' ' + item.excerpt + ' ' + detail(item)).toLocaleLowerCase().includes(text))).slice(0, 20);
         }
-        return (await env.api(`connection-search&q=${encodeURIComponent(query.query)}&kind=${encodeURIComponent(query.kind || '')}&exclude=${encodeURIComponent(id)}`)).items;
+        return (await env.api(`connection-search&q=${encodeURIComponent(query.query)}&kind=${encodeURIComponent(query.kind || '')}&exclude=${encodeURIComponent(id)}${suggestions ? '&suggestions=1' : ''}`)).items;
     }
     function autocomplete(input, accounts) {
         const list = document.createElement('div');
@@ -154,12 +154,12 @@ export function createConnections(env) {
                 return;
             }
             const query = connectionQuery(input.value);
-            if (!query || query.name === 'link' && !query.query)
+            if (!query || query.name === 'link' && !query.kind && !query.query)
                 return;
             command = query.name;
             list.setAttribute('aria-label', 'Matching items');
             const request = version;
-            timer = setTimeout(() => { void search(input.value).then(result => { if (request !== version || !input.isConnected)
+            timer = setTimeout(() => { void search(input.value, true).then(result => { if (request !== version || !input.isConnected)
                 return; items = result.map(item => ({ id: item.id, title: label(item.kind) + ' · ' + item.title, detail: detail(item), excerpt: item.excerpt, kind: query.name === 'link' ? item.kind : undefined })); index = 0; render(); }).catch(error => { if (request === version) {
                 items = [];
                 list.innerHTML = `<p role="status">${e(error.message)}</p>`;

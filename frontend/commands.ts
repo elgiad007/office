@@ -17,7 +17,7 @@ export const commandRegistry={
   errors:{arguments:0,action:'Open activity errors',context:'Normal mode',options:'Errors filter; no arguments.'},
   warnings:{arguments:0,action:'Open activity warnings',context:'Normal mode',options:'Warnings filter; no arguments.'},
   new:{arguments:2,action:'Create an item',context:'Normal mode',options:':new [type] [title], for example :new event Project kickoff. Use :new "Project kickoff" for the current application. :new linked <type> [title] links the draft to the current item on first save. '+Object.entries(creationTypes).map(([type,app])=>type+' → '+app).join('; ')+'. Type required in Settings.'},
-  link:{arguments:2,action:'Link an existing item',context:'Selected item',options:':link [type] <name or ID>. Search titles and descriptions. ↑/↓ choose; Tab accepts; Enter links. Escape dismisses suggestions and keeps command mode.'},
+  link:{arguments:2,action:'Link an existing item',context:'Selected item',options:':link [type] <name or ID>. Enter a type to browse its items, or search titles and descriptions. ↑/↓ choose; Tab accepts; Enter links. Escape dismisses suggestions and keeps command mode.'},
   unlink:{arguments:2,action:'Remove a connection',context:'Selected item',options:':unlink [type] <name or ID>. Only current connections are suggested.'},
   links:{arguments:1,aliases:['l'],action:'View connections',context:'Selected item or workspace',options:':links opens current connections; :links all opens the workspace list and graph.'},
 } as const;

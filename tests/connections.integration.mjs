@@ -49,24 +49,49 @@ try{
  await command(':link');
  const commandInput=page.locator('#command-input');
  const suggestionList=page.locator('#connection-suggestions');
- for(const value of [':link',':link   ',':link event ']){
+ for(const value of [':link',':link   ']){
   await commandInput.fill(value);
   await page.waitForTimeout(250);
   assert.equal(await suggestionList.isVisible(),false);
   assert.deepEqual(linkSearches,[]);
  }
- await commandInput.pressSequentially('f');
+ await commandInput.fill(':link event');
  await suggestionList.getByRole('option').first().waitFor();
- assert.deepEqual(linkSearches,['f']);
+ assert.equal(await suggestionList.getByRole('option').count(),2);
+ assert.deepEqual(linkSearches,['']);
+ await commandInput.pressSequentially(' f');
+ await suggestionList.getByRole('option').first().waitFor();
+ assert.deepEqual(linkSearches,['','f']);
  await commandInput.press('Backspace');
+ await suggestionList.getByRole('option').first().waitFor();
+ assert.deepEqual(linkSearches,['','f','']);
+ await commandInput.fill(':link ');
  await page.waitForTimeout(250);
  assert.equal(await suggestionList.isVisible(),false);
- assert.deepEqual(linkSearches,['f']);
+ assert.deepEqual(linkSearches,['','f','']);
  await commandInput.fill(':link event forecast');await page.locator('#connection-suggestions [role="option"]').first().waitFor();
  assert.equal(await page.locator('#connection-suggestions [role="option"]').count(),2);
  const popup=await page.locator('#connection-suggestions').boundingBox();assert.ok(await page.evaluate(({x,y,width,height})=>!!document.elementFromPoint(x+width/2,y+height/2)?.closest('#connection-suggestions'),popup));
  await page.keyboard.press('Escape');assert.equal(await page.locator('#command-input').inputValue(),':link event forecast');assert.equal(await page.locator('#mode').textContent(),'COMMAND');assert.equal(await page.locator('#connection-suggestions').isVisible(),false);
- await page.locator('#command-input').fill(':link event Budget');await page.locator('#connection-suggestions [role="option"]').first().waitFor();
+ await page.keyboard.press('Escape');
+ await run(':settings');await page.getByRole('button',{name:'Connections settings',exact:true}).click();
+ const limit=page.getByLabel('Maximum suggestions'),sort=page.getByLabel('Sort suggestions by');
+ assert.equal(await limit.inputValue(),'20');assert.equal(await sort.inputValue(),'modified-desc');
+ await limit.fill('1');await sort.selectOption('title-desc');await page.getByRole('button',{name:'Save link preferences'}).click();
+ await page.locator('#notice').filter({hasText:'Link preferences saved.'}).waitFor();
+ await run(':tasks');await page.locator('#items [data-id="'+source.id+'"]').click();
+ await command(':link event');await suggestionList.getByRole('option').first().waitFor();
+ assert.equal(await suggestionList.getByRole('option').count(),1);
+ assert.match(await suggestionList.getByRole('option').first().textContent(),/Budget review B/);
+ await page.keyboard.press('Tab');assert.equal(await commandInput.inputValue(),':link '+second.id);
+ await page.keyboard.press('Escape');
+ await run(':settings');await page.getByRole('button',{name:'Connections settings',exact:true}).click();
+ assert.equal(await limit.inputValue(),'1');assert.equal(await sort.inputValue(),'title-desc');
+ await limit.fill('20');await sort.selectOption('modified-desc');await page.getByRole('button',{name:'Save link preferences'}).click();
+ await page.locator('#notice').filter({hasText:'Link preferences saved.'}).waitFor();
+ await run(':tasks');await page.locator('#items [data-id="'+source.id+'"]').click();
+ await command(':link event Budget');
+ await page.locator('#connection-suggestions [role="option"]').first().waitFor();
  await page.keyboard.press('ArrowDown');const selected=await page.locator('#connection-suggestions [aria-selected="true"] small').textContent();
  await page.keyboard.press('Tab');const chosen=(await page.locator('#command-input').inputValue()).slice(6);assert.ok(selected.includes(chosen));await page.keyboard.press('Enter');
  await page.locator('#notice').filter({hasText:'Items linked.'}).waitFor();assert.equal((await api('connections&id='+source.id)).links.length,1);
@@ -113,6 +138,18 @@ try{
  await page.keyboard.press('Escape');await page.keyboard.press('Escape');
  // Header controls work in every app, including the received-mail header and wiki preview.
  const examples=[source,first,await save('mail','Received linked message','Message content\n'.repeat(80),{folder:'Inbox',from:'sender@example.test'}),await save('contacts','Header contact'),await save('documents','Header document','<p>Document content</p>'),await save('wiki','header:page','Wiki content'),await save('sheets','Header sheet','',{workbook:{sheets:[{name:'Sheet 1',cells:{A1:'Content'}}]}})];
+ await page.setViewportSize({width:1440,height:1000});
+ await page.locator('.application-nav [data-app="calendar"]').click();
+ await page.locator('#items [data-id="'+first.id+'"]').press('Enter');
+ await command(':link task');await suggestionList.getByRole('option').filter({hasText:source.id}).waitFor();
+ await page.keyboard.press('Escape');await page.keyboard.press('Escape');
+ await page.locator('.application-nav [data-app="tasks"]').click();
+ await page.locator('#items [data-id="'+source.id+'"]').click();
+ for(const [type,item] of ['event','mail','contact','doc','page','sheet'].map((type,i)=>[type,examples[i+1]])){
+  await command(':link '+type);
+  await suggestionList.getByRole('option').filter({hasText:item.id}).waitFor();
+  await page.keyboard.press('Escape');await page.keyboard.press('Escape');
+ }
  for(const item of examples)if(item.id!==source.id)await api('connection',{id:source.id,target:item.id});
  for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
   await page.setViewportSize(viewport);

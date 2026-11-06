@@ -52,7 +52,18 @@ try {
         session_regenerate_id(true); $_SESSION['owner']=true; $_SESSION['csrf']=bin2hex(random_bytes(32)); json_response(['ok'=>true,'csrf'=>$_SESSION['csrf']]);
     }
     owner();
-    if($route==='connection-search' && $method==='GET') { session_write_close();json_response(['items'=>connection_search((string)($_GET['q']??''),(string)($_GET['kind']??''),(string)($_GET['exclude']??''))]); }
+    if($route==='connection-search' && $method==='GET') {
+        session_write_close();
+        $limit=20;$sort=null;
+        if(($_GET['suggestions']??'')==='1'){
+            $prefs=setting('preferences',[])['linkAutocomplete']??[];
+            $savedLimit=$prefs['limit']??null;
+            if(is_int($savedLimit)&&$savedLimit>=1&&$savedLimit<=100)$limit=$savedLimit;
+            $savedSort=$prefs['sort']??null;
+            $sort=is_string($savedSort)?$savedSort:'modified-desc';
+        }
+        json_response(['items'=>connection_search((string)($_GET['q']??''),(string)($_GET['kind']??''),(string)($_GET['exclude']??''),$limit,$sort)]);
+    }
     if($route==='connections' && $method==='GET') {
         session_write_close();
         $mode=(string)($_GET['mode']??'');$offset=(int)($_GET['offset']??0);$visibility=(string)($_GET['visibility']??'active');

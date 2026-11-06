@@ -2487,7 +2487,7 @@ function renderJunkSettings() {
     select.onchange = () => void render();
     void render();
 }
-const settingsPages = [['appearance', 'Appearance'], ['mail', 'Mail'], ['accounts', 'Accounts'], ['keyboard', 'Keyboard'], ['backups', 'Backups']];
+const settingsPages = [['appearance', 'Appearance'], ['mail', 'Mail'], ['accounts', 'Accounts'], ['connections', 'Connections'], ['keyboard', 'Keyboard'], ['backups', 'Backups']];
 const settingsPageKey = 'office-settings-page';
 let settingsPage = 'appearance';
 try {
@@ -2499,6 +2499,13 @@ catch { /* Storage may be unavailable. */ }
 function renderSettings() {
     renderAppHeader();
     const p = state.prefs;
+    const linkLimit = p.linkAutocomplete?.limit ?? 20;
+    const linkSortOptions = {
+        'modified-desc': 'Date modified · newest first',
+        'modified-asc': 'Date modified · oldest first',
+        'title-asc': 'Title · A–Z',
+        'title-desc': 'Title · Z–A',
+    };
     const main = document.querySelector('#main');
     main.innerHTML = `<div class="settings">
     <nav class="settings-navigation" aria-label="Settings categories">
@@ -2528,6 +2535,13 @@ function renderSettings() {
       <section class="card" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section>
       <section class="card"><details><summary>Sync and connection details</summary><p>Office checks accounts every two minutes while the app is visible and you’ve used it in the last two minutes. You can also choose Sync now. Inbox, Archive, Trash and Junk: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, use the Google integration settings.</p></details></section>
     </section>
+    <section class="settings-grid" id="settings-connections" data-settings-page="connections"${settingsPage === 'connections' ? '' : ' hidden'}>
+      <section class="card"><h2>Link autocomplete</h2><form id="link-preferences">
+        <label>Maximum suggestions<input name="limit" type="number" min="1" max="100" step="1" required value="${Number.isInteger(linkLimit) && linkLimit >= 1 && linkLimit <= 100 ? linkLimit : 20}"></label>
+        <label>Sort suggestions by<select name="sort">${Object.entries(linkSortOptions).map(([key, label]) => `<option value="${key}" ${p.linkAutocomplete?.sort === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+        <button class="primary">Save link preferences</button>
+      </form></section>
+    </section>
     <section class="settings-grid" id="settings-keyboard" data-settings-page="keyboard"${settingsPage === 'keyboard' ? '' : ' hidden'}>
       <section class="card"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action, key]) => field(action, 'key_' + action, keys()[action], 'text', 'required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section>
     </section>
@@ -2551,6 +2565,17 @@ function renderSettings() {
     void renderGoogleSettings(document.querySelector('#google-integration'), api);
     document.querySelector('#preferences').onsubmit = ev => { ev.preventDefault(); void attempt(async () => { const form = ev.target, preferences = { ...state.prefs, ...Object.fromEntries(new FormData(form)), showElapsedTime: form.elements.namedItem('showElapsedTime').checked }; await api('preferences', { preferences }); state.prefs = preferences; applyTheme(); notice('Preferences saved.'); }); };
     renderJunkSettings();
+    document.querySelector('#link-preferences').onsubmit = event => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const linkAutocomplete = { limit: Number(form.get('limit')), sort: String(form.get('sort')) };
+        void attempt(async () => {
+            const preferences = { ...state.prefs, linkAutocomplete };
+            await api('preferences', { preferences });
+            state.prefs = preferences;
+            notice('Link preferences saved.');
+        });
+    };
     document.querySelector('#mail-preferences').onsubmit = event => { event.preventDefault(); void attempt(async () => { const preferences = { ...state.prefs, ...Object.fromEntries(new FormData(event.target)), mailOffline: event.target.elements.namedItem('mailOffline').checked, confirmBeforeSend: event.target.elements.namedItem('confirmBeforeSend').checked }; await api('preferences', { preferences }); state.prefs = preferences; notice('Mail preferences saved.'); }); };
     document.querySelector('#key-form').onsubmit = ev => { ev.preventDefault(); void attempt(async () => { const map = Object.fromEntries([...new FormData(ev.target)].map(([k, v]) => [k.slice(4), v])); if (new Set(Object.values(map)).size !== Object.values(map).length)
         throw Error('Choose a different key for each action.'); if (Object.values(map).some(v => 'gGnN0123456789'.includes(v) || /\s/.test(v)))

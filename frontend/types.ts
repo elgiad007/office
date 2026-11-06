@@ -71,6 +71,7 @@ export interface Preferences {
   mailList?: MailListLayout;
   mailView?: MailViewPreferences;
   taskView?: TaskViewPreferences;
+  linkAutocomplete?: {limit:number; sort:string};
   theme?: string; density?: string; accent?: string;
   keys?: Record<string, string>;
   mailDisplay?: string; defaultMailAccount?: string;
