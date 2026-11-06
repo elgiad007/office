@@ -33,6 +33,7 @@ try{
     else if(action==='accounts')json={accounts:[{id:'fixture',label:'Fixture',type:'imap'}]};
     else if(action==='records')json={records:records.filter(r=>r.kind===new URL(route.request().url()).searchParams.get('kind'))};
     else if(action==='sync')json={count:0};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='save'){
       const input=route.request().postDataJSON();writes.push(input);
       if(reject)return route.fulfill({status:500,json:{error:'Fixture save failure'}});
@@ -65,11 +66,9 @@ try{
     }
     if(app==='mail'){
       await page.locator('[name="to"]').fill('fixture@example.com');
-      await page.locator('[data-action="send"]').click();
-      await page.locator('#notice').filter({hasText:'Save this draft first.'}).waitFor();
       await page.locator('[data-attach-input]').setInputFiles({name:'fixture.txt',mimeType:'text/plain',buffer:Buffer.from('fixture')});
       await page.locator('[data-file-status]').filter({hasText:'Save this draft first.'}).waitFor();
-      assert.equal(writes.length,before,'send and attachments cannot implicitly save');
+      assert.equal(writes.length,before,'attachments cannot implicitly save');
     }
     await discard();assert.equal(writes.length,before,app+' discard has no save');
     await create();await page.locator('.title-input').fill('Saved '+app);
@@ -115,5 +114,5 @@ try{
     }
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS drafts: all seven apps, manual first save, subsequent autosave, discard, save/cancel/discard navigation, failed save and retry, preview/sheets/export/sync/send/attachment gates.');
+  console.log('PASS drafts: all seven apps, manual first save, subsequent autosave, discard, save/cancel/discard navigation, failed save and retry, preview/sheets/export/sync/attachment gates.');
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

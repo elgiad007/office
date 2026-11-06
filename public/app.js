@@ -2116,19 +2116,30 @@ async function sendMail() {
     busyButton(document.querySelector('#detail [data-action="send"]'), true);
     try {
         await waitForAttachments();
-        await requireSaved();
-        if (state.app !== 'mail' || state.current?.id !== record.id)
+        if (state.app !== 'mail' || state.current !== record)
             return;
+        collect();
         if (!mailAccounts().some(a => a.id === record.meta.sendAccount))
             throw Error('Choose a sending account first.');
         if (state.prefs.confirmBeforeSend !== false) {
             const confirmed = await new Promise(resolve => {
-                confirmation('Send message', `Send this saved draft to ${record.meta.to}?`, () => resolve(true));
+                confirmation('Send message', `Send this message to ${record.meta.to}?`, () => resolve(true));
+                const confirm = dialog.querySelector('#confirm');
+                confirm.onkeydown = event => {
+                    if (event.key === 'Enter' && (event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey))
+                        event.preventDefault();
+                };
+                confirm.focus();
                 dialog.addEventListener('close', () => resolve(false), { once: true });
             });
             if (!confirmed)
                 return;
         }
+        if (state.app !== 'mail' || state.current !== record)
+            return;
+        await commit(true);
+        if (state.app !== 'mail' || state.current !== record)
+            return;
         try {
             await api('send', { id: record.id, revision: record.revision, account: record.meta.sendAccount });
             if (state.app === 'mail' && state.current?.id === record.id && !state.dirty && !state.savePromise) {

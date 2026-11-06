@@ -11,6 +11,7 @@ export async function testDraftFolders(page,url) {
     else if(action==='accounts')json={accounts:['a','b'].map(id=>({id:'folder-'+id,label:'Folder '+id,type:'imap',folders:[{id:'Orders',name:'Orders',protected:false}]}))};
     else if(action==='records')json={records};
     else if(['sync','mail-folder-sync'].includes(action))json={count:0};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='save'){
       const record={...input,id:input.id||'draft-'+(++sequence),revision:(input.revision||0)+1,created:new Date().toISOString(),updated:new Date().toISOString()};
       records=records.filter(r=>r.id!==record.id);records.push(record);json={record};
@@ -31,7 +32,7 @@ export async function testDraftFolders(page,url) {
   const save=async()=>{await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();};
   const discard=async()=>{await page.locator('#detail [data-action="delete"]').click();await page.locator('#confirm').click();await page.locator('#record-form').waitFor({state:'detached'});};
   const send=async()=>{
-    await page.locator('[name="to"]').fill('recipient@example.com');await page.locator('[name="sendAccount"]').selectOption('folder-a');await save();
+    await page.locator('[name="to"]').fill('recipient@example.com');await page.locator('[name="sendAccount"]').selectOption('folder-a');
     await page.locator('[data-action="send"]').click();await page.locator('#notice').filter({hasText:'Message accepted'}).waitFor();
   };
   const openScope=async(account,id)=>{
