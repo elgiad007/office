@@ -8,7 +8,7 @@ import { isPresent } from './utils.js';
 import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
 import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
-import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, openAccountInbox, backOutOfMailFolder } from './mail-folders.js';
+import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder } from './mail-folders.js';
 import { mailBody, mailDisplayControls, bindMailReader } from './mail-reader.js';
 import { messageHeaders, setupHeaderViewer } from './mail-headers.js';
 import { attachmentSection, bindAttachments, waitForAttachments } from './mail-attachments.js';
@@ -109,7 +109,23 @@ function closeCommand(restore = false) {
 }
 async function signOut() { await waitForAttachments(); await leaveEditor(); await api('logout', {}); await boot(); }
 const commandHandlers = {
-    mail: () => changeApp('mail'),
+    mail: async (accountQuery) => {
+        if (accountQuery === undefined) {
+            await changeApp('mail');
+            return;
+        }
+        const scope = accountInboxScope(resolveAccount(mailAccounts(), accountQuery));
+        await changeApp('mail', false, scope);
+        if (state.app === 'mail' && state.mailScope === scope) {
+            try {
+                await syncOpenFolder(mailFolderEnv());
+            }
+            finally {
+                if (state.mailScope === scope && document.activeElement === document.body)
+                    focusList();
+            }
+        }
+    },
     calendar: () => changeApp('calendar'),
     tasks: () => changeApp('tasks'),
     contacts: () => changeApp('contacts'),
@@ -149,7 +165,7 @@ function openCommand(value = ':') {
     document.querySelector('#notice').hidden = true;
     document.querySelector('#activity-status').prepend(input);
     input.focus();
-    commandSuggestions = connections.autocomplete(input, () => state.accounts);
+    commandSuggestions = connections.autocomplete(input, command => command === 'mail' ? mailAccounts() : state.accounts);
     if (value !== ':')
         input.dispatchEvent(new Event('input'));
     input.addEventListener('blur', () => { if (commandInput === input) {
@@ -175,7 +191,7 @@ function openCommand(value = ':') {
         let command;
         try {
             command = resolveCommand(input.value);
-            if (command.name === 'sync')
+            if (command.name === 'sync' || command.name === 'mail')
                 command.argument = commandSuggestions?.selectedAccountId() ?? command.argument;
         }
         catch (cause) {
@@ -1488,10 +1504,23 @@ async function openConnectedRecord(id) {
     focusList();
     document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
 }
-async function changeApp(name, keepSidebar = false) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if (name === 'mail' && state.app !== 'mail') {
-    state.mailFolder = 'Inbox';
-    state.mailScope = null;
-} state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(undefined, { enteringApp: true, keepSidebar }); }
+async function changeApp(name, keepSidebar = false, mailScope) {
+    await waitForAttachments();
+    await leaveEditor();
+    rememberSelection();
+    if (name === 'mail' && (state.app !== 'mail' || mailScope)) {
+        state.mailFolder = 'Inbox';
+        state.mailScope = mailScope ?? null;
+    }
+    state.app = name;
+    state.current = null;
+    state.search = '';
+    state.sheet = 0;
+    state.cell = 'A1';
+    state.mode = 'normal';
+    location.hash = name;
+    await load(undefined, { enteringApp: true, keepSidebar });
+}
 function updateMailListItem(id) {
     const row = state.rows.find(r => r.id === id), button = document.querySelector(`#items [data-id="${CSS.escape(id)}"]`);
     if (!row || !button)
@@ -1789,16 +1818,19 @@ async function importFile() {
     });
     input.click();
 }
+function resolveAccount(accounts, query) {
+    const exact = accounts.find(account => account.id === query);
+    if (exact)
+        return exact;
+    const matches = accounts.filter(account => account.label.trim().toLocaleLowerCase() === query.toLocaleLowerCase());
+    if (!matches.length)
+        throw new CommandError('No matching account. Use Tab to fill an account from the suggestions.');
+    if (matches.length > 1)
+        throw new CommandError('Several accounts have that name. Use Tab to select the account you want.');
+    return matches[0];
+}
 async function syncAccounts(manual = true, accountQuery) {
-    let accounts = [...state.accounts];
-    if (accountQuery !== undefined) {
-        const exact = accounts.find(account => account.id === accountQuery);
-        accounts = exact ? [exact] : accounts.filter(account => account.label.trim().toLocaleLowerCase() === accountQuery.toLocaleLowerCase());
-        if (!accounts.length)
-            throw new CommandError('No matching account. Use Tab to fill an account from the suggestions.');
-        if (accounts.length > 1)
-            throw new CommandError('Several accounts have that name. Use Tab to select the account you want.');
-    }
+    const accounts = accountQuery === undefined ? [...state.accounts] : [resolveAccount(state.accounts, accountQuery)];
     if (state.syncing || document.hidden || (!manual && Date.now() - state.lastActivity > 120000))
         return;
     if (!accounts.length) {

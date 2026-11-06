@@ -4,6 +4,7 @@ export async function testCommands(page,url) {
   let authenticated=true,creates=[],logout=0,saves=0,releaseCreate,createStarted,failLogout=false;
   const notices=[];
   const synced=[];
+  const openedFolders=[];
   const accounts=[{id:'work-mail',label:'Work Account',type:'imap'},{id:'work-calendar',label:'Work Account',type:'caldav'},{id:'personal-mail',label:'Personal',type:'imap'}];
   const records=[{id:'headers',kind:'mail',title:'Header fixture',body:'Body',revision:1,meta:{folder:'Inbox',read:true,raw:'Subject: Header fixture\r\n\r\nBody'}}];
   const routes=t=>t.pathname.endsWith('/api.php');
@@ -14,6 +15,7 @@ export async function testCommands(page,url) {
     else if(action==='accounts')json={accounts};
     else if(action==='mail-junk-settings')json={rules:[],folder:'Junk'};
     else if(action==='sync'){synced.push(route.request().postDataJSON().id);json={more:false};}
+    else if(action==='mail-folder-sync'){openedFolders.push(route.request().postDataJSON());json={more:false};}
     else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='activity'){if(route.request().method()==='POST')notices.push(route.request().postDataJSON());json={entries:['error','warning','info'].map((level,i)=>({id:i+1,time:'2026-11-03T00:00:00Z',level,phase:'diagnostic',operation:'fixture',message:level+' fixture',duration_ms:null}))};}
     else if(action==='records')json={records:records.filter(r=>r.kind===new URL(route.request().url()).searchParams.get('kind'))};
@@ -83,6 +85,24 @@ export async function testCommands(page,url) {
     await run(':sync');
     await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
     assert.deepEqual(synced.sort(),['personal-mail','work-calendar','work-mail']);
+    accounts.push({id:'work-gmail',label:'Work Account',type:'google'});
+    records.push({id:'gmail-inbox',kind:'mail',title:'Gmail Inbox fixture',body:'Body',revision:1,meta:{folder:'Inbox',read:true,remote:true,account:'work-gmail',labelIds:['INBOX']}});
+    await page.reload();await page.locator('#sync-status').filter({hasText:'Checked'}).waitFor();
+    await run(':mail Work Account');
+    await page.locator('#notice').filter({hasText:'Several accounts have that name'}).waitFor();
+    assert.equal(new URL(page.url()).hash,'#tasks');
+    await page.keyboard.press(':');
+    await page.locator('#command-input').fill(':m ');
+    assert.equal(await page.getByRole('listbox',{name:'Matching accounts'}).getByRole('option').count(),3);
+    await page.locator('#command-input').fill(':m work-gmail');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('#command-input').inputValue(),':m "Work Account"');
+    await page.keyboard.press('Enter');
+    await page.locator('.folder-current').getByText(/Work Account \/ Inbox/i).waitFor();
+    await page.locator('#selected-item[data-id=gmail-inbox]').waitFor();
+    await page.waitForFunction(()=>!document.querySelector('#sync-button').disabled);
+    assert.deepEqual(openedFolders.map(({account,folder})=>[account,folder]),[['work-gmail','INBOX']]);
+    await navigate(':t','tasks');
     for(const [command,level,count] of [['errors','error',1],['warnings','warning',1],['log','',3]]){
       await run(':bogus');
       await run(':'+command);await page.locator('#activity-dialog[open]').waitFor();
@@ -104,7 +124,9 @@ export async function testCommands(page,url) {
       assert.doesNotMatch(await page.locator('#notice').textContent(),/Unknown command|Unknown parameter/);
       assert.equal(creates.length,7);
       const before=page.url();await run(':'+name+' extra');assert.equal(page.url(),before);
-      assert.equal(await page.locator('#notice').textContent(),'Unknown parameter: extra');
+      assert.equal(await page.locator('#notice').textContent(),target==='mail'
+        ?'No matching account. Use Tab to fill an account from the suggestions.'
+        :'Unknown parameter: extra');
     }
     await page.locator('#main').focus();await page.keyboard.press('?');
     for(const alias of ['cal','con','doc','sh','set']){

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CommandError,resolveCommand,connectionQuery,syncQuery} from '../public/commands.js';
+import {CommandError,resolveCommand,connectionQuery,accountCommandQuery} from '../public/commands.js';
 const navigation={mail:['m'],calendar:['cal'],tasks:['t'],contacts:['con'],docs:['doc','d'],sheets:['sh'],wiki:['w'],settings:['set']};
 test('connection commands preserve multiword queries and support every registered type',()=>{
  for(const [type,kind] of Object.entries({mail:'mail',event:'calendar',task:'tasks',contact:'contacts',doc:'documents',page:'wiki',sheet:'sheets'})){
@@ -21,7 +21,7 @@ test('connection commands preserve multiword queries and support every registere
 test('navigation names and exact aliases resolve to canonical commands without arguments',()=>{
  for(const [canonical,aliases] of Object.entries(navigation))for(const name of [canonical,...aliases]){
   assert.deepEqual(resolveCommand(': '+name+' '),{name:canonical,argument:undefined});
-  assert.throws(()=>resolveCommand(':'+name+' extra more'),error=>error instanceof CommandError&&error.message==='Unknown parameter: extra');
+  if(canonical!=='mail')assert.throws(()=>resolveCommand(':'+name+' extra more'),error=>error instanceof CommandError&&error.message==='Unknown parameter: extra');
  }
  for(const name of ['ca','cont','documents','se','constructor','toString'])assert.throws(()=>resolveCommand(':'+name),error=>error instanceof CommandError&&error.message==='Unknown command: '+name);
 });
@@ -43,9 +43,15 @@ test('sync accepts an optional account name and suggests accounts after a space'
  assert.deepEqual(resolveCommand(': sync Work  Calendar '),{name:'sync',argument:'Work  Calendar'});
  assert.equal(resolveCommand(':sync '+JSON.stringify('Work "Calendar"')).argument,'Work "Calendar"');
  assert.equal(resolveCommand(':sync ""').argument,'');
- assert.equal(syncQuery(':sync'),undefined);
- assert.equal(syncQuery(':sync '),'');
- assert.equal(syncQuery(':sync Work Ca'),'Work Ca');
+ assert.equal(accountCommandQuery(':sync'),undefined);
+ assert.equal(accountCommandQuery(':sync ')?.query,'');
+ assert.equal(accountCommandQuery(':sync Work Ca')?.query,'Work Ca');
+});
+test('mail accepts account names and IDs through either command name',()=>{
+ assert.deepEqual(resolveCommand(':mail Work Account'),{name:'mail',argument:'Work Account'});
+ assert.deepEqual(resolveCommand(':m work-mail'),{name:'mail',argument:'work-mail'});
+ assert.deepEqual(accountCommandQuery(':m '),{name:'mail',token:'m',query:''});
+ assert.equal(resolveCommand(':mail '+JSON.stringify('Work "Mail"')).argument,'Work "Mail"');
 });
 test('command errors report only the first offending token',()=>{
  for(const [input,message] of [[':','Unknown command'],[':frob','Unknown command: frob'],[':new banana','Unknown parameter: banana'],[':new bad extra','Unknown parameter: bad'],[':head extra','Unknown parameter: extra'],[':<img>','Unknown command: <img>']]){

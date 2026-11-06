@@ -1,5 +1,5 @@
 import {openConnectionExplorer} from './connection-explorer.js';
-import {connectionQuery,syncQuery,CommandError} from './commands.js';
+import {connectionQuery,accountCommandQuery,CommandError} from './commands.js';
 import {itemTypes, type ItemKind} from './item-types.js';
 import {escapeHtml as e} from './formats.js';
 import type {Account,ConnectionItem,ConnectionList,RequestApi,ConfirmDeletion,ConnectionDeletionChoices} from './types.js';
@@ -46,34 +46,36 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
     }
     return (await env.api(`connection-search&q=${encodeURIComponent(query.query)}&kind=${encodeURIComponent(query.kind||'')}&exclude=${encodeURIComponent(id)}`)).items;
   }
-  function autocomplete(input:HTMLInputElement,accounts:()=>Account[]) {
+  function autocomplete(input:HTMLInputElement,accounts:(command:'mail'|'sync')=>Account[]) {
     const list=document.createElement('div');list.id='connection-suggestions';list.className='connection-suggestions';list.setAttribute('role','listbox');list.setAttribute('aria-label','Matching items');list.hidden=true;input.after(list);
     input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
     let version=0,timer:ReturnType<typeof setTimeout>,index=0,command='',chosen=false;
     let items:{id:string; title:string; detail:string; excerpt?:string}[]=[];
     let selectedAccount:{id:string; value:string}|undefined;
+    let accountCommand: ReturnType<typeof accountCommandQuery>;
     const hide=()=>{version++;clearTimeout(timer);list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');};
     const accept=()=>{
       const item=items[index];if(!item)return;
-      if(command==='sync'){
+      if(accountCommand){
         const name=/[\s"]/.test(item.title)?JSON.stringify(item.title):item.title;
-        input.value=':sync '+name;
+        input.value=':'+accountCommand.token+' '+name;
         selectedAccount={id:item.id,value:input.value};
       }else input.value=':'+command+' '+item.id;
       hide();input.focus();
     };
     function render(){
-      list.innerHTML=items.length?items.map((item,i)=>`<div role="option" id="connection-option-${i}" aria-selected="${i===index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt===undefined?'':`<span>${e(item.excerpt)}</span>`}</div>`).join(''):`<p role="status">No matching ${command==='sync'?'accounts':'items'}.</p>`;
+      list.innerHTML=items.length?items.map((item,i)=>`<div role="option" id="connection-option-${i}" aria-selected="${i===index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt===undefined?'':`<span>${e(item.excerpt)}</span>`}</div>`).join(''):`<p role="status">No matching ${accountCommand?'accounts':'items'}.</p>`;
       list.hidden=false;input.setAttribute('aria-expanded','true');if(items.length){input.setAttribute('aria-activedescendant','connection-option-'+index);list.children[index]?.scrollIntoView({block:'nearest'});}else input.removeAttribute('aria-activedescendant');
     }
     list.onpointerdown=event=>{event.preventDefault();const option=(event.target as HTMLElement).closest<HTMLElement>('[data-index]');if(option){index=Number(option.dataset.index);accept();}};
     input.addEventListener('input',()=>{
       hide();chosen=false;index=0;selectedAccount=undefined;
-      const accountQuery=syncQuery(input.value);
-      if(accountQuery!==undefined){
-        command='sync';list.setAttribute('aria-label','Matching accounts');
-        const query=accountQuery.toLocaleLowerCase();
-        items=accounts().filter(account=>account.label.toLocaleLowerCase().includes(query)||account.id.toLocaleLowerCase().includes(query))
+      accountCommand=accountCommandQuery(input.value);
+      if(accountCommand){
+        list.setAttribute('aria-label','Matching accounts');
+        const {name,query}=accountCommand;
+        const search=query.toLocaleLowerCase();
+        items=accounts(name).filter(account=>account.label.toLocaleLowerCase().includes(search)||account.id.toLocaleLowerCase().includes(search))
           .map(account=>({id:account.id,title:account.label,detail:account.type}));
         render();return;
       }
@@ -87,7 +89,7 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
         if(event.isComposing||list.hidden)return false;
         if(event.key==='Escape'){event.preventDefault();hide();return true;}
         if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();if(items.length){index=(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;chosen=true;render();}return true;}
-        if(event.key==='Enter'&&!event.repeat&&command==='sync'&&chosen)accept();
+        if(event.key==='Enter'&&!event.repeat&&accountCommand&&chosen)accept();
         if(event.key==='Tab'){event.preventDefault();accept();return true;}
         return false;
       },

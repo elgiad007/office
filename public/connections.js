@@ -1,6 +1,6 @@
 // Generated from frontend/connections.ts by pnpm build. Do not edit.
 import { openConnectionExplorer } from './connection-explorer.js';
-import { connectionQuery, syncQuery, CommandError } from './commands.js';
+import { connectionQuery, accountCommandQuery, CommandError } from './commands.js';
 import { itemTypes } from './item-types.js';
 import { escapeHtml as e } from './formats.js';
 const label = (kind) => itemTypes[kind]?.label || kind;
@@ -101,14 +101,15 @@ export function createConnections(env) {
         let version = 0, timer, index = 0, command = '', chosen = false;
         let items = [];
         let selectedAccount;
+        let accountCommand;
         const hide = () => { version++; clearTimeout(timer); list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
         const accept = () => {
             const item = items[index];
             if (!item)
                 return;
-            if (command === 'sync') {
+            if (accountCommand) {
                 const name = /[\s"]/.test(item.title) ? JSON.stringify(item.title) : item.title;
-                input.value = ':sync ' + name;
+                input.value = ':' + accountCommand.token + ' ' + name;
                 selectedAccount = { id: item.id, value: input.value };
             }
             else
@@ -117,7 +118,7 @@ export function createConnections(env) {
             input.focus();
         };
         function render() {
-            list.innerHTML = items.length ? items.map((item, i) => `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt === undefined ? '' : `<span>${e(item.excerpt)}</span>`}</div>`).join('') : `<p role="status">No matching ${command === 'sync' ? 'accounts' : 'items'}.</p>`;
+            list.innerHTML = items.length ? items.map((item, i) => `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt === undefined ? '' : `<span>${e(item.excerpt)}</span>`}</div>`).join('') : `<p role="status">No matching ${accountCommand ? 'accounts' : 'items'}.</p>`;
             list.hidden = false;
             input.setAttribute('aria-expanded', 'true');
             if (items.length) {
@@ -136,12 +137,12 @@ export function createConnections(env) {
             chosen = false;
             index = 0;
             selectedAccount = undefined;
-            const accountQuery = syncQuery(input.value);
-            if (accountQuery !== undefined) {
-                command = 'sync';
+            accountCommand = accountCommandQuery(input.value);
+            if (accountCommand) {
                 list.setAttribute('aria-label', 'Matching accounts');
-                const query = accountQuery.toLocaleLowerCase();
-                items = accounts().filter(account => account.label.toLocaleLowerCase().includes(query) || account.id.toLocaleLowerCase().includes(query))
+                const { name, query } = accountCommand;
+                const search = query.toLocaleLowerCase();
+                items = accounts(name).filter(account => account.label.toLocaleLowerCase().includes(search) || account.id.toLocaleLowerCase().includes(search))
                     .map(account => ({ id: account.id, title: account.label, detail: account.type }));
                 render();
                 return;
@@ -179,7 +180,7 @@ export function createConnections(env) {
                     }
                     return true;
                 }
-                if (event.key === 'Enter' && !event.repeat && command === 'sync' && chosen)
+                if (event.key === 'Enter' && !event.repeat && accountCommand && chosen)
                     accept();
                 if (event.key === 'Tab') {
                     event.preventDefault();

@@ -31,9 +31,8 @@ async function reloadMail(env, preserveSelection = false) {
     if (env.state.app === 'mail' && !env.state.dirty && !env.state.savePromise)
         await env.load(undefined, { preserveSelection });
 }
-async function openFolder(env, account, folder, closePanel) {
+async function openFolder(env, scope, closePanel) {
     await env.commit();
-    const scope = { account, folder, limit: 100 };
     env.state.mailScope = scope;
     env.state.current = null;
     env.state.selected.clear();
@@ -43,13 +42,14 @@ async function openFolder(env, account, folder, closePanel) {
     if (env.state.app === 'mail' && env.state.mailScope === scope)
         await syncOpenFolder(env);
 }
-function inboxId(account) {
-    return account.folders?.find(folder => folder.id.toUpperCase() === 'INBOX')?.id || 'INBOX';
+export function accountInboxScope(account) {
+    const folder = account.folders?.find(folder => folder.id.toUpperCase() === 'INBOX')?.id || 'INBOX';
+    return { account: account.id, folder, limit: 100 };
 }
 export function openAccountInbox(env, id) {
     const account = env.state.accounts.find(account => account.id === id);
     if (account)
-        return openFolder(env, id, inboxId(account), false);
+        return openFolder(env, accountInboxScope(account), false);
 }
 export function backOutOfMailFolder(env) {
     const scope = env.state.mailScope;
@@ -60,7 +60,7 @@ export function backOutOfMailFolder(env) {
     const delimiter = folder?.delimiter;
     const parent = folder && delimiter ? account.folders?.filter(candidate => folder.name.startsWith(candidate.name + delimiter))
         .reduce((nearest, candidate) => !nearest || candidate.name.length > nearest.name.length ? candidate : nearest, undefined) : undefined;
-    return openFolder(env, account.id, parent?.id || inboxId(account), false);
+    return openFolder(env, parent ? { account: account.id, folder: parent.id, limit: 100 } : accountInboxScope(account), false);
 }
 export async function syncOpenFolder(env, more = false) {
     const scope = env.state.mailScope;
@@ -130,7 +130,7 @@ export function renderMailFolders(env) {
             b.disabled = false;
         }
     }));
-    host.querySelectorAll('[data-open-folder]').forEach(b => b.onclick = () => env.attempt(() => openFolder(env, b.dataset.folderAccount, b.dataset.openFolder, true)));
+    host.querySelectorAll('[data-open-folder]').forEach(b => b.onclick = () => env.attempt(() => openFolder(env, { account: b.dataset.folderAccount, folder: b.dataset.openFolder, limit: 100 }, true)));
     host.querySelectorAll('[data-open-folder]').forEach(button => {
         const owner = state.accounts.find(a => a.id === button.dataset.folderAccount);
         const folder = owner?.folders?.find(f => f.id === button.dataset.openFolder);

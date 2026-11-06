@@ -13,7 +13,7 @@ type MailSnapshot = Pick<OfficeRecord, 'id' | 'kind' | 'contentHash' | 'meta'>;
 import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
-import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
+import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
 import {mailBody, mailDisplayControls, bindMailReader} from './mail-reader.js';
 import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
 import {attachmentSection, bindAttachments, waitForAttachments} from './mail-attachments.js';
@@ -100,7 +100,15 @@ function closeCommand(restore=false) {
 }
 async function signOut() {await waitForAttachments();await leaveEditor();await api('logout',{});await boot();}
 const commandHandlers={
-  mail:()=>changeApp('mail'),
+  mail:async(accountQuery?:string)=>{
+    if(accountQuery===undefined){await changeApp('mail');return;}
+    const scope=accountInboxScope(resolveAccount(mailAccounts(),accountQuery));
+    await changeApp('mail',false,scope);
+    if(state.app==='mail'&&state.mailScope===scope){
+      try{await syncOpenFolder(mailFolderEnv());}
+      finally{if(state.mailScope===scope&&document.activeElement===document.body)focusList();}
+    }
+  },
   calendar:()=>changeApp('calendar'),
   tasks:()=>changeApp('tasks'),
   contacts:()=>changeApp('contacts'),
@@ -128,7 +136,7 @@ function openCommand(value=':') {
   input.id='command-input';input.setAttribute('aria-label','Command');input.autocomplete='off';input.spellcheck=false;input.value=value;
   document.querySelector<HTMLElement>('#notice')!.hidden=true;
   document.querySelector<HTMLElement>('#activity-status')!.prepend(input);input.focus();
-  commandSuggestions=connections.autocomplete(input,()=>state.accounts);
+  commandSuggestions=connections.autocomplete(input,command=>command==='mail'?mailAccounts():state.accounts);
   if(value!==':')input.dispatchEvent(new Event('input'));
   input.addEventListener('blur',()=>{if(commandInput===input){closeCommand();if(editable(document.activeElement))setMode('insert');}});
   input.addEventListener('keydown',event=>{
@@ -140,7 +148,7 @@ function openCommand(value=':') {
     let command: ReturnType<typeof resolveCommand>;
     try{
       command=resolveCommand(input.value);
-      if(command.name==='sync')command.argument=commandSuggestions?.selectedAccountId()??command.argument;
+      if(command.name==='sync'||command.name==='mail')command.argument=commandSuggestions?.selectedAccountId()??command.argument;
     }catch(cause){activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});closeCommand(true);return;}
     activity.clearCommandError();
     commandBusy=true;closeCommand(true);
@@ -932,7 +940,12 @@ async function openConnectedRecord(id:string){
   focusList();
   document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
 }
-async function changeApp(name: AppName,keepSidebar=false) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(undefined,{enteringApp:true,keepSidebar}); }
+async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope) {
+  await waitForAttachments();await leaveEditor();rememberSelection();
+  if(name==='mail'&&(state.app!=='mail'||mailScope)){state.mailFolder='Inbox';state.mailScope=mailScope??null;}
+  state.app=name;state.current=null;state.search='';state.sheet=0;state.cell='A1';state.mode='normal';location.hash=name;
+  await load(undefined,{enteringApp:true,keepSidebar});
+}
 function updateMailListItem(id: string) {
   const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
   if(!row||!button)return;
@@ -1050,14 +1063,16 @@ async function importFile() {
     const result=await api('import-items',{records});await load();notice(`Imported ${result.count} items locally.`);
   });input.click();
 }
+function resolveAccount(accounts: AppState['accounts'],query: string) {
+  const exact=accounts.find(account=>account.id===query);
+  if(exact)return exact;
+  const matches=accounts.filter(account=>account.label.trim().toLocaleLowerCase()===query.toLocaleLowerCase());
+  if(!matches.length)throw new CommandError('No matching account. Use Tab to fill an account from the suggestions.');
+  if(matches.length>1)throw new CommandError('Several accounts have that name. Use Tab to select the account you want.');
+  return matches[0];
+}
 async function syncAccounts(manual=true,accountQuery?:string) {
-  let accounts=[...state.accounts];
-  if(accountQuery!==undefined){
-    const exact=accounts.find(account=>account.id===accountQuery);
-    accounts=exact?[exact]:accounts.filter(account=>account.label.trim().toLocaleLowerCase()===accountQuery.toLocaleLowerCase());
-    if(!accounts.length)throw new CommandError('No matching account. Use Tab to fill an account from the suggestions.');
-    if(accounts.length>1)throw new CommandError('Several accounts have that name. Use Tab to select the account you want.');
-  }
+  const accounts=accountQuery===undefined?[...state.accounts]:[resolveAccount(state.accounts,accountQuery)];
   if(state.syncing || document.hidden || (!manual && Date.now()-state.lastActivity>120000))return;
   if(!accounts.length){if(manual){notice('Add an account in Settings to start syncing.');await changeApp('settings');}return;}
   if(state.dirty){if(manual)await commit();else return;}

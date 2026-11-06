@@ -3,7 +3,7 @@
 import { creationTypes } from './item-types.js';
 export { creationTypes } from './item-types.js';
 export const commandRegistry = {
-    mail: { arguments: 0, aliases: ['m'], action: 'Switch to Mail', context: 'Normal mode', options: 'No arguments; prompts for unsaved drafts and saves existing items.' },
+    mail: { arguments: 1, aliases: ['m'], action: 'Switch to Mail', context: 'Normal mode', options: ':mail [account name or ID] opens the account’s Inbox. Type a space for suggestions. Use ↑/↓ to choose, Tab to fill, and Enter to open.' },
     calendar: { arguments: 0, aliases: ['cal'], action: 'Switch to Calendar', context: 'Normal mode', options: 'No arguments; prompts for unsaved drafts and saves existing items.' },
     tasks: { arguments: 0, aliases: ['t'], action: 'Switch to Tasks', context: 'Normal mode', options: 'No arguments; prompts for unsaved drafts and saves existing items.' },
     contacts: { arguments: 0, aliases: ['con'], action: 'Switch to Contacts', context: 'Normal mode', options: 'No arguments; prompts for unsaved drafts and saves existing items.' },
@@ -32,17 +32,22 @@ for (const name of Object.keys(registry)) {
 }
 export class CommandError extends Error {
 }
-export function syncQuery(value) {
-    const query = value.trimStart().replace(/^:/, '').trimStart().match(/^sync\s+([\s\S]*)$/)?.[1].trim();
-    if (query?.startsWith('"') && query.endsWith('"')) {
+export function accountCommandQuery(value) {
+    const match = value.trimStart().replace(/^:/, '').trimStart().match(/^(\S+)\s+([\s\S]*)$/);
+    if (!match)
+        return;
+    const [, token, parameters] = match;
+    const name = aliases.get(token) || token;
+    if (name !== 'mail' && name !== 'sync')
+        return;
+    let query = parameters.trim();
+    if (query.startsWith('"') && query.endsWith('"')) {
         try {
-            return JSON.parse(query);
+            query = JSON.parse(query);
         }
-        catch {
-            return query;
-        }
+        catch { /* Keep the typed text. */ }
     }
-    return query;
+    return { name, token, query };
 }
 export function connectionQuery(value) {
     const match = value.trimStart().replace(/^:/, '').trimStart().match(/^(link|unlink)(?:\s+(.*))?$/);
@@ -57,8 +62,8 @@ export function resolveCommand(value) {
     const command = Object.hasOwn(registry, name) ? name : aliases.get(name);
     if (!command)
         throw new CommandError('Unknown command' + (name ? ': ' + name : ''));
-    if (command === 'sync')
-        return { name: command, argument: args.length ? syncQuery(value) : undefined };
+    if (command === 'sync' || command === 'mail')
+        return { name: command, argument: args.length ? accountCommandQuery(value)?.query : undefined };
     if (command === 'link' || command === 'unlink') {
         const query = connectionQuery(value);
         if (!query.query)
