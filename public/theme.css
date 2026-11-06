@@ -543,7 +543,7 @@ dialog.help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
 .help-table kbd { white-space: normal; }
 @media (max-width: 600px) { .help-table th, .help-table td { padding: 8px; } .help-table { min-width: 680px; } }
 /* Inset rings identify the active pane without changing its dimensions. */
-.list-pane:focus-within, .detail:focus-within, .detail:focus {
+.sidebar:focus-within, .list-pane:focus-within, .detail:focus-within, .detail:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
   outline-offset: -2px;
 }
