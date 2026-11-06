@@ -114,11 +114,11 @@ const commandHandlers={
   log:()=>activity.open(),
   errors:()=>activity.open('error'),
   warnings:()=>activity.open('warning'),
-  new:async(type?: string)=>{
+  new:async(type?: string,title?: string)=>{
     const target=type as AppName | undefined;
     if(!target&&!apps[state.app])throw new CommandError('Specify an item type for :new in Settings.');
     if(target&&target!==state.app)await changeApp(target);
-    await createRecord();
+    await createRecord({title});
   },
 };
 function openCommand(value=':') {
@@ -153,9 +153,9 @@ function openCommand(value=':') {
         await leaveEditor();
         if(!state.rows.some(row=>row.id===source.id))throw new CommandError('Linked creation cancelled because the source draft was discarded.');
         const sourceId=source.id;
-        await commandHandlers.new(command.argument);
+        await commandHandlers.new(command.argument,command.title);
         if(isUnsavedDraft())pendingLinkedSource={draft:state.current!.id,source:sourceId};
-      }else await commandHandlers[command.name](command.argument);
+      }else await commandHandlers[command.name](command.argument,command.title);
     }catch(cause){if(!(cause instanceof DraftCancelled))activity.notice(asError(cause).message,true,{log:!(cause instanceof CommandError)});}finally{commandBusy=false;}})();
   });
 }

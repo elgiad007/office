@@ -52,7 +52,7 @@ try{
  await run(':link '+chosen);await page.locator('#notice').filter({hasText:'Items linked.'}).waitFor();assert.equal((await api('connections&id='+source.id)).links.length,1);
  await openConnections();await page.locator('.item-connections [data-connection-open]').click();await page.waitForURL('**/#calendar');await page.locator('.item-connections [data-connection-open="'+source.id+'"]').waitFor({state:'attached'});
  await openConnections();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').click();await page.waitForURL('**/#tasks');await page.locator('.item-connections [data-connection-open="'+chosen+'"]').waitFor({state:'attached'});
- await run(':new linked mail');await page.waitForURL('**/#mail');await page.locator('#save-status').filter({hasText:/^Unsaved draft$/}).waitFor();await page.getByRole('textbox',{name:'Title',exact:true}).fill('Linked draft');
+ await run(':new linked mail Linked draft');await page.waitForURL('**/#mail');await page.locator('#save-status').filter({hasText:/^Unsaved draft$/}).waitFor();assert.equal(await page.getByRole('textbox',{name:'Title',exact:true}).inputValue(),'Linked draft');
  assert.equal(await page.locator('.connection-count').isDisabled(),true);assert.equal(await page.locator('[data-connections-add]').isDisabled(),true);
  assert.equal((await api('connections&id='+source.id)).links.length,1);
  await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();await page.locator('.item-connections [data-connection-open="'+source.id+'"]').waitFor({state:'attached'});

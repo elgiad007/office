@@ -12,6 +12,7 @@ export async function testCommands(page,url) {
     if(action==='status')json={authenticated,activity:true,csrf:'fixture',preferences:{}};
     else if(action==='google-settings')json={configured:false,client_id:'',redirect:''};
     else if(action==='accounts')json={accounts};
+    else if(action==='mail-junk-settings')json={rules:[],folder:'Junk'};
     else if(action==='sync'){synced.push(route.request().postDataJSON().id);json={more:false};}
     else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='activity'){if(route.request().method()==='POST')notices.push(route.request().postDataJSON());json={entries:['error','warning','info'].map((level,i)=>({id:i+1,time:'2026-11-03T00:00:00Z',level,phase:'diagnostic',operation:'fixture',message:level+' fixture',duration_ms:null}))};}
@@ -43,7 +44,7 @@ export async function testCommands(page,url) {
     await page.evaluate(()=>{document.querySelector('#notice').textContent='Background work';});
     assert.equal(await page.locator('#command-input').inputValue(),':new doc');
     await page.keyboard.press('Escape');assert.equal(await page.locator('#main').evaluate(e=>e===document.activeElement),true);assert.equal(creates.length,0);
-    for(const invalid of [':bogus',':new bad',':new doc extra',':q extra',':head extra']){await run(invalid);assert.equal(creates.length,0);assert.equal(logout,0);}
+    for(const invalid of [':bogus',':new bad',':new linked bad',':q extra',':head extra']){await run(invalid);assert.equal(creates.length,0);assert.equal(logout,0);}
     for(const invalid of [':log extra',':errors extra',':warnings extra']){await run(invalid);assert.equal(await page.locator('#activity-dialog[open]').count(),0);}
     for(const [command,message] of [[':frob','Unknown command: frob'],[':new banana','Unknown parameter: banana']]){
       await run(command);assert.equal(await page.locator('#notice').textContent(),message);
@@ -122,9 +123,10 @@ export async function testCommands(page,url) {
     assert.equal(records.find(record=>record.kind==='tasks').title,'Saved by navigation');assert.equal(creates.length,7);
     for(const kind of ['mail','calendar','tasks','contacts','documents','wiki','sheets']){
       await page.locator('[data-app="'+kind+'"]').first().click();
-      const before=creates.length;await run(':new');
+      const before=creates.length;await run(':new "Current app title"');
       await page.waitForFunction(()=>document.activeElement?.closest('#detail')!==null);
       await saveDraft();assert.equal(creates.length,before+1);assert.equal(creates.at(-1),kind);
+      assert.equal(records.at(-1).title,'Current app title');
     }
     await page.locator('[data-app="mail"]').first().click();await page.locator('[data-id="headers"]').click();
     await run(':head');await page.locator('.message-headers').waitFor();assert.match(await page.locator('.message-headers').textContent(),/Subject: Header fixture/);await page.keyboard.press('Escape');
@@ -138,8 +140,9 @@ export async function testCommands(page,url) {
     failLogout=true;const loggedFailure=page.waitForResponse(response=>response.url().includes('r=activity')&&response.request().method()==='POST');
     await run(':q');await loggedFailure;await page.waitForFunction(()=>document.querySelector('#notice').textContent==='Logout fixture failed');
     assert.equal(notices.at(-1)?.message,'Logout fixture failed');failLogout=false;
-    releaseCreate={};const started=new Promise(resolve=>{createStarted=resolve;});await run(':new task');
-    await page.getByRole('textbox',{name:'Title',exact:true}).fill('Pending command save');await page.keyboard.press('Control+s');
+    releaseCreate={};const started=new Promise(resolve=>{createStarted=resolve;});await run(':new task Pending command save');
+    await page.locator('#save-status').filter({hasText:/^Unsaved draft$/}).waitFor();
+    assert.equal(await page.getByRole('textbox',{name:'Title',exact:true}).inputValue(),'Pending command save');await page.keyboard.press('Control+s');
     await Promise.race([started,new Promise((_,reject)=>setTimeout(()=>reject(Error('Create did not start')),5000))]);
     assert.equal(await page.locator('#save-status').textContent(),'Unsaved draft');
     await page.keyboard.press('Control+s');await page.keyboard.press('Control+s');
