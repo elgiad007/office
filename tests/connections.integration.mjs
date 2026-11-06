@@ -33,7 +33,7 @@ try{
  const source=await save('tasks','Planning hub','Quarterly planning');
  const first=await save('calendar','Budget review A','Review forecast alpha',{start:'2026-11-05T14:00:00Z'});
  const second=await save('calendar','Budget review B','Review forecast beta',{start:'2026-11-06T14:00:00Z'});
- await save('contacts','Finance lead','Discuss forecasts',{email:'finance@example.test'});
+ await save('contacts','Finance lead for the annual planning and budget review','Discuss forecasts',{email:'finance@example.test'});
  await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('#items [data-id="'+source.id+'"]').click();
  const command=async text=>{await page.keyboard.press('Escape');await page.locator('#main').focus();await page.keyboard.press(':');await page.locator('#command-input').fill(text);};
  const run=async text=>{await command(text);await page.keyboard.press('Enter');};
@@ -74,7 +74,21 @@ try{
  for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});
  await api('restore',{backup});assert.equal((await api('backup')).connections.length,2);
  await page.reload();await page.locator('#items [data-id="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open]').first().waitFor({state:'attached'});
- await page.setViewportSize({width:390,height:844});await command(':link forecast');await page.locator('#connection-suggestions').waitFor();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:'test-results/connections-mobile.png'});
+ await page.setViewportSize({width:390,height:844});await command(':link forecast');
+ const suggestions=page.locator('#connection-suggestions [role="option"]');
+ await suggestions.filter({hasText:'Contact · Finance lead'}).waitFor();
+ for(const [type,kind] of [['Event','calendar'],['Contact','contacts']]){
+  const option=suggestions.filter({hasText:type+' · '}).first();
+  const icon=option.locator('strong svg');
+  assert.ok(await icon.isVisible());
+  assert.equal(await icon.getAttribute('aria-hidden'),'true');
+  assert.equal(await icon.locator('path').getAttribute('d'),await page.locator(`.application-nav [data-app="${kind}"] svg path`).getAttribute('d'));
+ }
+ assert.ok(await suggestions.filter({hasText:'Contact · Finance lead'}).locator('strong span').evaluate(title=>{
+  const text=document.createRange();text.selectNodeContents(title);
+  return new Set(Array.from(text.getClientRects(),rect=>rect.top)).size>1;
+ }));
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:'test-results/connections-mobile.png'});
  await page.keyboard.press('Escape');await page.keyboard.press('Escape');
  // Header controls work in every app, including the received-mail header and wiki preview.
  const examples=[source,first,await save('mail','Received linked message','Message content\n'.repeat(80),{folder:'Inbox',from:'sender@example.test'}),await save('contacts','Header contact'),await save('documents','Header document','<p>Document content</p>'),await save('wiki','header:page','Wiki content'),await save('sheets','Header sheet','',{workbook:{sheets:[{name:'Sheet 1',cells:{A1:'Content'}}]}})];

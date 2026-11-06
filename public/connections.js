@@ -118,7 +118,13 @@ export function createConnections(env) {
             input.focus();
         };
         function render() {
-            list.innerHTML = items.length ? items.map((item, i) => `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt === undefined ? '' : `<span>${e(item.excerpt)}</span>`}</div>`).join('') : `<p role="status">No matching ${accountCommand ? 'accounts' : 'items'}.</p>`;
+            list.innerHTML = items.length ? items.map((item, i) => {
+                const title = e(item.title);
+                const heading = item.kind
+                    ? `<strong class="connection-suggestion-title">${env.icon(item.kind)}<span>${title}</span></strong>`
+                    : `<strong>${title}</strong>`;
+                return `<div role="option" id="connection-option-${i}" aria-selected="${i === index}" data-index="${i}">${heading}<small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt === undefined ? '' : `<span>${e(item.excerpt)}</span>`}</div>`;
+            }).join('') : `<p role="status">No matching ${accountCommand ? 'accounts' : 'items'}.</p>`;
             list.hidden = false;
             input.setAttribute('aria-expanded', 'true');
             if (items.length) {
@@ -154,7 +160,7 @@ export function createConnections(env) {
             list.setAttribute('aria-label', 'Matching items');
             const request = version;
             timer = setTimeout(() => { void search(input.value).then(result => { if (request !== version || !input.isConnected)
-                return; items = result.map(item => ({ id: item.id, title: label(item.kind) + ' · ' + item.title, detail: detail(item), excerpt: item.excerpt })); index = 0; render(); }).catch(error => { if (request === version) {
+                return; items = result.map(item => ({ id: item.id, title: label(item.kind) + ' · ' + item.title, detail: detail(item), excerpt: item.excerpt, kind: query.name === 'link' ? item.kind : undefined })); index = 0; render(); }).catch(error => { if (request === version) {
                 items = [];
                 list.innerHTML = `<p role="status">${e(error.message)}</p>`;
                 list.hidden = false;

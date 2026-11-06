@@ -38,7 +38,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys() });
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
-const connections = createConnections({ api, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
+const connections = createConnections({ api, icon, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
 class DraftCancelled extends Error {
@@ -80,7 +80,9 @@ let mailDeleteVersion = 0;
 const pendingMailReads = new Map();
 const mailAccountQueue = new Map(), mailSnapshots = new Map(), mailLatest = new Map(), trashedMailCopies = new Map();
 let mailReadVersion = 0, displayedMailId = null;
-const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
+function icon(name) {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
+}
 const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => {
     const saved = state.prefs.keys?.[action];
     // Upgrade the former defaults when reading older saved bindings. Settings

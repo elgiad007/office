@@ -6,7 +6,7 @@ import type {Account,ConnectionItem,ConnectionList,RequestApi,ConfirmDeletion,Co
 
 const label=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const detail=(item:ConnectionItem)=>Object.entries(item.meta).filter(([key])=>itemTypes[item.kind as ItemKind]?.fields.some(field=>field===key)).map(([,value])=>value).join(' · ');
-export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,string>;closed?:(opener:HTMLElement|null)=>void;current:()=>string|undefined;open:(id:string)=>Promise<void>;modal:(title:string,body:string)=>void;dialog:HTMLDialogElement;notice:(message:string,error?:boolean)=>void;command:(value:string)=>void;confirmation:(title:string,message:string,action:()=>unknown)=>void;attempt:(action:()=>unknown)=>unknown}) {
+export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string;keys?:()=>Record<string,string>;closed?:(opener:HTMLElement|null)=>void;current:()=>string|undefined;open:(id:string)=>Promise<void>;modal:(title:string,body:string)=>void;dialog:HTMLDialogElement;notice:(message:string,error?:boolean)=>void;command:(value:string)=>void;confirmation:(title:string,message:string,action:()=>unknown)=>void;attempt:(action:()=>unknown)=>unknown}) {
   let checkingDeletion=false;
   const confirmDeletion: ConfirmDeletion=async(rows,title,message,action,skipUnconnected=false)=>{
     if(checkingDeletion)return;
@@ -50,7 +50,7 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
     const list=document.createElement('div');list.id='connection-suggestions';list.className='connection-suggestions';list.setAttribute('role','listbox');list.setAttribute('aria-label','Matching items');list.hidden=true;input.after(list);
     input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
     let version=0,timer:ReturnType<typeof setTimeout>,index=0,command='',chosen=false;
-    let items:{id:string; title:string; detail:string; excerpt?:string}[]=[];
+    let items:{id:string; title:string; detail:string; excerpt?:string; kind?:string}[]=[];
     let selectedAccount:{id:string; value:string}|undefined;
     let accountCommand: ReturnType<typeof accountCommandQuery>;
     const hide=()=>{version++;clearTimeout(timer);list.hidden=true;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');};
@@ -64,7 +64,13 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
       hide();input.focus();
     };
     function render(){
-      list.innerHTML=items.length?items.map((item,i)=>`<div role="option" id="connection-option-${i}" aria-selected="${i===index}" data-index="${i}"><strong>${e(item.title)}</strong><small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt===undefined?'':`<span>${e(item.excerpt)}</span>`}</div>`).join(''):`<p role="status">No matching ${accountCommand?'accounts':'items'}.</p>`;
+      list.innerHTML=items.length?items.map((item,i)=>{
+        const title=e(item.title);
+        const heading=item.kind
+          ?`<strong class="connection-suggestion-title">${env.icon(item.kind)}<span>${title}</span></strong>`
+          :`<strong>${title}</strong>`;
+        return `<div role="option" id="connection-option-${i}" aria-selected="${i===index}" data-index="${i}">${heading}<small>${e(item.detail)} · ${e(item.id)}</small>${item.excerpt===undefined?'':`<span>${e(item.excerpt)}</span>`}</div>`;
+      }).join(''):`<p role="status">No matching ${accountCommand?'accounts':'items'}.</p>`;
       list.hidden=false;input.setAttribute('aria-expanded','true');if(items.length){input.setAttribute('aria-activedescendant','connection-option-'+index);list.children[index]?.scrollIntoView({block:'nearest'});}else input.removeAttribute('aria-activedescendant');
     }
     list.onpointerdown=event=>{event.preventDefault();const option=(event.target as HTMLElement).closest<HTMLElement>('[data-index]');if(option){index=Number(option.dataset.index);accept();}};
@@ -81,7 +87,7 @@ export function createConnections(env:{api:RequestApi;keys?:()=>Record<string,st
       }
       const query=connectionQuery(input.value);if(!query)return;
       command=query.name;list.setAttribute('aria-label','Matching items');const request=version;
-      timer=setTimeout(()=>{void search(input.value).then(result=>{if(request!==version||!input.isConnected)return;items=result.map(item=>({id:item.id,title:label(item.kind)+' · '+item.title,detail:detail(item),excerpt:item.excerpt}));index=0;render();}).catch(error=>{if(request===version){items=[];list.innerHTML=`<p role="status">${e(error.message)}</p>`;list.hidden=false;input.setAttribute('aria-expanded','true');}});},150);
+      timer=setTimeout(()=>{void search(input.value).then(result=>{if(request!==version||!input.isConnected)return;items=result.map(item=>({id:item.id,title:label(item.kind)+' · '+item.title,detail:detail(item),excerpt:item.excerpt,kind:query.name==='link'?item.kind:undefined}));index=0;render();}).catch(error=>{if(request===version){items=[];list.innerHTML=`<p role="status">${e(error.message)}</p>`;list.hidden=false;input.setAttribute('aria-expanded','true');}});},150);
     });
     return {
       selectedAccountId(){return selectedAccount?.value===input.value?selectedAccount.id:undefined;},
