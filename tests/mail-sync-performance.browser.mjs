@@ -27,6 +27,7 @@ export async function testSyncScheduling(page,url){
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{}};
+    else if(action==='connections')json={connections:[]};
     else if(action==='accounts')json={accounts};
     else if(action==='activity')json={entries:[]};
     else if(action==='records')json={records:++recordCalls>1?[record()]:[]};
@@ -59,6 +60,7 @@ export async function testOfflineSyncWindows(page,url){
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{mailOffline:true}};
+    else if(action==='connections')json={connections:[]};
     else if(action==='accounts')json={accounts:[{id:'offline',type:'imap',label:'Offline fixture'}]};
     else if(action==='records')json={records:[]};
     else if(action==='activity')json={entries:[]};

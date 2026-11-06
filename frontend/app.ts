@@ -38,6 +38,40 @@ const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const lastSelectedItems=new Map<AppName,string>();
 let appEntryVersion=0;
+let mailCache: {rows: OfficeRecord[]; expires: number; view: MailDraftOrigin; limit: number; scrollTop: number} | undefined;
+let mailCacheTimer: number | undefined;
+let pendingWrites=0;
+const mailCacheLifetime=30_000;
+const mailCacheBudget=8*1024*1024;
+function clearMailCache() {
+  clearTimeout(mailCacheTimer);
+  mailCache=undefined;
+}
+function retainMailRows() {
+  clearMailCache();
+  if(pendingWrites||state.syncing)return;
+  let remaining=mailCacheBudget;
+  const fits=(value: unknown): boolean=>{
+    remaining-=typeof value==='string'?32+2*value.length:64;
+    if(remaining<0)return false;
+    if(Array.isArray(value))return value.every(fits);
+    if(value&&typeof value==='object'){
+      for(const key in value){
+        if(!fits(key)||!fits((value as Record<string,unknown>)[key]))return false;
+      }
+    }
+    return true;
+  };
+  if(!fits(state.rows))return;
+  mailCache={
+    rows:state.rows,
+    expires:Date.now()+mailCacheLifetime,
+    view:mailDraftOrigin(false),
+    limit:mailListLimit,
+    scrollTop:document.querySelector('#items')?.scrollTop??0,
+  };
+  mailCacheTimer=window.setTimeout(clearMailCache,mailCacheLifetime);
+}
 const appEntryVisible=()=>!!document.querySelector('#main[data-app-entry]');
 function rememberSelection() {
   if(state.current)lastSelectedItems.set(state.app,state.current.id);
@@ -298,7 +332,15 @@ async function api<R extends ApiRoute>(route: R, data?: ApiData): Promise<ApiRes
       }
     }
   };
-  const trackedRun=async()=>{activity.running(tracking);try{return await run();}finally{activity.done(tracking);}};
+  const trackedRun=async()=>{
+    activity.running(tracking);
+    if(data){pendingWrites++;clearMailCache();}
+    try{return await run();}
+    finally{
+      if(data){pendingWrites--;clearMailCache();}
+      activity.done(tracking);
+    }
+  };
   if(!account)return await trackedRun() as ApiResponse<R>;
   const queueAccount=['sync','mail-folder-sync'].includes(route)?'sync:'+account:account;
   const previous=mailAccountQueue.get(queueAccount)||Promise.resolve();
@@ -327,6 +369,9 @@ function authView(status: Status) {
 }
 async function boot() {
   appEntryVersion++;
+  clearMailCache();
+  state.rows=[];
+  state.current=null;
   document.querySelector<HTMLElement>('#sync-status')!.hidden=true;
   lastMailDelete=undefined;
   try { const status=await api('status'); state.csrf=status.csrf;activity.configure(!!status.authenticated&&!!status.activity); if (!status.authenticated) { authView(status); return; }
@@ -540,7 +585,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   document.querySelector<HTMLElement>('#mail-folder-navigation')!.hidden=state.app!=='mail';
   document.querySelector<HTMLElement>('#mail-folders-toggle')!.hidden=state.app!=='mail';
   if(state.app!=='mail')setMailFolderPanel(false);
-  if(entryVersion!==undefined&&!document.hidden){
+  if(entryVersion!==undefined&&!initialRecords&&!document.hidden){
     // Let the loading screen paint before a fast response triggers rendering.
     await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
     if(entryVersion!==appEntryVersion)return;
@@ -960,6 +1005,7 @@ async function openConnectedRecord(id:string){
   if(version!==appEntryVersion)return;
   if(!apps[record.kind])throw new CommandError('This item type is not available in this version.');
   rememberSelection();
+  if(record.kind==='mail')clearMailCache();
   state.app=record.kind;state.current=null;state.search='';state.sheet=0;state.cell='A1';setMode('normal');location.hash=record.kind;
   if(record.kind==='mail'){
     state.mailScope=null;
@@ -976,18 +1022,39 @@ async function openConnectedRecord(id:string){
 }
 async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope) {
   await waitForAttachments();await leaveEditor();rememberSelection();
+  if(state.app==='mail'&&name!=='mail'&&!appEntryVisible()){
+    retainMailRows();
+    state.rows=[];
+  }
+  let cached=name==='mail'&&!state.syncing&&!pendingWrites&&mailCache&&Date.now()<mailCache.expires?mailCache:undefined;
+  if(name==='mail')clearMailCache();
   if(name==='mail'&&(state.app!=='mail'||mailScope)){state.mailFolder='Inbox';state.mailScope=mailScope??null;}
   state.app=name;state.current=null;state.search='';state.sheet=0;state.cell='A1';state.mode='normal';location.hash=name;
-  return showAppEntry(name,entryVersion=>load(undefined,{enteringApp:true,keepSidebar,entryVersion}));
+  return showAppEntry(name,async entryVersion=>{
+    const initial=cached;
+    cached=undefined;
+    const view=mailScope?undefined:initial?.view;
+    if(view){
+      state.mailFolder=view.folder;
+      state.mailScope=view.scope;
+      state.search=view.search;
+      mailListLimit=initial!.limit;
+    }
+    await load(view?.selectedId,{enteringApp:true,keepSidebar,entryVersion},initial?.rows);
+    if(view&&entryVersion===appEntryVersion){
+      const list=document.querySelector('#items');
+      if(list)list.scrollTop=initial!.scrollTop;
+    }
+  },!!cached);
 }
-async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>) {
+async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>,warm=false) {
   const version=++appEntryVersion;
   const main=document.querySelector<HTMLElement>('#main')!;
   const controls=document.querySelectorAll<HTMLElement>('#app-toolbar,#mail-toolbar,#mail-folder-navigation,#mail-folders-toggle');
   controls.forEach(control=>{control.inert=true;});
   main.dataset.appEntry='';
   const label=apps[name]?.name||'Settings';
-  main.innerHTML=`<div class="app-entry-screen" role="status"><span class="app-entry-spinner" aria-hidden="true"></span><p>Loading ${e(label)}…</p></div>`;
+  if(!warm)main.innerHTML=`<div class="app-entry-screen" role="status"><span class="app-entry-spinner" aria-hidden="true"></span><p>Loading ${e(label)}…</p></div>`;
   try {
     await open(version);
     if(version!==appEntryVersion)return false;
@@ -1145,6 +1212,21 @@ async function syncAccounts(manual=true,accountQuery?:string) {
   state.syncing=true;busyButton(document.querySelector<HTMLButtonElement>('#sync-button')!,true);let errors=0;
   const queue=accounts.map(account=>({account,batch:0}));let next=0;
   const active=new Map<string,string>(),pendingHistory=new Set<string>();
+  let mailRefresh: Promise<void> | undefined;
+  let mailRefreshRequested=false;
+  function refreshSyncedMail() {
+    mailRefreshRequested=true;
+    // A batch finishing during a read needs a follow-up snapshot, but the two
+    // workers should never download and render the mailbox concurrently.
+    return mailRefresh??=(async()=>{
+      try {
+        while(mailRefreshRequested){
+          mailRefreshRequested=false;
+          if(state.app==='mail'&&!state.dirty)await load(undefined,{preserveSelection:true});
+        }
+      } finally {mailRefresh=undefined;}
+    })();
+  }
   const showActive=()=>{const status=document.querySelector<HTMLElement>('#sync-status');if(status)status.textContent='Syncing '+[...active.values()].join('; ')+'…';};
   const worker=async()=>{
     while(next<queue.length){
@@ -1155,7 +1237,7 @@ async function syncAccounts(manual=true,accountQuery?:string) {
         active.set(a.id,`${a.label} · batch ${batch+1}${pendingHistory.has(a.id)?' · downloading older mail':''}`);showActive();
         const result=await api('sync',{id:a.id,batches:batchCount});
         if(result.more)pendingHistory.add(a.id);else pendingHistory.delete(a.id);
-        if(state.app==='mail'&&!state.dirty)await load(undefined,{preserveSelection:true});
+        if(state.app==='mail'&&!state.dirty)await refreshSyncedMail();
         // Give every account a first pass before continuing older history.
         if(result.more && batch+batchCount<5 && !document.hidden)queue.push({account:a,batch:batch+batchCount});
       }catch(cause) { const error=asError(cause);errors++;if(manual)notice(a.label+': '+error.message,true);}finally{active.delete(a.id);if(active.size)showActive();}

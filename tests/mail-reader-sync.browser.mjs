@@ -14,6 +14,7 @@ export async function testMailReaderSync(page,url) {
     const handled=(async()=>{
       const action=new URL(route.request().url()).searchParams.get('r');let json;
       if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{}};
+      else if(action==='connections')json={connections:[]};
       else if(action==='accounts')json={accounts:[account]};
       else if(action==='activity')json={entries:[]};
       else if(action==='records'){
@@ -73,6 +74,7 @@ export async function testHtmlReaderSync(page,url) {
   await page.route(apiRoute,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{}};
+    else if(action==='connections')json={connections:[]};
     else if(action==='accounts')json={accounts:[account]};
     else if(action==='activity')json={entries:[]};
     else if(action==='records'){

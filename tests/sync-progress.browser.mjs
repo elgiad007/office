@@ -7,6 +7,7 @@ export async function testSyncProgress(page,url){
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences:{}};
+    else if(action==='connections')json={connections:[]};
     else if(action==='accounts')json={accounts:[{id:'sync-fixture',label:'Progress fixture',type:'imap'}]};
     else if(action==='records')json={records:[]};
     else if(action==='activity')json={entries:[]};

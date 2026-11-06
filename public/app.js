@@ -32,6 +32,45 @@ const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', pageDown: 'd', 
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiEditing: false, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const lastSelectedItems = new Map();
 let appEntryVersion = 0;
+let mailCache;
+let mailCacheTimer;
+let pendingWrites = 0;
+const mailCacheLifetime = 30_000;
+const mailCacheBudget = 8 * 1024 * 1024;
+function clearMailCache() {
+    clearTimeout(mailCacheTimer);
+    mailCache = undefined;
+}
+function retainMailRows() {
+    clearMailCache();
+    if (pendingWrites || state.syncing)
+        return;
+    let remaining = mailCacheBudget;
+    const fits = (value) => {
+        remaining -= typeof value === 'string' ? 32 + 2 * value.length : 64;
+        if (remaining < 0)
+            return false;
+        if (Array.isArray(value))
+            return value.every(fits);
+        if (value && typeof value === 'object') {
+            for (const key in value) {
+                if (!fits(key) || !fits(value[key]))
+                    return false;
+            }
+        }
+        return true;
+    };
+    if (!fits(state.rows))
+        return;
+    mailCache = {
+        rows: state.rows,
+        expires: Date.now() + mailCacheLifetime,
+        view: mailDraftOrigin(false),
+        limit: mailListLimit,
+        scrollTop: document.querySelector('#items')?.scrollTop ?? 0,
+    };
+    mailCacheTimer = window.setTimeout(clearMailCache, mailCacheLifetime);
+}
 const appEntryVisible = () => !!document.querySelector('#main[data-app-entry]');
 function rememberSelection() {
     if (state.current)
@@ -424,12 +463,23 @@ async function api(route, data) {
             }
         }
     };
-    const trackedRun = async () => { activity.running(tracking); try {
-        return await run();
-    }
-    finally {
-        activity.done(tracking);
-    } };
+    const trackedRun = async () => {
+        activity.running(tracking);
+        if (data) {
+            pendingWrites++;
+            clearMailCache();
+        }
+        try {
+            return await run();
+        }
+        finally {
+            if (data) {
+                pendingWrites--;
+                clearMailCache();
+            }
+            activity.done(tracking);
+        }
+    };
     if (!account)
         return await trackedRun();
     const queueAccount = ['sync', 'mail-folder-sync'].includes(route) ? 'sync:' + account : account;
@@ -483,6 +533,9 @@ function authView(status) {
 }
 async function boot() {
     appEntryVersion++;
+    clearMailCache();
+    state.rows = [];
+    state.current = null;
     document.querySelector('#sync-status').hidden = true;
     lastMailDelete = undefined;
     try {
@@ -816,7 +869,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     document.querySelector('#mail-folders-toggle').hidden = state.app !== 'mail';
     if (state.app !== 'mail')
         setMailFolderPanel(false);
-    if (entryVersion !== undefined && !document.hidden) {
+    if (entryVersion !== undefined && !initialRecords && !document.hidden) {
         // Let the loading screen paint before a fast response triggers rendering.
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         if (entryVersion !== appEntryVersion)
@@ -1523,6 +1576,8 @@ async function openConnectedRecord(id) {
     if (!apps[record.kind])
         throw new CommandError('This item type is not available in this version.');
     rememberSelection();
+    if (record.kind === 'mail')
+        clearMailCache();
     state.app = record.kind;
     state.current = null;
     state.search = '';
@@ -1550,6 +1605,13 @@ async function changeApp(name, keepSidebar = false, mailScope) {
     await waitForAttachments();
     await leaveEditor();
     rememberSelection();
+    if (state.app === 'mail' && name !== 'mail' && !appEntryVisible()) {
+        retainMailRows();
+        state.rows = [];
+    }
+    let cached = name === 'mail' && !state.syncing && !pendingWrites && mailCache && Date.now() < mailCache.expires ? mailCache : undefined;
+    if (name === 'mail')
+        clearMailCache();
     if (name === 'mail' && (state.app !== 'mail' || mailScope)) {
         state.mailFolder = 'Inbox';
         state.mailScope = mailScope ?? null;
@@ -1561,16 +1623,33 @@ async function changeApp(name, keepSidebar = false, mailScope) {
     state.cell = 'A1';
     state.mode = 'normal';
     location.hash = name;
-    return showAppEntry(name, entryVersion => load(undefined, { enteringApp: true, keepSidebar, entryVersion }));
+    return showAppEntry(name, async (entryVersion) => {
+        const initial = cached;
+        cached = undefined;
+        const view = mailScope ? undefined : initial?.view;
+        if (view) {
+            state.mailFolder = view.folder;
+            state.mailScope = view.scope;
+            state.search = view.search;
+            mailListLimit = initial.limit;
+        }
+        await load(view?.selectedId, { enteringApp: true, keepSidebar, entryVersion }, initial?.rows);
+        if (view && entryVersion === appEntryVersion) {
+            const list = document.querySelector('#items');
+            if (list)
+                list.scrollTop = initial.scrollTop;
+        }
+    }, !!cached);
 }
-async function showAppEntry(name, open) {
+async function showAppEntry(name, open, warm = false) {
     const version = ++appEntryVersion;
     const main = document.querySelector('#main');
     const controls = document.querySelectorAll('#app-toolbar,#mail-toolbar,#mail-folder-navigation,#mail-folders-toggle');
     controls.forEach(control => { control.inert = true; });
     main.dataset.appEntry = '';
     const label = apps[name]?.name || 'Settings';
-    main.innerHTML = `<div class="app-entry-screen" role="status"><span class="app-entry-spinner" aria-hidden="true"></span><p>Loading ${e(label)}…</p></div>`;
+    if (!warm)
+        main.innerHTML = `<div class="app-entry-screen" role="status"><span class="app-entry-spinner" aria-hidden="true"></span><p>Loading ${e(label)}…</p></div>`;
     try {
         await open(version);
         if (version !== appEntryVersion)
@@ -1931,6 +2010,25 @@ async function syncAccounts(manual = true, accountQuery) {
     const queue = accounts.map(account => ({ account, batch: 0 }));
     let next = 0;
     const active = new Map(), pendingHistory = new Set();
+    let mailRefresh;
+    let mailRefreshRequested = false;
+    function refreshSyncedMail() {
+        mailRefreshRequested = true;
+        // A batch finishing during a read needs a follow-up snapshot, but the two
+        // workers should never download and render the mailbox concurrently.
+        return mailRefresh ??= (async () => {
+            try {
+                while (mailRefreshRequested) {
+                    mailRefreshRequested = false;
+                    if (state.app === 'mail' && !state.dirty)
+                        await load(undefined, { preserveSelection: true });
+                }
+            }
+            finally {
+                mailRefresh = undefined;
+            }
+        })();
+    }
     const showActive = () => { const status = document.querySelector('#sync-status'); if (status)
         status.textContent = 'Syncing ' + [...active.values()].join('; ') + '…'; };
     const worker = async () => {
@@ -1948,7 +2046,7 @@ async function syncAccounts(manual = true, accountQuery) {
                 else
                     pendingHistory.delete(a.id);
                 if (state.app === 'mail' && !state.dirty)
-                    await load(undefined, { preserveSelection: true });
+                    await refreshSyncedMail();
                 // Give every account a first pass before continuing older history.
                 if (result.more && batch + batchCount < 5 && !document.hidden)
                     queue.push({ account: a, batch: batch + batchCount });

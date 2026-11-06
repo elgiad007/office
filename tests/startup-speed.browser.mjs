@@ -15,12 +15,14 @@ const pageErrors=[];page.on('pageerror',error=>pageErrors.push(error.message));
 await page.route(routeApi,async route=>{
   const action=new URL(route.request().url()).searchParams.get('r');
   if(action==='status')return route.fulfill({json:{authenticated:true,csrf:'fixture',preferences:{}}});
+  if(action==='connections')return route.fulfill({json:{connections:[]}});
   if(action==='accounts'){
     accountsRequested();
     await new Promise(resolve=>releaseAccounts=resolve);
     return route.fulfill({json:{accounts:[]}});
   }
   if(action==='records'){
+    if(new URL(route.request().url()).searchParams.get('kind')!=='mail')return route.fulfill({json:{records:[]}});
     recordsRequests++;recordsRequested();
     return route.fulfill({json:{records:[{id:'startup',kind:'mail',title:'Startup fixture',body:'Searchable body',revision:1,summary:true,meta:{folder:'Inbox',read:true,hasAttachments:false}}]}});
   }
@@ -34,6 +36,24 @@ try{
   releaseAccounts();
   await page.locator('#items [data-id="startup"]').waitFor();
   assert.equal(recordsRequests,1,'Startup reuses prefetched records');
+  await page.clock.install();
+  const goToTasks=async()=>{
+    await page.getByRole('button',{name:'Tasks',exact:true}).click();
+    await page.locator('#main:not([data-app-entry]) #items').waitFor();
+  };
+  const returnToMail=async()=>{
+    await page.getByRole('button',{name:'Mail',exact:true}).click();
+    await page.locator('#items [data-id="startup"]').waitFor();
+  };
+  await page.locator('#search').fill('Searchable');
+  await goToTasks();
+  await returnToMail();
+  assert.equal(recordsRequests,1,'Returning to Mail reuses the existing snapshot');
+  assert.equal(await page.locator('#search').inputValue(),'Searchable','Returning restores the Mail search');
+  await goToTasks();
+  await page.clock.fastForward(31_000);
+  await returnToMail();
+  assert.equal(recordsRequests,2,'Returning after expiry fetches a fresh snapshot');
   await page.unroute(routeApi);
   await page.route(routeApi,route=>{
     const action=new URL(route.request().url()).searchParams.get('r');
