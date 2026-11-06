@@ -71,6 +71,12 @@ try{
  await page.evaluate(()=>window.testKeys={up:'K',down:'J'});await page.keyboard.press('K');assert.equal(await focusedId(),'n0');await page.keyboard.press('J');assert.equal(await focusedId(),'n1');await page.keyboard.press('ArrowUp');assert.equal(await focusedId(),'n1');await page.evaluate(()=>window.testKeys={});
  // Item-to-item travel records the previous center; the From card returns through history.
  await page.keyboard.press('k');await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelector('.connection-focal')?.getAttribute('data-node')==='n0');assert.match(await page.locator('[data-origin-node]').getAttribute('aria-label'),/From Task: Project item 0001/);
+ const fromCard=page.locator('[data-origin-node="n1"]');
+ assert.equal(await fromCard.count(),1);
+ assert.equal(await page.locator('[data-node="n1"]').count(),0);
+ const arrivalEdge=page.locator('[data-edges] line.connection-navigation-line[data-a="n0"][data-b="n1"]');
+ assert.equal(await page.locator('.connection-navigation-line').count(),1);
+ assert.equal(await fromCard.getAttribute('transform'),`translate(${await arrivalEdge.getAttribute('x2')} ${await arrivalEdge.getAttribute('y2')})`);
  await page.locator('[data-origin-node]').click();await page.waitForFunction(()=>document.querySelector('.connection-focal')?.getAttribute('data-node')==='n1');assert.match(await page.locator('[data-origin-node]').getAttribute('aria-label'),/From Group: Project hub/);
  await page.getByRole('button',{name:'Forward in connections'}).click();await page.waitForFunction(()=>document.querySelector('.connection-focal')?.getAttribute('data-node')==='n0');assert.match(await page.locator('[data-origin-node]').getAttribute('aria-label'),/From Task: Project item 0001/);
  await page.locator('[data-origin-node]').focus();await page.keyboard.press('Space');await page.waitForFunction(()=>document.querySelector('.connection-focal')?.getAttribute('data-node')==='n1');await page.locator('[data-node="n1"]').focus();

@@ -52,6 +52,7 @@ export async function openConnectionExplorer(env, source = '') {
     let place = { mode: source ? 'graph' : 'overview', id: source, group: '', q: '', kind: '' };
     let data = { links: [], items: [], more: false }, selected = source, focusedId = '', sequenceTime = 0, request = 0, busy = false, listPage = 0, timer;
     let points = new Map(), width = 900, height = 600, view = { x: -100, y: -100, w: 900, h: 600 }, fitWidth = 900;
+    let originNodeId = ORIGIN_ID;
     let history = [{ place: { ...place } }], historyIndex = 0, disposed = false;
     const active = () => !disposed && host.isConnected && dialog.open;
     const cleanup = () => { disposed = true; ++request; clearTimeout(timer); observer.disconnect(); resize.disconnect(); dialog.removeEventListener('close', onClose); dialog.removeEventListener('cancel', cancel); };
@@ -92,7 +93,7 @@ export async function openConnectionExplorer(env, source = '') {
         const p = points.get(selected);
         if (p) {
             size();
-            const from = selected === (place.id || place.group) ? points.get(ORIGIN_ID) : undefined;
+            const from = selected === (place.id || place.group) ? points.get(originNodeId) : undefined;
             if (from) {
                 const left = Math.min(p.x, from.x) - 140, right = Math.max(p.x, from.x) + 140, top = Math.min(p.y, from.y) - 104, bottom = Math.max(p.y, from.y) + 88, unit = Math.max(1, (right - left) / width, (bottom - top) / height);
                 view = { x: (left + right) / 2 - width * unit / 2, y: (top + bottom) / 2 - height * unit / 2, w: width * unit, h: height * unit };
@@ -108,12 +109,12 @@ export async function openConnectionExplorer(env, source = '') {
         fit();
     }
     else {
-        if (points.has(ORIGIN_ID) || (oldW >= 640) !== (width >= 640))
+        if (points.has(originNodeId) || (oldW >= 640) !== (width >= 640))
             renderMap();
         view.w *= width / oldW;
         view.h *= height / oldH;
         updateView();
-        if (points.has(ORIGIN_ID) && selected === (place.id || place.group))
+        if (points.has(originNodeId) && selected === (place.id || place.group))
             centerSelection();
         else if (map.contains(document.activeElement))
             reveal(focusedId);
@@ -287,13 +288,13 @@ export async function openConnectionExplorer(env, source = '') {
         if (!current || !from)
             return;
         const position = connectionArrivalPoint([...points].map(([id, p]) => ({ id, ...p })), focal, width, height);
-        points.set(ORIGIN_ID, position);
+        points.set(originNodeId, position);
         const description = from.role === 'group' ? 'Group' : from.role === 'item' ? typeLabel(from.kind) : 'View';
-        layer.innerHTML = `<line class="connection-navigation-line" aria-hidden="true" x1="${position.x}" y1="${position.y}" x2="${current.x}" y2="${current.y}"/><g class="connection-origin" data-origin-node="${ORIGIN_ID}" data-kind="${e(from.kind)}" role="button" tabindex="-1" aria-label="From ${e(description)}: ${e(from.title)}. Return to previous view." transform="translate(${position.x} ${position.y})"><text class="connection-context-label" x="-122" y="-89">From</text>${itemCard(from.role === 'item' ? from.kind : '', from.title, description + ' · Return')}<title>${e('From ' + description + ': ' + from.title + ' — Return to previous view')}</title></g>`;
-        query('[data-map-note]').textContent += ' Dashed line shows your navigation path.';
+        layer.innerHTML = `<line class="connection-navigation-line" aria-hidden="true" x1="${position.x}" y1="${position.y}" x2="${current.x}" y2="${current.y}"/><g class="connection-origin" data-origin-node="${e(originNodeId)}" data-kind="${e(from.kind)}" role="button" tabindex="-1" aria-label="From ${e(description)}: ${e(from.title)}. Return to previous view." transform="translate(${position.x} ${position.y})"><text class="connection-context-label" x="-122" y="-89">From</text>${itemCard(from.role === 'item' ? from.kind : '', from.title, description + ' · Return')}<title>${e('From ' + description + ': ' + from.title + ' — Return to previous view')}</title></g>`;
     }
     function renderMap() {
         const restoreFocus = map.contains(document.activeElement);
+        originNodeId = ORIGIN_ID;
         if (place.mode === 'overview') {
             const groups = (data.groups || []).slice(0, GRAPH_LIMIT);
             size();
@@ -301,18 +302,28 @@ export async function openConnectionExplorer(env, source = '') {
             query('[data-edges]').innerHTML = '';
             query('[data-nodes]').innerHTML = groups.map(group => { const p = points.get(group.id), lines = titleLines(group.title, 228); return `<g role="button" tabindex="0" data-group-node="${e(group.id)}" data-kind="${e(group.kind)}" aria-label="Explore group ${e(typeLabel(group.kind))}: ${e(group.title)}, ${group.items} items, ${group.links} connections" transform="translate(${p.x} ${p.y})"><rect x="-150" y="-52" width="300" height="104" rx="14"/><text class="connection-group-symbol" x="-132" y="-9" aria-hidden="true">${symbols[group.kind] || '●'}</text><text class="connection-group-title" text-anchor="middle">${lines.map((line, i) => `<tspan x="16" y="${-19 + i * 19}">${e(line)}</tspan>`).join('')}</text><text class="connection-group-count" y="31" text-anchor="middle">${group.items} items · ${group.links} connections</text>${group.archivedLinks ? '<text class="connection-archive-label" y="47" text-anchor="middle">' + (group.archivedLinks === group.links ? 'Archived' : group.archivedLinks + ' archived') + '</text>' : ''}<title>${e(typeLabel(group.kind) + ' · ' + group.title)}</title></g>`; }).join('');
             query('[data-map-note]').textContent = `Map: ${groups.length} of ${(data.groups || []).length} loaded groups. Each group contains items joined by a path of connections. Select a group to explore it.`;
+            renderArrival();
         }
         else {
-            const visible = visibleConnectionItems(data.items, data.links, selected, place.id || place.group);
-            points = new Map(connectionLayout(visible, data.links, place.id || place.group).map(p => [p.id, p]));
+            const focal = place.id || place.group, from = history[historyIndex].from;
+            const visible = visibleConnectionItems(data.items, data.links, selected, focal);
+            if (place.mode === 'graph' && from?.role === 'item' && from.id !== focal && visible.some(item => item.id === focal) && visible.some(item => item.id === from.id))
+                originNodeId = from.id;
+            const cards = visible.filter(item => item.id !== originNodeId);
+            points = new Map(connectionLayout(cards, data.links, focal).map(p => [p.id, p]));
+            query('[data-nodes]').innerHTML = cards.map(item => { const p = points.get(item.id); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Explore ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind, item.title, `${typeLabel(item.kind)} · ${item.degree ?? '—'} ${visibility === 'archived' ? 'archived links' : 'links'}`)}<title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
+            renderArrival();
             const eligible = data.links.filter(link => points.has(link.a) && points.has(link.b));
             const related = eligible.filter(link => link.a === selected || link.b === selected), others = eligible.filter(link => link.a !== selected && link.b !== selected);
             const edges = [...related, ...others].slice(0, 500);
-            query('[data-edges]').innerHTML = edges.map(link => { const a = points.get(link.a), b = points.get(link.b); return `<line class="${link.archived ? 'connection-archived-edge' : ''}" data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`; }).join('');
-            query('[data-nodes]').innerHTML = visible.map(item => { const p = points.get(item.id); return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Explore ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind, item.title, `${typeLabel(item.kind)} · ${item.degree ?? '—'} ${visibility === 'archived' ? 'archived links' : 'links'}`)}<title>${e(typeLabel(item.kind) + ' · ' + item.title)}</title></g>`; }).join('');
+            const arrivalEdge = edges.find(link => (link.a === originNodeId && link.b === focal) || (link.b === originNodeId && link.a === focal));
+            if (arrivalEdge)
+                query('[data-navigation-path] line').remove();
+            query('[data-edges]').innerHTML = edges.map(link => { const a = points.get(link.a), b = points.get(link.b); return `<line class="${link === arrivalEdge ? 'connection-navigation-line ' : ''}${link.archived ? 'connection-archived-edge' : ''}" data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`; }).join('');
             query('[data-map-note]').textContent = `Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length > GRAPH_LIMIT || eligible.length > 500 ? `Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. ` : ''}Drag to pan · Wheel/pinch to zoom · Click or press Enter to explore.`;
         }
-        renderArrival();
+        if (points.has(originNodeId))
+            query('[data-map-note]').textContent += ' Dashed line shows your navigation path.';
         selection();
         const nodes = mapNodes();
         if (!nodes.some(node => nodeId(node) === focusedId))
@@ -587,7 +598,7 @@ export async function openConnectionExplorer(env, source = '') {
         }
         if (event.key === ' ') {
             event.preventDefault();
-            if (focusedId === ORIGIN_ID) {
+            if (focusedId === originNodeId) {
                 if (!event.repeat)
                     exploreNode();
             }
