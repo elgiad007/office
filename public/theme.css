@@ -280,10 +280,18 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .mail-actions-popover button:hover { background: var(--wash); }
 .detail-toolbar .mail-detail-heading { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .mail-reader-header { position: relative; padding-bottom: 0; margin-bottom: 0; border-bottom: 1px solid var(--line); }
-.mail-subject-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.mail-subject-row { display: flex; align-items: center; gap: 5px 10px; flex-wrap: wrap; }
 .mail-subject-row h1 { margin: 0; font-size: 23px; line-height: 1.3; overflow-wrap: anywhere; min-width: 0; }
-.mail-header-badges { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.mail-header-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.mail-header-badges .badge, .mail-header-badges .item-connections > button {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 3px 6px;
+  border-radius: 4px; background: var(--wash); font-size: 11px; line-height: 1.4;
+}
 .mail-header-badges .badge { white-space: normal; overflow-wrap: anywhere; }
+.mail-header-badges .item-connections > button:hover, .mail-header-badges .item-connections > button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--wash), var(--accent) 18%);
+}
+.mail-header-badges .item-connections > button svg { width: 14px; height: 14px; }
 .mail-envelope-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0 12px; font-size: 12px; color: var(--muted); }
 .mail-correspondents { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
 .mail-compact-date { font-variant-numeric: tabular-nums; }

@@ -88,6 +88,19 @@ try{
    assert.equal(await page.locator('#detail > .item-connections').count(),0);
    assert.equal(await page.locator((item.kind==='mail'?'.mail-reader-header':'.detail-toolbar')+' .item-connections').count(),1);
    assert.ok((await count.boundingBox()).height<=22);
+   if(item.kind==='mail'){
+    const header=page.locator('.mail-subject-row');
+    const subject=await header.locator('h1').boundingBox();
+    const badges=await header.locator('.badge, .item-connections > button').evaluateAll(nodes=>nodes.map(node=>{
+     const {top,height}=node.getBoundingClientRect();
+     return {top,height,background:getComputedStyle(node).backgroundColor};
+    }));
+    assert.equal(badges.length,3);
+    assert.ok(badges.every(badge=>badge.height===22&&badge.background===badges[0].background));
+    if(viewport.width===1440)assert.ok(badges.every(badge=>Math.abs(badge.top+badge.height/2-subject.y-subject.height/2)<1));
+    assert.equal(await header.locator('.item-connections > button > svg[aria-hidden="true"]').count(),2);
+    await header.getByRole('button',{name:/Connections · \d/}).waitFor();
+   }
    const contentHeight=await page.locator('#detail').evaluate(panel=>panel.scrollHeight);
    await count.focus();await page.keyboard.press('ArrowDown');await page.locator('.connection-popover:popover-open').waitFor();
    assert.equal(await page.locator('#detail').evaluate(panel=>panel.scrollHeight),contentHeight);
