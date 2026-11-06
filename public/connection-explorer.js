@@ -72,7 +72,7 @@ export async function openConnectionExplorer(env, source = '') {
         const shape = connectionShape(kind), lines = titleLines(title, shape.width);
         return shape.markup + `<text class="connection-node-title">${lines.map((line, i) => `<tspan x="${shape.x}" y="${shape.y + i * 17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="${shape.x}" y="${shape.y + (lines.length - 1) * 17 + 17}">${e(subtitle)}</text>`;
     }
-    function fit() {
+    function fit(padding = 0) {
         size();
         const values = [...points.values()];
         if (!values.length) {
@@ -83,7 +83,8 @@ export async function openConnectionExplorer(env, source = '') {
         }
         const overview = place.mode === 'overview', padX = overview ? GROUP_CARD.width / 2 + GROUP_CARD.padding : 140, padY = overview ? GROUP_CARD.height / 2 + GROUP_CARD.padding : 104;
         const xs = values.map(p => p.x), ys = values.map(p => p.y), x = Math.min(...xs) - padX, y = Math.min(...ys) - padY, w = Math.max(...xs) - x + padX, h = Math.max(...ys) - y + padY;
-        const unit = Math.max(w / width, h / height, overview ? 1 : .65);
+        const inset = Math.min(padding, width / 4, height / 4);
+        const unit = Math.max(w / (width - 2 * inset), h / (height - 2 * inset), overview ? 1 : .65);
         view = { x: x + w / 2 - width * unit / 2, y: y + h / 2 - height * unit / 2, w: width * unit, h: height * unit };
         fitWidth = view.w;
         updateView();
@@ -506,7 +507,7 @@ export async function openConnectionExplorer(env, source = '') {
     more.onclick = () => { if (!busy)
         void fetchPage(false); };
     host.querySelectorAll('[data-list-page]').forEach(button => button.onclick = () => { listPage += Number(button.dataset.listPage); render(false); query('[data-list-title]').focus(); });
-    query('[data-fit]').onclick = fit;
+    query('[data-fit]').onclick = () => fit(32);
     query('[data-reset-graph]').onclick = () => void navigate({ ...place }, false);
     query('[data-center]').onclick = centerSelection;
     host.querySelectorAll('[data-zoom]').forEach(button => button.onclick = () => zoom(button.dataset.zoom === 'in' ? .8 : 1.25));

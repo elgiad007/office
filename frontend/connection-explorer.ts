@@ -66,10 +66,11 @@ export async function openConnectionExplorer(env:Env,source='') {
     const shape=connectionShape(kind),lines=titleLines(title,shape.width);
     return shape.markup+`<text class="connection-node-title">${lines.map((line,i)=>`<tspan x="${shape.x}" y="${shape.y+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="${shape.x}" y="${shape.y+(lines.length-1)*17+17}">${e(subtitle)}</text>`;
   }
-  function fit(){size();const values=[...points.values()];if(!values.length){view={x:-100,y:-100,w:width,h:height};fitWidth=view.w;updateView();return;}
+  function fit(padding=0){size();const values=[...points.values()];if(!values.length){view={x:-100,y:-100,w:width,h:height};fitWidth=view.w;updateView();return;}
     const overview=place.mode==='overview',padX=overview?GROUP_CARD.width/2+GROUP_CARD.padding:140,padY=overview?GROUP_CARD.height/2+GROUP_CARD.padding:104;
     const xs=values.map(p=>p.x),ys=values.map(p=>p.y),x=Math.min(...xs)-padX,y=Math.min(...ys)-padY,w=Math.max(...xs)-x+padX,h=Math.max(...ys)-y+padY;
-    const unit=Math.max(w/width,h/height,overview?1:.65);view={x:x+w/2-width*unit/2,y:y+h/2-height*unit/2,w:width*unit,h:height*unit};fitWidth=view.w;updateView();}
+    const inset=Math.min(padding,width/4,height/4);
+    const unit=Math.max(w/(width-2*inset),h/(height-2*inset),overview?1:.65);view={x:x+w/2-width*unit/2,y:y+h/2-height*unit/2,w:width*unit,h:height*unit};fitWidth=view.w;updateView();}
   function zoom(factor:number,px=width/2,py=height/2){size();const w=Math.max(width*.25,Math.min(Math.max(fitWidth*4,width*8),view.w*factor)),f=w/view.w;view={x:view.x+px/width*view.w*(1-f),y:view.y+py/height*view.h*(1-f),w,h:view.h*f};updateView();}
   function centerSelection(){const p=points.get(selected);if(p){size();const from=selected===(place.id||place.group)?points.get(originNodeId):undefined;
     if(from){const left=Math.min(p.x,from.x)-140,right=Math.max(p.x,from.x)+140,top=Math.min(p.y,from.y)-104,bottom=Math.max(p.y,from.y)+88,unit=Math.max(1,(right-left)/width,(bottom-top)/height);view={x:(left+right)/2-width*unit/2,y:(top+bottom)/2-height*unit/2,w:width*unit,h:height*unit};}
@@ -266,7 +267,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   visibilityControl.onchange=()=>{visibility=visibilityControl.value as ConnectionVisibility;clearTimeout(timer);invalidateHistory();void fetchPage(true);};
   more.onclick=()=>{if(!busy)void fetchPage(false);};
   host.querySelectorAll<HTMLButtonElement>('[data-list-page]').forEach(button=>button.onclick=()=>{listPage+=Number(button.dataset.listPage);render(false);query<HTMLElement>('[data-list-title]').focus();});
-  query<HTMLButtonElement>('[data-fit]').onclick=fit;
+  query<HTMLButtonElement>('[data-fit]').onclick=()=>fit(32);
   query<HTMLButtonElement>('[data-reset-graph]').onclick=()=>void navigate({...place},false);
   query<HTMLButtonElement>('[data-center]').onclick=centerSelection;
   host.querySelectorAll<HTMLButtonElement>('[data-zoom]').forEach(button=>button.onclick=()=>zoom(button.dataset.zoom==='in'?.8:1.25));

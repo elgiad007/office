@@ -52,10 +52,23 @@ try{
  await page.keyboard.press('l');assert.equal(await focusedId(),'group1');await page.keyboard.press('l');assert.equal(await focusedId(),'group2');await page.keyboard.press('h');assert.equal(await focusedId(),'group1');
  await page.evaluate(()=>window.testKeys={right:'L',left:'H'});await page.keyboard.press('L');assert.equal(await focusedId(),'group2');await page.keyboard.press('H');assert.equal(await focusedId(),'group1');await page.evaluate(()=>window.testKeys={});await page.keyboard.press('Home');
  const checkCards=async()=>assert.ok(await page.locator('svg').evaluate(svg=>{const map=svg.getBoundingClientRect(),cards=[...svg.querySelectorAll('[data-group-node] rect')].map(node=>node.getBoundingClientRect());return cards.every(card=>card.left>=map.left&&card.right<=map.right&&card.top>=map.top&&card.bottom<=map.bottom)&&cards.every((card,i)=>cards.every((other,j)=>i===j||card.right<=other.left||card.left>=other.right||card.bottom<=other.top||card.top>=other.bottom));}));
+ const checkFitBuffer=async()=>{
+  await page.getByRole('button',{name:'Fit view',exact:true}).click();
+  const clearance=await page.locator('svg').evaluate(svg=>{
+   const map=svg.getBoundingClientRect();
+   const cards=[...svg.querySelectorAll('[data-group-node] rect, [data-node], [data-origin-node]')];
+   return Math.min(...cards.map(node=>{
+    const card=node.getBoundingClientRect();
+    return Math.min(card.left-map.left,map.right-card.right,card.top-map.top,map.bottom-card.bottom);
+   }));
+  });
+  assert.ok(Number.isFinite(clearance)&&clearance>=31,`Fit View clearance was ${clearance}px`);
+ };
  await checkCards();await page.screenshot({path:'test-results/connection-overview-readable.png'});
  assert.ok(await page.locator('[data-group-node]').evaluateAll(nodes=>nodes.every(node=>{const rect=node.querySelector('rect').getBBox(),title=node.querySelector('.connection-group-title').getBBox(),icon=node.querySelector('.connection-group-symbol').getBBox();return title.x>=rect.x&&title.x+title.width<=rect.x+rect.width&&icon.x+icon.width<title.x;})));
  await page.setViewportSize({width:1200,height:1000});await page.waitForTimeout(150);assert.equal(await page.locator('[data-zoom-level]').textContent(),'100%');await checkCards();
  await page.setViewportSize({width:1440,height:1000});groupCount=30;await page.locator('[data-reset-graph]').click();await page.locator('[data-group-node]').nth(29).waitFor();assert.ok(parseInt(await page.locator('[data-zoom-level]').textContent())<100);await checkCards();
+ await checkFitBuffer();
  for(const kind of groupKinds)assert.ok(await page.locator(`[data-group-node][data-kind="${kind}"] .connection-group-symbol`).count()>0);
  groupCount=1;await page.locator('[data-reset-graph]').click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1 groups'}).waitFor();
  const box=await page.locator('dialog').boundingBox();assert.equal(box.width,1440);assert.equal(box.height,1000);assert.equal(box.x,0);assert.equal(box.y,0);
@@ -108,7 +121,8 @@ try{
  await page.locator('[data-overview]').click();await page.locator('[data-group-node]').click();await page.locator('[data-node]').first().waitFor();
  await page.getByRole('button',{name:'Center selection',exact:true}).click();await page.screenshot({path:'test-results/connection-explorer-desktop.png'});
  for(const viewport of [{width:390,height:844},{width:844,height:390}]){
-  await page.setViewportSize(viewport);await page.getByRole('button',{name:'Center selection',exact:true}).click();assert.ok(await page.locator('dialog').evaluate(node=>node.scrollWidth<=node.clientWidth+1));
+  await page.setViewportSize(viewport);await checkFitBuffer();
+  await page.getByRole('button',{name:'Center selection',exact:true}).click();assert.ok(await page.locator('dialog').evaluate(node=>node.scrollWidth<=node.clientWidth+1));
   assert.ok(await page.locator('svg').evaluate(svg=>{const from=svg.querySelector('[data-origin-node] .connection-outline').getBoundingClientRect(),current=svg.querySelector('.connection-focal .connection-outline').getBoundingClientRect(),map=svg.getBoundingClientRect();return (from.right<=current.left||from.bottom<=current.top)&&[from,current].every(rect=>rect.left>=map.left-1&&rect.right<=map.right+1&&rect.top>=map.top-1&&rect.bottom<=map.bottom+1);}));
   const map=await page.locator('[data-connection-graph]').boundingBox();assert.ok(map.height>=100);assert.ok(map.y+map.height<=viewport.height);
   await page.locator('[data-toggle-panel]').click();assert.equal(await page.locator('#connection-panel').isVisible(),false);await page.locator('[data-toggle-panel]').click();assert.equal(await page.locator('#connection-panel').isVisible(),true);
