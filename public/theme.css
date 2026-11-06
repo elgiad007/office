@@ -543,9 +543,17 @@ dialog.help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
 .help-table kbd { white-space: normal; }
 @media (max-width: 600px) { .help-table th, .help-table td { padding: 8px; } .help-table { min-width: 680px; } }
 /* Inset rings identify the active pane without changing its dimensions. */
-.sidebar:focus-within, .list-pane:focus-within, .detail:focus-within, .detail:focus {
+.list-pane:focus-within, .detail:focus-within, .detail:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
   outline-offset: -2px;
+}
+.sidebar:focus-within::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  pointer-events: none;
+  z-index: 1;
 }
 .detail > .mail-body:focus, .detail > .mail-html:focus, .detail .sheet-wrap:focus {
   outline: none;
