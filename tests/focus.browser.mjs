@@ -1,7 +1,7 @@
 import {createRequire} from 'node:module';
 import {readFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import {testFocusNavigation} from './focus-navigation.browser.mjs';
+import {testFocusNavigation,testSettingsNavigation} from './focus-navigation.browser.mjs';
 import {testMailHtml} from './mail-html.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
@@ -20,6 +20,8 @@ try{
     await page.getByLabel('Password',{exact:true}).fill('test-only-password-123');await page.getByRole('button',{name:'Open workspace',exact:true}).click();
   }
   await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();
+  await testSettingsNavigation(page,url);
+  console.log('PASS Settings keyboard navigation, native controls, scrolling, and focus after refresh.');
   await testFocusNavigation(page,url);
   await testMailHtml(page,url);
   await page.locator('#selected-item').focus();await page.keyboard.press('Tab');

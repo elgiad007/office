@@ -258,6 +258,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .settings-navigation button[aria-current="page"] { border-color: var(--accent); background: var(--wash); font-weight: 600; }
 .settings-grid { grid-template-columns: minmax(0, 1fr); }
 .settings-grid[hidden] { display: none; }
+.settings-grid:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .settings-grid summary { cursor: pointer; font-weight: 600; }
 .settings-grid details p { margin: 12px 0 0; }
 @media (max-width: 760px) {

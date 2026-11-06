@@ -9,7 +9,7 @@ export async function testFocusNavigation(page,url) {
     const action=new URL(route.request().url()).searchParams.get('r');
     if(action==='delete'){removed.add(route.request().postDataJSON().id);await route.fulfill({json:{ok:true}});return;}
     const records=[0,1,2].map(i=>({id:`focus-${kind}-${i}`,kind,title:`Focus ${kind} ${i}`,body:kind==='documents'?long.replaceAll('\n','<br>'):long,revision:1,meta:kind==='mail'?{folder:'Inbox',read:true,from:'sender@example.com'}:kind==='sheets'?{workbook:{sheets:[{name:'Sheet 1',cells:{}}]}}:{}})).filter(row=>!removed.has(row.id));
-    const responses={status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark',accent:'plum',keys:{down:'J',up:'K'}}},accounts:{accounts:[]},records:{records},'google-settings':{configured:false}};
+    const responses={status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark',accent:'plum',keys:{down:'J',up:'K'}}},accounts:{accounts:[]},records:{records},connections:{items:[],links:[]},'google-settings':{configured:false}};
     assert.ok(action in responses,`Unexpected focus API: ${action}`);
     await route.fulfill({json:responses[action]});
   });
@@ -101,4 +101,60 @@ export async function testFocusNavigation(page,url) {
 
     }
   }finally{await page.unroute(routes);await page.goto(url+'#mail');await page.reload();}
+}
+
+export async function testSettingsNavigation(page,url) {
+  let keys={};
+  const routes=target=>target.pathname.endsWith('/api.php')&&target.searchParams.get('r')!=='activity';
+  await page.route(routes,async route=>{
+    const action=new URL(route.request().url()).searchParams.get('r');
+    const responses={status:{authenticated:true,csrf:'fixture',preferences:{keys}},accounts:{accounts:[{id:'fixture',label:'Fixture mail',type:'imap'}]},'google-settings':{configured:false},'mail-junk-settings':{rules:[],folder:''},sync:{ok:true}};
+    assert.ok(action in responses,`Unexpected Settings API: ${action}`);
+    await route.fulfill({json:responses[action]});
+  });
+  const focused=async selector=>assert.equal(await page.locator(selector).evaluate(node=>node===document.activeElement),true,`${selector} should have focus`);
+  const category=name=>`[data-settings-category="${name}"]`;
+  try {
+    for(const remapped of [false,true]){
+      keys=remapped?{left:'H',right:'L',down:'J',up:'K',pageDown:'F'}:{};
+      const [left,right,down,up]=remapped?['H','L','J','K']:['h','l','j','k'];
+      await page.setViewportSize(remapped?{width:700,height:450}:{width:1440,height:600});
+      await page.goto(url+'#settings');
+      await page.evaluate(()=>sessionStorage.removeItem('office-settings-page'));
+      await page.reload();
+      const sidebar=page.locator('[data-app="settings"]');
+      await sidebar.focus();
+      await page.keyboard.press(right);await focused(category('appearance'));
+      await page.keyboard.press(down);await focused(category('mail'));
+      assert.equal(await page.locator(category('appearance')).getAttribute('aria-current'),'page');
+      await page.keyboard.press(up);await focused(category('appearance'));
+      await page.keyboard.press('Tab');await focused('[name="theme"]');
+      await page.keyboard.press('ArrowDown');await focused('[name="theme"]');
+      await page.keyboard.press('Shift+Tab');await focused(category('appearance'));
+      await page.keyboard.press('End');await focused(category('backups'));
+      await page.keyboard.press('ArrowUp');await focused(category('keyboard'));
+      await page.keyboard.press('Space');
+      assert.equal(await page.locator(category('keyboard')).getAttribute('aria-current'),'page');
+      await page.keyboard.press(right);await focused('#settings-keyboard');
+      const scroll=()=>page.evaluate(()=>Math.max(document.querySelector('#main').scrollTop,document.scrollingElement.scrollTop));
+      await page.keyboard.press('Home');
+      await page.waitForFunction(()=>!document.querySelector('#main').scrollTop&&!document.scrollingElement.scrollTop);
+      await page.keyboard.press(remapped?'F':'Control+f');
+      await page.waitForFunction(()=>document.querySelector('#main').scrollTop>0||document.scrollingElement.scrollTop>0);
+      assert.ok(await scroll()>0);
+      const panel=await page.locator('#settings-keyboard').elementHandle();
+      await page.locator('#sync-button').evaluate(button=>button.click());
+      await page.waitForFunction(node=>!node.isConnected,panel);
+      await focused('#settings-keyboard');
+      await page.keyboard.press('Tab');await focused('[name="key_down"]');
+      await page.keyboard.press(left);await focused('[name="key_down"]');
+      await page.keyboard.press('Shift+Tab');await focused(category('keyboard'));
+      await page.keyboard.press('Home');await focused(category('appearance'));
+      await page.keyboard.press('ArrowDown');await focused(category('mail'));
+      await page.keyboard.press('Enter');
+      await page.keyboard.press(right);await focused('#settings-mail');
+      await page.keyboard.press(left);await focused(category('mail'));
+      await page.keyboard.press(left);await focused('[data-app="settings"]');
+    }
+  }finally{await page.unroute(routes);await page.setViewportSize({width:1440,height:800});await page.goto(url+'#mail');await page.reload();}
 }

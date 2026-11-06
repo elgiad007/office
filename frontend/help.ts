@@ -8,6 +8,9 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add(k.left+' / '+k.right,'Focus the pane to the left / right','Normal mode','Move between the application sidebar, item list, and selected content.');
   add(k.down+' / '+k.up+'; ArrowDown / ArrowUp','Focus next / previous sidebar entry','Application sidebar','Navigate apps, mail accounts, and visible folders. The Mail folder dropdown uses arrow keys to choose a folder.');
   add('Enter / Space','Activate the focused sidebar entry','Application sidebar','Enter opens an app, folder, or the focused account’s Inbox. Space expands or collapses account groups. Use the Mail folders button on narrow screens.');
+  add(k.left+' / '+k.right,'Focus the pane to the left / right','Settings','Move between the application sidebar, category list, and active settings panel.');
+  add(k.down+' / '+k.up+'; ArrowDown / ArrowUp; Home / End','Focus next / previous / first / last category','Settings categories','Enter or Space opens the focused category. Tab moves to controls in the open category.');
+  add('ArrowDown / ArrowUp; PageDown / PageUp; Home / End','Scroll down / up, page down / up, or jump to top / bottom','Focused settings panel','Office’s remappable and Ctrl scrolling shortcuts also work when the panel itself has focus.');
   add('Backspace','Go up a folder or return to app selection','Mail sidebar','Opens the nearest selectable parent, then the account’s Inbox. From the Inbox, focuses the Mail app button and leaves the Inbox open.');
   add('ArrowDown / ArrowRight; ArrowUp / ArrowLeft','Next / previous item','Item lists','Down or Right moves to the next item; Up or Left moves to the previous item.');
   add('Ctrl+f / Ctrl+b','Page down / up','Focused list or nonediting content','Scrolls the focused pane, including HTML mail. Repeating the key continues scrolling.');

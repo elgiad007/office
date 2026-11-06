@@ -825,6 +825,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     if (state.app === 'settings') {
         state.current = null;
         renderSettings(entryVersion);
+        if (enteringApp && (!keepSidebar || !document.activeElement?.closest('.sidebar')))
+            focusList();
         return;
     }
     // Retry snapshots taken across a deletion, rollback or read update.
@@ -2568,9 +2570,12 @@ function renderSettings(entryVersion) {
         'title-desc': 'Title · Z–A',
     };
     const main = document.querySelector('#main');
+    const focused = document.activeElement;
+    const focusedCategory = focused?.closest('[data-settings-category]')?.dataset.settingsCategory;
+    const focusedPage = focused?.closest('[data-settings-page]')?.dataset.settingsPage;
     main.innerHTML = `<div class="settings">
     <nav class="settings-navigation" aria-label="Settings categories">
-      ${settingsPages.map(([id, label]) => `<button type="button" data-settings-category="${id}" aria-label="${label} settings" aria-controls="settings-${id}" aria-current="${settingsPage === id ? 'page' : 'false'}">${label}</button>`).join('')}
+      ${settingsPages.map(([id, label]) => `<button type="button" data-settings-category="${id}" aria-label="${label} settings" aria-controls="settings-${id}" aria-current="${settingsPage === id ? 'page' : 'false'}" tabindex="${settingsPage === id ? 0 : -1}">${label}</button>`).join('')}
     </nav>
     <section class="settings-grid" id="settings-appearance" data-settings-page="appearance"${settingsPage === 'appearance' ? '' : ' hidden'}>
       <section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences">
@@ -2612,6 +2617,14 @@ function renderSettings(entryVersion) {
   </div>`;
     const categories = main.querySelectorAll('[data-settings-category]');
     const pages = main.querySelectorAll('[data-settings-page]');
+    pages.forEach(page => {
+        page.tabIndex = -1;
+        page.setAttribute('aria-label', settingsPages.find(([id]) => id === page.dataset.settingsPage)[1] + ' settings');
+        page.addEventListener('focusin', () => categories.forEach(category => category.tabIndex = category.dataset.settingsCategory === settingsPage ? 0 : -1));
+    });
+    main.querySelector('.settings-navigation').addEventListener('focusin', event => {
+        categories.forEach(category => category.tabIndex = category === event.target ? 0 : -1);
+    });
     categories.forEach(button => button.onclick = () => {
         settingsPage = button.dataset.settingsCategory;
         try {
@@ -2648,6 +2661,24 @@ function renderSettings(entryVersion) {
     document.querySelectorAll('[data-repair-account]').forEach(b => b.onclick = () => void repairMail(b.dataset.repairAccount, b));
     document.querySelectorAll('[data-google]').forEach(b => b.onclick = () => void attempt(async () => { const r = await api('google-connect', { id: b.dataset.google }); location.href = r.url; }));
     document.querySelectorAll('[data-remove-account]').forEach(b => b.onclick = () => confirmation('Remove account', 'Remove the saved credentials and downloaded cache from this workspace? The provider account is unaffected.', async () => { await api('account-delete', { id: b.dataset.removeAccount }); state.accounts = (await api('accounts')).accounts; renderSettings(); }));
+    if (focusedCategory)
+        focusSettingsCategory(focusedCategory);
+    else if (focusedPage === settingsPage) {
+        const panel = activeSettingsPanel();
+        const replacement = focused?.id && document.getElementById(focused.id);
+        if (replacement && panel?.contains(replacement))
+            replacement.focus({ preventScroll: true });
+        if (document.activeElement === document.body)
+            panel?.focus({ preventScroll: true });
+    }
+}
+function activeSettingsPanel() {
+    return document.querySelector('[data-settings-page]:not([hidden])');
+}
+function focusSettingsCategory(category = settingsPage) {
+    const button = document.querySelector(`[data-settings-category="${CSS.escape(category)}"]`);
+    button?.focus({ preventScroll: true });
+    button?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 function accountDialog() {
     openAccountSetup({ dialog, request: api, onSaved: async () => {
@@ -2677,6 +2708,10 @@ function restoreConnectionsFocus(opener) {
     setMode('normal');
 }
 function focusList() {
+    if (state.app === 'settings' && activeSettingsPanel()) {
+        focusSettingsCategory();
+        return;
+    }
     const entry = document.querySelector('#selected-item') || document.querySelector('#items') || document.querySelector('#main');
     if (entry) {
         if (entry.id !== 'selected-item')
@@ -2772,6 +2807,44 @@ function handleSidebarKey(event, target) {
     }
 }
 const keyboardScrollers = new WeakMap();
+const scrollKeys = { ArrowUp: 'up', ArrowDown: 'down', PageUp: 'page-up', PageDown: 'page-down', Home: 'start', End: 'end' };
+function handleSettingsKey(event, target) {
+    if (state.app !== 'settings' || !target.closest('.settings') || event.isComposing)
+        return false;
+    const category = target.closest('[data-settings-category]');
+    const panel = activeSettingsPanel();
+    const key = event.key, k = keys();
+    const vimDirection = target === panel ? vimScrollDirection(event) : undefined;
+    if (!vimDirection && (event.ctrlKey || event.metaKey || event.altKey || ['Enter', ' ', 'Tab'].includes(key)))
+        return false;
+    if (category && (key === k.left || key === k.right)) {
+        if (key === k.left)
+            focusSidebar();
+        else
+            panel?.focus();
+    }
+    else if (category && (key === k.up || key === k.down || ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(key))) {
+        const index = settingsPages.findIndex(([id]) => id === category.dataset.settingsCategory);
+        const next = key === 'Home' ? 0 : key === 'End' ? settingsPages.length - 1 : index + (key === 'ArrowDown' || key !== 'ArrowUp' && key === k.down ? 1 : -1);
+        focusSettingsCategory(settingsPages[Math.max(0, Math.min(settingsPages.length - 1, next))][0]);
+    }
+    else if (panel?.contains(target) && key === k.left && !vimDirection) {
+        focusSettingsCategory();
+    }
+    else if (target === panel) {
+        const direction = vimDirection || scrollKeys[key] ||
+            (key === k.down ? 'down' : key === k.up ? 'up' : key === k.pageDown ? 'half-page-down' : key === k.pageUp ? 'half-page-up' : undefined);
+        if (!direction)
+            return false;
+        scrollFocusedPane(target, direction);
+    }
+    else
+        return false;
+    event.preventDefault();
+    keySequence = '';
+    setMode('normal');
+    return true;
+}
 function scrollMailBody(target, direction) {
     const frame = target.closest('.mail-html');
     if (frame) {
@@ -2793,10 +2866,11 @@ function scrollFocusedPane(target, direction) {
         scrollMailBody(target, direction);
         return;
     }
-    const pane = target.closest('#items,#detail') || document.querySelector(activePane() === 'content' ? '#detail' : '#items');
+    const pane = state.app === 'settings' && target.matches('[data-settings-page]') ?
+        document.querySelector('#main') : target.closest('#items,#detail') || document.querySelector(activePane() === 'content' ? '#detail' : '#items');
     if (!pane)
         return false;
-    let panel = pane;
+    let panel = pane.id === 'main' ? document.scrollingElement || pane : pane;
     for (let node = target; node && pane.contains(node); node = node.parentElement) {
         if (node.scrollHeight > node.clientHeight && /auto|scroll/.test(getComputedStyle(node).overflowY)) {
             panel = node;
@@ -2920,6 +2994,8 @@ document.addEventListener('keydown', event => {
         setMode('insert');
         return;
     }
+    if (handleSettingsKey(event, target))
+        return;
     const vimDirection = vimScrollDirection(event);
     if (vimDirection) {
         if (scrollFocusedPane(event.target, vimDirection) !== false) {
@@ -2995,10 +3071,9 @@ document.addEventListener('keydown', event => {
             event.preventDefault();
         return;
     }
-    const scrollKey = { ArrowUp: 'up', ArrowDown: 'down', PageUp: 'page-up', PageDown: 'page-down', Home: 'start', End: 'end' };
-    if (mailBody && scrollKey[key]) {
+    if (mailBody && scrollKeys[key]) {
         event.preventDefault();
-        scrollMailBody(target, scrollKey[key]);
+        scrollMailBody(target, scrollKeys[key]);
         return;
     }
     if (event.repeat && action && !['down', 'up', 'left', 'right'].includes(action)) {

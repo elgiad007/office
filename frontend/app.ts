@@ -545,7 +545,11 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
     await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
     if(entryVersion!==appEntryVersion)return;
   }
-  if (state.app==='settings') { state.current=null; renderSettings(entryVersion); return; }
+  if (state.app==='settings') {
+    state.current=null;renderSettings(entryVersion);
+    if(enteringApp&&(!keepSidebar||!document.activeElement?.closest('.sidebar')))focusList();
+    return;
+  }
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let records,version;
   do{version=mailDeleteVersion+mailReadVersion;records=initialRecords??(await api(`records&kind=${app}${app==='mail'?'&summaries=1':''}`)).records;initialRecords=undefined;if(state.app!==app||versionAtStart!==appEntryVersion)return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
@@ -1478,9 +1482,12 @@ function renderSettings(entryVersion?: number) {
     'title-desc':'Title · Z–A',
   };
   const main=document.querySelector<HTMLElement>('#main')!;
+  const focused=document.activeElement as HTMLElement|null;
+  const focusedCategory=focused?.closest<HTMLElement>('[data-settings-category]')?.dataset.settingsCategory;
+  const focusedPage=focused?.closest<HTMLElement>('[data-settings-page]')?.dataset.settingsPage;
   main.innerHTML=`<div class="settings">
     <nav class="settings-navigation" aria-label="Settings categories">
-      ${settingsPages.map(([id,label])=>`<button type="button" data-settings-category="${id}" aria-label="${label} settings" aria-controls="settings-${id}" aria-current="${settingsPage===id?'page':'false'}">${label}</button>`).join('')}
+      ${settingsPages.map(([id,label])=>`<button type="button" data-settings-category="${id}" aria-label="${label} settings" aria-controls="settings-${id}" aria-current="${settingsPage===id?'page':'false'}" tabindex="${settingsPage===id?0:-1}">${label}</button>`).join('')}
     </nav>
     <section class="settings-grid" id="settings-appearance" data-settings-page="appearance"${settingsPage==='appearance'?'':' hidden'}>
       <section class="card"><h2>Look & feel</h2><p>Choose a theme, accent color, and density.</p><form id="preferences">
@@ -1522,6 +1529,14 @@ function renderSettings(entryVersion?: number) {
   </div>`;
   const categories=main.querySelectorAll<HTMLButtonElement>('[data-settings-category]');
   const pages=main.querySelectorAll<HTMLElement>('[data-settings-page]');
+  pages.forEach(page=>{
+    page.tabIndex=-1;
+    page.setAttribute('aria-label',settingsPages.find(([id])=>id===page.dataset.settingsPage)![1]+' settings');
+    page.addEventListener('focusin',()=>categories.forEach(category=>category.tabIndex=category.dataset.settingsCategory===settingsPage?0:-1));
+  });
+  main.querySelector<HTMLElement>('.settings-navigation')!.addEventListener('focusin',event=>{
+    categories.forEach(category=>category.tabIndex=category===event.target?0:-1);
+  });
   categories.forEach(button=>button.onclick=()=>{
     settingsPage=button.dataset.settingsCategory!;
     try {sessionStorage.setItem(settingsPageKey,settingsPage);} catch {/* Keep the in-page choice. */}
@@ -1551,6 +1566,21 @@ function renderSettings(entryVersion?: number) {
   document.querySelectorAll<HTMLButtonElement>('[data-repair-account]').forEach(b=>b.onclick=()=>void repairMail(b.dataset.repairAccount!,b));
   document.querySelectorAll<HTMLButtonElement>('[data-google]').forEach(b=>b.onclick=()=>void attempt(async()=>{const r=await api('google-connect',{id:b.dataset.google!});location.href=r.url;}));
   document.querySelectorAll<HTMLButtonElement>('[data-remove-account]').forEach(b=>b.onclick=()=>confirmation('Remove account','Remove the saved credentials and downloaded cache from this workspace? The provider account is unaffected.',async()=>{await api('account-delete',{id:b.dataset.removeAccount!});state.accounts=(await api('accounts')).accounts;renderSettings();}));
+  if(focusedCategory)focusSettingsCategory(focusedCategory);
+  else if(focusedPage===settingsPage){
+    const panel=activeSettingsPanel();
+    const replacement=focused?.id&&document.getElementById(focused.id);
+    if(replacement&&panel?.contains(replacement))replacement.focus({preventScroll:true});
+    if(document.activeElement===document.body)panel?.focus({preventScroll:true});
+  }
+}
+function activeSettingsPanel() {
+  return document.querySelector<HTMLElement>('[data-settings-page]:not([hidden])');
+}
+function focusSettingsCategory(category=settingsPage) {
+  const button=document.querySelector<HTMLButtonElement>(`[data-settings-category="${CSS.escape(category)}"]`);
+  button?.focus({preventScroll:true});
+  button?.scrollIntoView({block:'nearest',inline:'nearest'});
 }
 function accountDialog() {
   openAccountSetup({dialog,request:api,onSaved:async()=>{
@@ -1574,6 +1604,7 @@ function restoreConnectionsFocus(opener:HTMLElement|null) {
   setMode('normal');
 }
 function focusList() {
+  if(state.app==='settings'&&activeSettingsPanel()){focusSettingsCategory();return;}
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
@@ -1642,6 +1673,32 @@ function handleSidebarKey(event: KeyboardEvent,target: HTMLElement) {
   if(entry){entry.focus({preventScroll:true});entry.scrollIntoView({block:'nearest',inline:'nearest'});}
 }
 const keyboardScrollers=new WeakMap<HTMLElement,ReturnType<typeof createKeyboardScroller>>();
+const scrollKeys: Record<string,ScrollDirection>={ArrowUp:'up',ArrowDown:'down',PageUp:'page-up',PageDown:'page-down',Home:'start',End:'end'};
+function handleSettingsKey(event: KeyboardEvent,target: HTMLElement) {
+  if(state.app!=='settings'||!target.closest('.settings')||event.isComposing)return false;
+  const category=target.closest<HTMLButtonElement>('[data-settings-category]');
+  const panel=activeSettingsPanel();
+  const key=event.key,k=keys();
+  const vimDirection=target===panel?vimScrollDirection(event):undefined;
+  if(!vimDirection&&(event.ctrlKey||event.metaKey||event.altKey||['Enter',' ','Tab'].includes(key)))return false;
+  if(category&&(key===k.left||key===k.right)){
+    if(key===k.left)focusSidebar();
+    else panel?.focus();
+  }else if(category&&(key===k.up||key===k.down||['ArrowUp','ArrowDown','Home','End'].includes(key))){
+    const index=settingsPages.findIndex(([id])=>id===category.dataset.settingsCategory);
+    const next=key==='Home'?0:key==='End'?settingsPages.length-1:index+(key==='ArrowDown'||key!=='ArrowUp'&&key===k.down?1:-1);
+    focusSettingsCategory(settingsPages[Math.max(0,Math.min(settingsPages.length-1,next))][0]);
+  }else if(panel?.contains(target)&&key===k.left&&!vimDirection){
+    focusSettingsCategory();
+  }else if(target===panel){
+    const direction=vimDirection||scrollKeys[key]||
+      (key===k.down?'down':key===k.up?'up':key===k.pageDown?'half-page-down':key===k.pageUp?'half-page-up':undefined);
+    if(!direction)return false;
+    scrollFocusedPane(target,direction);
+  }else return false;
+  event.preventDefault();keySequence='';setMode('normal');
+  return true;
+}
 function scrollMailBody(target: HTMLElement,direction: ScrollDirection) {
   const frame=target.closest<HTMLIFrameElement>('.mail-html');
   if(frame){frame.contentWindow?.postMessage({type:'office-mail-scroll',direction},'*');return;}
@@ -1652,9 +1709,10 @@ function scrollMailBody(target: HTMLElement,direction: ScrollDirection) {
 }
 function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
   if(target.closest('.mail-html')){scrollMailBody(target,direction);return;}
-  const pane=target.closest<HTMLElement>('#items,#detail')||document.querySelector<HTMLElement>(activePane()==='content'?'#detail':'#items');
+  const pane=state.app==='settings'&&target.matches('[data-settings-page]')?
+    document.querySelector<HTMLElement>('#main'):target.closest<HTMLElement>('#items,#detail')||document.querySelector<HTMLElement>(activePane()==='content'?'#detail':'#items');
   if(!pane)return false;
-  let panel=pane;
+  let panel=pane.id==='main'?(document.scrollingElement as HTMLElement|null)||pane:pane;
   for(let node: HTMLElement|null=target;node&&pane.contains(node);node=node.parentElement){
     if(node.scrollHeight>node.clientHeight&&/auto|scroll/.test(getComputedStyle(node).overflowY)){panel=node;break;}
     if(node===pane)break;
@@ -1698,6 +1756,7 @@ document.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(()=>commit(true));return;}
   if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
   if(editable(target)&&!inSidebar){setMode('insert');return;}
+  if(handleSettingsKey(event,target))return;
   const vimDirection=vimScrollDirection(event);
   if(vimDirection){if(scrollFocusedPane(event.target as HTMLElement,vimDirection)!==false){event.preventDefault();keySequence='';}return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
@@ -1715,8 +1774,7 @@ document.addEventListener('keydown',event=>{
   const listArrow=activePane()==='list'?(key==='ArrowUp'||key==='ArrowLeft'?'up':key==='ArrowDown'||key==='ArrowRight'?'down':undefined):undefined;
   const action=listArrow||Object.keys(k).find(action=>k[action]===key);
   if(action==='pageDown'||action==='pageUp'){if(scrollFocusedPane(target,action==='pageDown'?'half-page-down':'half-page-up')!==false)event.preventDefault();return;}
-  const scrollKey: Record<string,ScrollDirection>={ArrowUp:'up',ArrowDown:'down',PageUp:'page-up',PageDown:'page-down',Home:'start',End:'end'};
-  if(mailBody&&scrollKey[key]){event.preventDefault();scrollMailBody(target,scrollKey[key]);return;}
+  if(mailBody&&scrollKeys[key]){event.preventDefault();scrollMailBody(target,scrollKeys[key]);return;}
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}
