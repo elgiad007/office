@@ -80,7 +80,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .connections-view .connection-group-symbol { font-size:19px; fill:var(--node-color,var(--accent)); color:var(--node-color,var(--accent)); }
 .connections-view .connection-node-subtitle { font-size:11px; }
 .connections-view [data-node].selected .connection-outline { fill:var(--wash); stroke:var(--accent); stroke-width:4; }
-.connections-view [data-node]:focus { outline:none; }
+.connections-view :is([data-node],.connection-origin):focus { outline:none; }
 .connections-view [data-node]:focus .connection-outline,.connections-view [data-group-node]:focus rect { stroke:var(--text); stroke-width:4; }
 .connections-view .connection-focal .connection-outline { fill:color-mix(in srgb,var(--node-color) 12%,var(--surface)); stroke:var(--node-color); stroke-width:4; }
 .connections-view [data-node]:focus-visible .connection-outline { stroke:var(--text); stroke-width:4; }
