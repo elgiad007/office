@@ -55,7 +55,7 @@ try{
   await page.getByRole('button',{name:'View activity',exact:false}).click();
   assert.match(await page.locator('#activity-entries').textContent(),/\(\d+ minutes ago\)/);
   await page.getByRole('button',{name:'Close activity'}).click();
-  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Appearance settings',exact:true}).click();
   const checkbox=page.getByRole('checkbox',{name:'Show elapsed time beside dates'});
   assert.equal(await checkbox.isChecked(),true);await checkbox.uncheck();
   await Promise.all([page.waitForResponse(response=>response.url().includes('r=preferences')&&response.request().method()==='POST'),page.getByRole('button',{name:'Save preferences',exact:true}).click()]);
@@ -67,7 +67,7 @@ try{
   await page.getByRole('button',{name:'View activity',exact:false}).click();
   assert.doesNotMatch(await page.locator('#activity-entries').innerText(),/ago\)/);
   await page.getByRole('button',{name:'Close activity'}).click();
-  await page.getByRole('button',{name:'Settings',exact:true}).click();await checkbox.check();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Appearance settings',exact:true}).click();await checkbox.check();
   await Promise.all([page.waitForResponse(response=>response.url().includes('r=preferences')&&response.request().method()==='POST'),page.getByRole('button',{name:'Save preferences',exact:true}).click()]);
   kind='documents';await page.goto(url+'#documents');await page.reload();
   await page.locator('#items .item').waitFor();

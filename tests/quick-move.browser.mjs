@@ -53,7 +53,7 @@ export async function testQuickMove(page,url){
     assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)),true,'Quick Move advances middle item and retains content focus');
     await page.locator('#main').focus();await page.keyboard.press('?');
     assert.match(await page.locator('#dialog').textContent(),/Quick Move to folder/);assert.doesNotMatch(await page.locator('#dialog').textContent(),/Toggle read \/ unread/);await page.keyboard.press('Escape');
-    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Keyboard settings',exact:true}).click();
     assert.equal(await page.locator('[name="key_move"]').inputValue(),'m');assert.equal(await page.locator('[name="key_read"]').count(),0,'legacy read binding is removed');
     console.log('PASS Quick Move: focused search, all accounts, duplicate names, nested folders, keyboard selection, Enter/Escape, no match, failure recovery, bulk selection, legacy preferences and help.');
   }finally{await page.unroute(routes);}

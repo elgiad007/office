@@ -14,7 +14,7 @@ export async function testMailList(page,url) {
     assert.ok(json,'Unexpected layout request: '+action);await route.fulfill({json});
   });
   const item=()=>page.locator('#items [data-id="layout-a"]');
-  const settings=async()=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('#mail-list-settings').waitFor();};
+  const settings=async()=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Mail settings',exact:true}).click();await page.locator('#mail-list-settings').waitFor();};
   const save=async()=>{await page.getByRole('button',{name:'Save list appearance',exact:true}).click();await page.getByText('List appearance saved.',{exact:true}).waitFor();};
   try {
     await page.goto(url+'?layout-test#mail');await item().waitFor();

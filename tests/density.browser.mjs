@@ -1,6 +1,19 @@
 import assert from 'node:assert/strict';
 
 export async function testDensity(page) {
+  const category = name => page.getByRole('button', {name:name+' settings',exact:true});
+  const theme = page.getByLabel('Theme', {exact:true});
+  const savedTheme = await theme.inputValue();
+  await theme.selectOption(savedTheme === 'light' ? 'dark' : 'light');
+  await category('Appearance').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await category('Mail').evaluate(button => button === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  assert.equal(await category('Mail').getAttribute('aria-current'), 'page');
+  assert.equal(await theme.isVisible(), false);
+  await category('Appearance').click();
+  assert.equal(await theme.inputValue(), savedTheme === 'light' ? 'dark' : 'light');
+  await theme.selectOption(savedTheme);
   const spacing = () => page.evaluate(() => {
     const css = selector => getComputedStyle(document.querySelector(selector));
     return {
@@ -41,7 +54,11 @@ export async function testDensity(page) {
   await page.emulateMedia({media:'screen'});
   await page.getByRole('button', {name:'Settings', exact:true}).click();
   await page.setViewportSize({width:390, height:844});
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  for (const name of ['Appearance', 'Mail', 'Accounts', 'Keyboard', 'Backups']) {
+    await category(name).click();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), name+' settings should fit the viewport');
+  }
+  await category('Appearance').click();
   await page.screenshot({path:'test-results/settings-compact-mobile.png', fullPage:true});
   await page.getByRole('button', {name:'Tasks', exact:true}).click();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));

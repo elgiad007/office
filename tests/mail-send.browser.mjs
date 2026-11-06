@@ -35,7 +35,7 @@ export async function testMailSend(page,url) {
     await body.fill('Send body '+sequence);
   };
   const settings=async enabled=>{
-    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Mail settings',exact:true}).click();
     const checkbox=page.getByLabel('Confirm before sending',{exact:true});await checkbox.waitFor();
     if(enabled===undefined)return checkbox.isChecked();
     await checkbox.setChecked(enabled);await page.getByRole('button',{name:'Save mail preferences',exact:true}).click();

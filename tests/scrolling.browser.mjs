@@ -83,7 +83,8 @@ export async function testScrolling(page, url) {
         assert.equal(await page.locator('.shell').evaluate(node => getComputedStyle(node).overflowY), 'visible');
         await page.emulateMedia({media:'screen'});
         await page.getByRole('button', {name:'Settings',exact:true}).click();
-        await page.locator('#preferences').waitFor();
+        await page.getByRole('button',{name:'Mail settings',exact:true}).click();
+        await page.locator('#mail-preferences').waitFor();
         await page.locator('#main').evaluate(node => { node.scrollTop = node.scrollHeight; });
         assert.ok(await page.locator('#main').evaluate(node => node.scrollTop > 0), 'Settings must remain scrollable');
       }
@@ -94,6 +95,7 @@ export async function testScrolling(page, url) {
     await page.setViewportSize({width:1440,height:1000});
     await page.goto(url+'#settings');
     await page.reload();
+    await page.getByRole('button',{name:'Appearance settings',exact:true}).click();
     await page.locator('#preferences').waitFor();
   }
 }

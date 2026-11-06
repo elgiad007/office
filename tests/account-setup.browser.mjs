@@ -27,6 +27,7 @@ export async function testAccountSetup(page, url) {
     await route.fulfill({status:400,json:{error:'Fixture: Google authorization unavailable. Try again.'}});
   });
   try {
+    await page.getByRole('button',{name:'Accounts settings',exact:true}).click();
     await page.getByLabel('Google OAuth client ID',{exact:true}).fill('browser.apps.googleusercontent.com');
     await page.getByLabel('Google OAuth client secret',{exact:true}).fill('browser-google-secret');
     assert.equal(await page.getByLabel('Google callback URL',{exact:true}).inputValue(),url+'api.php?r=oauth-callback');

@@ -248,7 +248,19 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .app-toolbar[hidden] { display: none; }
 .app-toolbar > button { white-space: nowrap; }
 .app-toolbar input { width: 210px; min-width: 0; max-width: 100%; }
-.settings-intro { margin: 20px 0; color: var(--muted); font-size: 12px; }
+.settings { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: start; gap: 20px; padding-top: 20px; }
+.settings-navigation { display: flex; flex-direction: column; gap: 4px; }
+.settings-navigation button { justify-content: flex-start; border-color: transparent; background: transparent; }
+.settings-navigation button:hover { background: var(--wash); }
+.settings-navigation button[aria-current="page"] { border-color: var(--accent); background: var(--wash); font-weight: 600; }
+.settings-grid { grid-template-columns: minmax(0, 1fr); }
+.settings-grid[hidden] { display: none; }
+.settings-grid summary { cursor: pointer; font-weight: 600; }
+.settings-grid details p { margin: 12px 0 0; }
+@media (max-width: 760px) {
+  .settings { grid-template-columns: minmax(0, 1fr); }
+  .settings-navigation { flex-direction: row; flex-wrap: wrap; }
+}
 @media screen {
   .topbar, .compact .topbar { height: auto; min-height: 77px; flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; }
   .compact .topbar { min-height: 52px; padding-top: 5px; padding-bottom: 5px; }
@@ -413,8 +425,8 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
   .compact .list-empty { padding: 15px 12px; }
   .compact .empty { min-height: 260px; padding: 18px; }
   .compact .empty .empty-symbol { margin-bottom: 12px; }
-  .compact .settings { padding: 0 16px 30px; }
-  .compact .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .compact .settings { padding: 10px 16px 30px; gap: 10px; }
+  .compact .settings-grid { gap: 10px; }
   .compact .card { min-width: 0; padding: 12px; overflow-wrap: anywhere; }
   .compact .card h2 { margin-bottom: 8px; }
   .compact .card p { margin-bottom: 8px; }
@@ -447,7 +459,6 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
   .compact .brand { padding: 0 5px 16px; }
   .compact .nav button { padding: 7px; }
   .compact .items { max-height: 220px; }
-  .compact .settings-grid { grid-template-columns: minmax(0, 1fr); }
   .compact .view-head { gap: 8px; }
   .compact .top-actions { gap: 3px; }
 }

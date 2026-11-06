@@ -25,7 +25,7 @@ export async function testMailSender(page,url) {
   const sender=page.getByLabel('Send using',{exact:true});
   const compose=async()=>{await page.getByRole('button',{name:'+ Compose',exact:true}).click();await sender.waitFor();await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();};
   const reload=async()=>{await page.goto(url+'#mail');await page.reload();await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();};
-  const settings=async()=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByLabel('Default mail account',{exact:true}).waitFor();};
+  const settings=async()=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Mail settings',exact:true}).click();await page.getByLabel('Default mail account',{exact:true}).waitFor();};
   try {
     await reload();
     await page.locator('.item').filter({hasText:message.title}).click();

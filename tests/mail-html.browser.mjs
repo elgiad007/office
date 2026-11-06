@@ -150,7 +150,7 @@ export async function testMailHtml(page,url) {
     await openMailMore(page);await page.getByRole('button',{name:'Load images',exact:true}).click();
     await frame.getByAltText('Remote logo').evaluate(img=>img.decode());
     assert.ok(remoteRequests>0);
-    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Mail settings',exact:true}).click();
     await page.getByLabel('Default email display',{exact:true}).selectOption('text');
     await page.getByRole('button',{name:'Save mail preferences',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Mail preferences saved.'}).waitFor();

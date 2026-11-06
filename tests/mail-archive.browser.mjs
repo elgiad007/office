@@ -81,7 +81,7 @@ export async function testMailArchive(page, url) {
     await page.locator('#dialog').getByRole('button',{name:'Discard copy',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Cached copy discarded.'}).waitFor();
     assert.equal(await page.locator('.item').count(),0);assert.equal(providerWrites,writesBefore);
-    await page.getByRole('button',{name:'Settings',exact:true}).click();
+    await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:'Accounts settings',exact:true}).click();
     await page.getByRole('button',{name:'Repair / resync',exact:true}).click();
     await page.locator('#notice').filter({hasText:'Mail folders resynchronized.'}).waitFor();
     assert.equal(repairs,1);
