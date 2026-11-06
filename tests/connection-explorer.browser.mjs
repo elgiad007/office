@@ -78,6 +78,15 @@ try{
  await page.getByRole('button',{name:'Forward in connections'}).click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();assert.equal(await focusedId(),'n1');await page.keyboard.press('Backspace');await page.locator('[data-connection-status]').filter({hasText:'100 of 1200'}).waitFor();
  await page.locator('[data-select="n1"]').first().click();await page.locator('[data-selection] h3').filter({hasText:'Project item 0001'}).waitFor();
  assert.equal(await page.locator('line.highlighted').count(),1);assert.ok(await page.locator('[data-node].dimmed').count()>0);
+ const neighborArea=page.locator('[data-neighbor-area]');
+ const highlight=page.getByRole('button',{name:'Highlight direct connections'});
+ assert.equal(await highlight.getAttribute('aria-pressed'),'true');
+ assert.equal(await neighborArea.locator('g > rect').count(),2);
+ assert.equal(await neighborArea.locator('g > path').count(),1);
+ assert.ok(await neighborArea.locator('mask rect[fill="black"]').count()>0);
+ await highlight.click();
+ assert.equal(await highlight.getAttribute('aria-pressed'),'false');
+ assert.equal(await neighborArea.locator('g > rect').count(),0);
  const initial=await page.locator('svg').getAttribute('viewBox');await page.getByRole('button',{name:'Zoom in',exact:true}).click();assert.notEqual(await page.locator('svg').getAttribute('viewBox'),initial);
  await page.getByRole('button',{name:'Center selection',exact:true}).click();
  await page.locator('[data-connection-graph]').focus();const before=await page.locator('svg').getAttribute('viewBox');await page.keyboard.press('Shift+ArrowRight');assert.notEqual(await page.locator('svg').getAttribute('viewBox'),before);
@@ -125,6 +134,14 @@ try{
  await page.evaluate(()=>{window.deferOpen=true;window.openError='';});await page.locator('#launch').click();await page.locator('[data-connection-status]').filter({hasText:'1 of 1'}).waitFor();await page.locator('[data-selection] [data-open]').click();await page.locator('.connection-opening-dialog[open]').waitFor();await page.evaluate(()=>window.finishOpen('Item load failed fixture'));await page.locator('.connection-opening-dialog').waitFor({state:'detached'});assert.equal(await page.evaluate(()=>window.openError),'Item load failed fixture');
  await page.evaluate(()=>window.launchSource='');
  await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.locator('[data-connection-filter]').fill('Project item 0001');await page.waitForTimeout(260);await page.evaluate(()=>window.replace());await page.waitForTimeout(650);assert.equal(await page.getByRole('button',{name:'Other dialog'}).count(),1);
- assert.deepEqual(errors,[]);console.log('PASS explorer: full screen, 1,200-edge fixture, grouping, bounded map/list, selection, zoom/pan, neighborhood requests, global search, type filters, history, stale responses, responsive views and lifecycle.');
+ await page.reload();
+ await page.evaluate(()=>window.launchSource='n1');
+ await page.locator('#launch').click();
+ await page.locator('[data-node="n1"]').waitFor();
+ assert.equal(await highlight.getAttribute('aria-pressed'),'false');
+ assert.equal(await neighborArea.locator('g > rect').count(),0);
+ await highlight.click();
+ assert.equal(await neighborArea.locator('g > rect').count(),2);
+ assert.deepEqual(errors,[]);console.log('PASS explorer: full screen, 1,200-edge fixture, grouping, bounded map/list, selection, persisted direct-neighbor highlight, zoom/pan, neighborhood requests, global search, type filters, history, stale responses, responsive views and lifecycle.');
 }catch(error){if(page)await page.screenshot({path:'test-results/connection-explorer-failure.png'});throw error;}
 finally{await browser?.close();server.closeAllConnections();await new Promise(r=>server.close(r));}

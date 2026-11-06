@@ -12,6 +12,7 @@ type Env={api:RequestApi;keys?:()=>Record<string,string>;changed?:()=>void;close
 const typeLabel=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦'};
 const ORIGIN_ID='navigation-origin';
+const NEIGHBOR_HIGHLIGHT_KEY='office.connections.highlightDirect';
 
 export async function openConnectionExplorer(env:Env,source='') {
   const opener=document.activeElement as HTMLElement|null;
@@ -23,8 +24,8 @@ export async function openConnectionExplorer(env:Env,source='') {
       <button data-toggle-panel aria-expanded="true" aria-controls="connection-panel">Hide details</button></div>
     <p class="connection-location" data-location></p>
     <div class="connection-workspace"><section class="connection-map-pane" aria-label="Connections map">
-      <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span><span data-group-actions></span></div>
-      <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-edges></g><g data-navigation-path></g><g data-nodes></g></svg></div>
+      <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span><button data-neighbor-highlight aria-pressed="true">Highlight direct connections</button><span data-group-actions></span></div>
+      <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-neighbor-area aria-hidden="true"></g><g data-edges></g><g data-navigation-path></g><g data-nodes></g></svg></div>
       <p class="connection-map-note" data-map-note></p>
       <div class="connection-legend" aria-label="Item type legend">${Object.entries(itemTypes).map(([kind,type])=>`<span class="connection-type" data-kind="${kind}">${symbols[kind]} ${e(type.label)}</span>`).join('')}</div>
     </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
@@ -36,6 +37,16 @@ export async function openConnectionExplorer(env:Env,source='') {
   let visibility:ConnectionVisibility='active',mutating=false;
   const more=query<HTMLButtonElement>('[data-connection-more]'),svg=query<SVGSVGElement>('svg'),map=query<HTMLElement>('[data-connection-graph]');
   const status=query<HTMLElement>('[data-connection-status]');
+  const highlightToggle=query<HTMLButtonElement>('[data-neighbor-highlight]');
+  let highlightNeighbors=true;
+  try{highlightNeighbors=localStorage.getItem(NEIGHBOR_HIGHLIGHT_KEY)!=='off';}catch{/* Storage may be unavailable. */}
+  highlightToggle.setAttribute('aria-pressed',String(highlightNeighbors));
+  highlightToggle.onclick=()=>{
+    highlightNeighbors=!highlightNeighbors;
+    highlightToggle.setAttribute('aria-pressed',String(highlightNeighbors));
+    try{localStorage.setItem(NEIGHBOR_HIGHLIGHT_KEY,highlightNeighbors?'on':'off');}catch{/* Keep the in-page choice. */}
+    selection();
+  };
   const textMeasure=document.createElement('canvas').getContext('2d');
   const titleLines=(title:string,maxWidth:number)=>{if(textMeasure)textMeasure.font=`600 14px ${getComputedStyle(svg).fontFamily}`;return connectionTitleLines(title,40,textMeasure?text=>textMeasure.measureText(text).width:undefined,maxWidth);};
   let place:Place={mode:source?'graph':'overview',id:source,group:'',q:'',kind:''};
@@ -94,12 +105,29 @@ export async function openConnectionExplorer(env:Env,source='') {
     root.querySelectorAll<HTMLButtonElement>('[data-explore]').forEach(button=>button.onclick=()=>void navigate({mode:'graph',id:button.dataset.explore!,group:'',q:'',kind:''}));
     root.querySelectorAll<HTMLButtonElement>('[data-group]').forEach(button=>button.onclick=()=>void navigate({mode:'graph',id:'',group:button.dataset.group!,q:'',kind:''}));
   }
+  function renderNeighborArea(peers:Set<string>){
+    const layer=query<SVGGElement>('[data-neighbor-area]'),center=points.get(selected);
+    layer.innerHTML='';
+    if(!highlightNeighbors||place.mode==='overview'||!center)return;
+    const neighbors=[...points].filter(([id])=>id!==selected&&id!==ORIGIN_ID&&peers.has(id));
+    if(!neighbors.length)return;
+    const included=[center,...neighbors.map(([,point])=>point)];
+    const xs=included.map(point=>point.x),ys=included.map(point=>point.y);
+    const left=Math.min(...xs)-140,top=Math.min(...ys)-102;
+    const bounds=`x="${left}" y="${top}" width="${Math.max(...xs)-left+140}" height="${Math.max(...ys)-top+102}"`;
+    const halo=(point:{x:number;y:number},fill:string,padding=0)=>`<rect x="${point.x-134-padding}" y="${point.y-92-padding}" width="${268+padding*2}" height="${176+padding*2}" rx="${18+padding}" fill="${fill}"/>`;
+    // A connector band can cross another card. Cut out that card and its surrounding space.
+    const exclusions=[...points].filter(([id])=>id===ORIGIN_ID||!peers.has(id));
+    const bands=neighbors.map(([,point])=>`<path d="M${center.x} ${center.y} L${point.x} ${point.y}" fill="none" stroke="currentColor" stroke-width="32"/>`).join('');
+    layer.innerHTML=`<mask id="connection-neighbor-mask" maskUnits="userSpaceOnUse" ${bounds}><rect ${bounds} fill="white"/>${exclusions.map(([,point])=>halo(point,'black',5)).join('')}</mask><g mask="url(#connection-neighbor-mask)">${bands}${included.map(point=>halo(point,'currentColor')).join('')}</g>`;
+  }
   function selection(){const item=data.items.find(item=>item.id===selected),section=query<HTMLElement>('[data-selection]');
     section.innerHTML=item?`<h3>${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind]||'●'} ${e(typeLabel(item.kind))} · ${item.degree??'—'} ${visibility==='all'?'total':visibility} connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>`:'<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
     wireItems(section);
     const peers=new Set([selected]);for(const link of data.links)if(link.a===selected||link.b===selected){peers.add(link.a);peers.add(link.b);}
     svg.querySelectorAll<SVGGElement>('[data-node]').forEach(node=>{node.classList.toggle('selected',node.dataset.node===selected);node.classList.toggle('dimmed',!!item&&!peers.has(node.dataset.node!));node.setAttribute('aria-pressed',String(node.dataset.node===selected));});
     svg.querySelectorAll<SVGLineElement>('[data-edges] line').forEach(line=>{const related=line.dataset.a===selected||line.dataset.b===selected;line.classList.toggle('highlighted',related);line.classList.toggle('dimmed',!!item&&!related);});
+    renderNeighborArea(peers);
     query<HTMLButtonElement>('[data-center]').disabled=!points.has(selected);
   }
   function select(id:string){const oldIds=[...points.keys()].join();selected=id;

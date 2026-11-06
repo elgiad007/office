@@ -57,6 +57,9 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .connections-view svg { display:block; width:100%; height:100%; }
 .connections-view line { stroke:var(--text); opacity:.22; stroke-width:1.5; vector-effect:non-scaling-stroke; pointer-events:none; }
 .connections-view line.highlighted { stroke:var(--accent); stroke-width:3; opacity:1; }
+.connections-view [data-neighbor-area] { color:var(--accent); opacity:.15; pointer-events:none; }
+.connections-view [data-neighbor-area] rect { stroke:none; }
+.connection-map-tools [data-neighbor-highlight][aria-pressed="true"] { background:var(--wash); border-color:var(--accent); }
 .connections-view .dimmed { opacity:.18; }
 .connections-view [data-node],.connections-view [data-group-node] { cursor:pointer; --node-color:var(--accent); }
 .connections-view [data-kind="mail"] { --node-color:#4d83c5; }
