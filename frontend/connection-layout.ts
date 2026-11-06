@@ -5,8 +5,8 @@ export interface GraphPoint {id:string;x:number;y:number}
 /** Reserve a separate lane for navigation context, outside every actual map card. */
 export function connectionArrivalPoint(points:GraphPoint[],focal:string,width:number,height=Infinity):{x:number;y:number}|undefined {
   const current=points.find(point=>point.id===focal);if(!current)return;
-  const side=width>=640||height!==Infinity&&Math.max(592/width,128/height)<=Math.max(272/width,248/height);
-  return side?{x:Math.min(...points.map(point=>point.x))-320,y:current.y}:{x:current.x,y:Math.min(...points.map(point=>point.y))-136};
+  const side=width>=640||height!==Infinity&&Math.max(600/width,192/height)<=Math.max(280/width,380/height);
+  return side?{x:Math.min(...points.map(point=>point.x))-320,y:current.y}:{x:current.x,y:Math.min(...points.map(point=>point.y))-188};
 }
 export function connectionNeighbor(points:GraphPoint[],id:string,direction:'left'|'right'|'up'|'down',singleRowKeys=false):string|undefined {
   const origin=points.find(point=>point.id===id);if(!origin)return;
@@ -66,7 +66,7 @@ export function connectionLayout(items:ConnectionItem[],links:ConnectionEdge[],c
     // Wrap wide layers into columns so a hub with hundreds of peers remains navigable.
     let column=0;const component:GraphPoint[]=[];
     for(const level of levels){
-      for(let i=0;i<level.length;i++){const row=i%12,col=Math.floor(i/12);component.push({id:level[i],x:(column+col)*270,y:row*76});}
+      for(let i=0;i<level.length;i++){const row=i%12,col=Math.floor(i/12);component.push({id:level[i],x:(column+col)*270,y:row*176});}
       column+=Math.ceil(level.length/12);
     }
     components.push(component);
@@ -74,7 +74,7 @@ export function connectionLayout(items:ConnectionItem[],links:ConnectionEdge[],c
   // Pack disconnected components, including search results, into shelves rather than a tall strip.
   const points:GraphPoint[]=[],shelfWidth=Math.max(1080,...components.map(component=>Math.max(...component.map(p=>p.x))+270));
   let x=0,y=0,rowHeight=0;
-  for(const component of components){const w=Math.max(...component.map(p=>p.x))+270,h=Math.max(...component.map(p=>p.y))+100;
+  for(const component of components){const w=Math.max(...component.map(p=>p.x))+270,h=Math.max(...component.map(p=>p.y))+176;
     if(x+w>shelfWidth){x=0;y+=rowHeight+40;rowHeight=0;}
     points.push(...component.map(p=>({id:p.id,x:p.x+x,y:p.y+y})));x+=w;rowHeight=Math.max(rowHeight,h);
   }

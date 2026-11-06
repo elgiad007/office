@@ -1,3 +1,4 @@
+import {connectionShape} from './connection-shapes.js';
 import {escapeHtml as e} from './formats.js';
 import {itemTypes,type ItemKind} from './item-types.js';
 import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,connectionArrivalPoint,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
@@ -49,13 +50,17 @@ export async function openConnectionExplorer(env:Env,source='') {
   const observer=new MutationObserver(()=>{if(!host.isConnected)cleanup();});observer.observe(dialog,{childList:true});
   const size=()=>{const rect=svg.getBoundingClientRect();width=Math.max(rect.width,1);height=Math.max(rect.height,1);};
   const updateView=()=>{svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);query('[data-zoom-level]').textContent=`${Math.round(width/view.w*100)}%`;};
+  function itemCard(kind:string,title:string,subtitle:string){
+    const shape=connectionShape(kind),lines=titleLines(title,shape.width);
+    return shape.markup+`<text class="connection-node-title">${lines.map((line,i)=>`<tspan x="${shape.x}" y="${shape.y+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="${shape.x}" y="${shape.y+(lines.length-1)*17+17}">${e(subtitle)}</text>`;
+  }
   function fit(){size();const values=[...points.values()];if(!values.length){view={x:-100,y:-100,w:width,h:height};fitWidth=view.w;updateView();return;}
-    const overview=place.mode==='overview',padX=overview?GROUP_CARD.width/2+GROUP_CARD.padding:140,padY=overview?GROUP_CARD.height/2+GROUP_CARD.padding:60;
+    const overview=place.mode==='overview',padX=overview?GROUP_CARD.width/2+GROUP_CARD.padding:140,padY=overview?GROUP_CARD.height/2+GROUP_CARD.padding:104;
     const xs=values.map(p=>p.x),ys=values.map(p=>p.y),x=Math.min(...xs)-padX,y=Math.min(...ys)-padY,w=Math.max(...xs)-x+padX,h=Math.max(...ys)-y+padY;
     const unit=Math.max(w/width,h/height,overview?1:.65);view={x:x+w/2-width*unit/2,y:y+h/2-height*unit/2,w:width*unit,h:height*unit};fitWidth=view.w;updateView();}
   function zoom(factor:number,px=width/2,py=height/2){size();const w=Math.max(width*.25,Math.min(Math.max(fitWidth*4,width*8),view.w*factor)),f=w/view.w;view={x:view.x+px/width*view.w*(1-f),y:view.y+py/height*view.h*(1-f),w,h:view.h*f};updateView();}
   function centerSelection(){const p=points.get(selected);if(p){size();const from=selected===(place.id||place.group)?points.get(ORIGIN_ID):undefined;
-    if(from){const left=Math.min(p.x,from.x)-136,right=Math.max(p.x,from.x)+136,top=Math.min(p.y,from.y)-64,bottom=Math.max(p.y,from.y)+48,unit=Math.max(1,(right-left)/width,(bottom-top)/height);view={x:(left+right)/2-width*unit/2,y:(top+bottom)/2-height*unit/2,w:width*unit,h:height*unit};}
+    if(from){const left=Math.min(p.x,from.x)-140,right=Math.max(p.x,from.x)+140,top=Math.min(p.y,from.y)-104,bottom=Math.max(p.y,from.y)+88,unit=Math.max(1,(right-left)/width,(bottom-top)/height);view={x:(left+right)/2-width*unit/2,y:(top+bottom)/2-height*unit/2,w:width*unit,h:height*unit};}
     else view={x:p.x-width/2,y:p.y-height/2,w:width,h:height};updateView();}}
   const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{if(points.has(ORIGIN_ID)||(oldW>=640)!==(width>=640))renderMap();view.w*=width/oldW;view.h*=height/oldH;updateView();if(points.has(ORIGIN_ID)&&selected===(place.id||place.group))centerSelection();else if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
   const panel=query<HTMLElement>('#connection-panel');
@@ -104,7 +109,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   const mapNodes=()=>[...svg.querySelectorAll<SVGGElement>('[data-node],[data-group-node],[data-origin-node]')];
   const nodeId=(node:SVGGElement)=>node.dataset.node||node.dataset.groupNode||node.dataset.originNode!;
   function reveal(id:string){const p=points.get(id);if(!p)return;
-    const halfW=place.mode==='overview'?GROUP_CARD.width/2:120,halfH=place.mode==='overview'?GROUP_CARD.height/2:id===ORIGIN_ID||id===(place.id||place.group)?60:32;
+    const halfW=place.mode==='overview'?GROUP_CARD.width/2:124,halfH=place.mode==='overview'?GROUP_CARD.height/2:94;
     if(p.x-halfW<view.x||p.x+halfW>view.x+view.w||p.y-halfH<view.y||p.y+halfH>view.y+view.h){view.x=p.x-view.w/2;view.y=p.y-view.h/2;updateView();}
   }
   function focusMap(preferred=focusedId){const nodes=mapNodes(),candidate=nodes.find(node=>nodeId(node)===preferred);
@@ -130,11 +135,11 @@ export async function openConnectionExplorer(env:Env,source='') {
     if(place.mode!=='graph')return;
     const focal=place.id||place.group,current=points.get(focal),from=history[historyIndex].from;
     const focalNode=svg.querySelector<SVGGElement>(`[data-node="${CSS.escape(focal)}"]`);
-    if(focalNode){focalNode.classList.add('connection-focal');focalNode.setAttribute('aria-label','Current focal item. '+focalNode.getAttribute('aria-label'));focalNode.insertAdjacentHTML('beforeend','<text class="connection-context-label" x="-120" y="-44">Current</text>');}
+    if(focalNode){focalNode.classList.add('connection-focal');focalNode.setAttribute('aria-label','Current focal item. '+focalNode.getAttribute('aria-label'));focalNode.insertAdjacentHTML('beforeend','<text class="connection-context-label" x="-122" y="-89">Current</text>');}
     if(!current||!from)return;
     const position=connectionArrivalPoint([...points].map(([id,p])=>({id,...p})),focal,width,height)!;points.set(ORIGIN_ID,position);
-    const horizontal=position.y===current.y,lines=titleLines(from.title,185),description=from.role==='group'?'Group':from.role==='item'?typeLabel(from.kind):'View';
-    layer.innerHTML=`<line class="connection-navigation-line" aria-hidden="true" x1="${position.x+(horizontal?120:0)}" y1="${position.y+(horizontal?0:32)}" x2="${current.x-(horizontal?120:0)}" y2="${current.y-(horizontal?0:32)}"/><g class="connection-origin" data-origin-node="${ORIGIN_ID}" data-kind="${e(from.kind)}" role="button" tabindex="-1" aria-label="From ${e(description)}: ${e(from.title)}. Return to previous view." transform="translate(${position.x} ${position.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-context-label" x="-120" y="-44">From</text><text class="connection-node-symbol" x="-105" y="5">${symbols[from.kind]||'↶'}</text><text class="connection-node-title">${lines.map((line,i)=>`<tspan x="-81" y="${-12+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(description)} · Return</text><title>${e('From '+description+': '+from.title+' — Return to previous view')}</title></g>`;
+    const description=from.role==='group'?'Group':from.role==='item'?typeLabel(from.kind):'View';
+    layer.innerHTML=`<line class="connection-navigation-line" aria-hidden="true" x1="${position.x}" y1="${position.y}" x2="${current.x}" y2="${current.y}"/><g class="connection-origin" data-origin-node="${ORIGIN_ID}" data-kind="${e(from.kind)}" role="button" tabindex="-1" aria-label="From ${e(description)}: ${e(from.title)}. Return to previous view." transform="translate(${position.x} ${position.y})"><text class="connection-context-label" x="-122" y="-89">From</text>${itemCard(from.role==='item'?from.kind:'',from.title,description+' · Return')}<title>${e('From '+description+': '+from.title+' — Return to previous view')}</title></g>`;
     query('[data-map-note]').textContent+=' Dashed line shows your navigation path.';
   }
   function renderMap(){
@@ -150,7 +155,7 @@ export async function openConnectionExplorer(env:Env,source='') {
       const related=eligible.filter(link=>link.a===selected||link.b===selected),others=eligible.filter(link=>link.a!==selected&&link.b!==selected);
       const edges=[...related,...others].slice(0,500);
       query('[data-edges]').innerHTML=edges.map(link=>{const a=points.get(link.a)!,b=points.get(link.b)!;return `<line class="${link.archived?'connection-archived-edge':''}" data-a="${e(link.a)}" data-b="${e(link.b)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;}).join('');
-      query('[data-nodes]').innerHTML=visible.map(item=>{const p=points.get(item.id)!,lines=titleLines(item.title,185);return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})"><rect x="-120" y="-32" width="240" height="64" rx="8"/><text class="connection-node-symbol" x="-105" y="5">${symbols[item.kind]||'●'}</text><text class="connection-node-title">${lines.map((line,i)=>`<tspan x="-81" y="${-12+i*17}">${e(line)}</tspan>`).join('')}</text><text class="connection-node-subtitle" x="-81" y="23">${e(typeLabel(item.kind))} · ${item.degree??'—'} ${visibility==='archived'?'archived links':'links'}</text><title>${e(typeLabel(item.kind)+' · '+item.title)}</title></g>`;}).join('');
+      query('[data-nodes]').innerHTML=visible.map(item=>{const p=points.get(item.id)!;return `<g role="button" tabindex="0" data-node="${e(item.id)}" data-kind="${e(item.kind)}" aria-label="Select ${e(typeLabel(item.kind))}: ${e(item.title)}" aria-pressed="false" transform="translate(${p.x} ${p.y})">${itemCard(item.kind,item.title,`${typeLabel(item.kind)} · ${item.degree??'—'} ${visibility==='archived'?'archived links':'links'}`)}<title>${e(typeLabel(item.kind)+' · '+item.title)}</title></g>`;}).join('');
       query('[data-map-note]').textContent=`Map: ${visible.length} of ${data.items.length} loaded items · ${edges.length} of ${data.links.length} loaded connections drawn. ${data.items.length>GRAPH_LIMIT||eligible.length>500?`Map limited to ${GRAPH_LIMIT} items and 500 lines; select from the list or explore a smaller neighborhood. `:''}Drag to pan · Wheel/pinch to zoom · Select to highlight.`;
     }
     renderArrival();selection();
