@@ -20,7 +20,7 @@ export async function testDraftFolders(page,url) {
       records=records.filter(r=>r.id!==input.id);json={ok:true};
     }else if(action==='send'){
       if(failSend)return route.fulfill({status:500,json:{error:'Fixture send failed'}});
-      const record=records.find(r=>r.id===input.id);record.meta.folder='Sent';record.revision++;json={ok:true};
+      const record=records.find(r=>r.id===input.id);record.meta.folder='Sent';record.revision++;json={ok:true,record};
     }else if(action==='mail-files'&&input.action==='forward'){
       const record={...message('forward-'+(++sequence),'Drafts'),title:'Forwarded fixture',meta:{folder:'Drafts',sendAccount:'folder-a'}};
       records.push(record);json={record,attachments:[]};

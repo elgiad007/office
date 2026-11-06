@@ -49,6 +49,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .connection-opening-spinner { display:inline-block; width:28px; height:28px; border:3px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:connection-opening-spin .8s linear infinite; }
 @keyframes connection-opening-spin { to { transform:rotate(360deg); } }
 @media(prefers-reduced-motion:reduce) { .connection-opening-spinner { animation:none; } }
+.mail-send-progress .connection-opening-spinner { margin:0 auto 16px; }
 .connection-location { font-weight:600; }
 .connection-workspace { display:flex; flex:1; min-height:0; gap:16px; }
 .connection-map-pane { display:flex; flex-direction:column; gap:8px; flex:1; min-width:0; min-height:0; }

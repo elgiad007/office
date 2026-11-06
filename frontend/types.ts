@@ -122,7 +122,7 @@ export interface ApiResponses {
   'mail-undo': MutationResult;
   'mail-junk-settings': {rules: {type: 'sender' | 'domain'; target: string}[]; folder: string};
   'mail-empty-junk': {authorize: true} | {count: number; name: string; token: string} | {deleted: number; skipped: number; unconfirmed: number; warning?: string};
-  send: { ok: boolean };
+  send: { ok: boolean; record: OfficeRecord };
   'mail-folders': { folders: MailFolder[] };
   'mail-folder-manage': { folders: MailFolder[] };
   'mail-folder-sync': { count: number; more?: boolean };

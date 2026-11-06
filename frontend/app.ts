@@ -2,7 +2,7 @@ import {openHelp} from './help.js';
 import {createKeyboardScroller, vimScrollDirection, type ScrollDirection} from './keyboard-scroll.js';
 import {CommandError,resolveCommand} from './commands.js';
 import {createConnections} from './connections.js';
-import {asError,isPresent,showProgressDialog} from './utils.js';
+import {asError,isPresent} from './utils.js';
 import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, ConnectionDeletionChoices, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences} from './types.js';
 
 interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; removedIds?: string[]; error?: string; code?: string; connectionCounts?: Record<string,number>}
@@ -65,6 +65,12 @@ function returnFromMailDraft(id: string) {
 let saveTimer: ReturnType<typeof setTimeout>, keySequence='', sequenceTime=0;
 let selectionAnchor: string | null=null,keyboardSelection=false;
 let sendingMail=false;
+let pendingSend: OfficeRecord | null=null;
+const isPendingSend=(id: string | undefined)=>!!pendingSend&&pendingSend.id===id;
+const viewingPendingSend=()=>state.app==='mail'&&isPendingSend(state.current?.id);
+function renderSendStatus() {
+  document.querySelector<HTMLElement>('#mail-send-status')!.hidden=!pendingSend||viewingPendingSend();
+}
 const pendingMailDeletes=new Set<string>();
 interface MailDeleteGesture {receipts: {token: string; account?: string; id: string; postId?: string}[]; done: Promise<void>; finish: () => void; currentId?: string; nextId?: string; context: string}
 let lastMailDelete: MailDeleteGesture | undefined,undoingMailDelete=false;
@@ -266,7 +272,7 @@ async function api<R extends ApiRoute>(route: R, data?: ApiData): Promise<ApiRes
   }
   const account=route==='mail-undo'?payload?.account:['mail-action','mail-files'].includes(route)?expected?.meta.account||latestMail(payload?.id)?.meta.account
     :route==='sync'?payload?.id:['mail-content','mail-folder-sync','mail-folders','mail-folder-manage'].includes(route)?payload?.account:null;
-  const names: Partial<Record<ApiRoute, string>>={'mail-undo':'Undoing mail deletion','mail-action':({trash:'Moving mail to Trash',archive:'Archiving mail',restore:'Restoring mail to Inbox',read:'Marking mail read',unread:'Marking mail unread',move:'Moving mail',discard:'Discarding cached copy','keep-local':'Saving local copy'})[payload?.action||'']||'Updating mail',sync:'Synchronizing mail','mail-folders':'Discovering folders','mail-folder-sync':'Refreshing folder','mail-folder-manage':'Updating folders','account-test':'Testing connection',save:'Saving item',delete:'Deleting item',send:'Sending mail',backup:'Preparing backup',restore:'Restoring backup',import:'Importing items','import-items':'Importing items'};
+  const names: Partial<Record<ApiRoute, string>>={'mail-undo':'Undoing mail deletion','mail-action':({trash:'Moving mail to Trash',archive:'Archiving mail',restore:'Restoring mail to Inbox',read:'Marking mail read',unread:'Marking mail unread',move:'Moving mail',discard:'Discarding cached copy','keep-local':'Saving local copy'})[payload?.action||'']||'Updating mail',sync:'Synchronizing mail','mail-folders':'Discovering folders','mail-folder-sync':'Refreshing folder','mail-folder-manage':'Updating folders','account-test':'Testing connection',save:'Saving item',delete:'Deleting item',backup:'Preparing backup',restore:'Restoring backup',import:'Importing items','import-items':'Importing items'};
   const label=state.accounts.find(row=>row.id===account)?.label;
   const tracking=activity.queued(names[route]?(label?label+': ':'')+names[route]+'…':null);
   const run=async()=>{
@@ -350,6 +356,7 @@ function searchableText(record: OfficeRecord) {
   return (record.title+' '+record.body+' '+JSON.stringify(meta)).toLocaleLowerCase();
 }
 function inMailView(record: OfficeRecord) {
+  if(isPendingSend(record.id))return false;
   const folder=record.meta.folder||'Archive';
   if(state.mailScope)return matchesMailScope(record,state.mailScope,state.accounts);
   if(state.mailFolder==='all')return !['Recovery copies','Not in Inbox','Trash','Junk'].includes(folder);
@@ -509,6 +516,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   return snapshot;
 }
 async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,keepSidebar=false}={},initialRecords?: OfficeRecord[]) {
+  renderSendStatus();
   await waitForAttachments();
   // A background refresh must never replace an in-memory draft.
   if(isUnsavedDraft() || (preserveSelection && state.dirty))return;
@@ -741,9 +749,15 @@ async function hydrateMailBody(record: OfficeRecord,manual=false) {
 }
 let displayedMailBody: string | undefined;
 function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
+  renderSendStatus();
   const scrollingPanel=document.querySelector<HTMLElement>('#detail');
   if(scrollingPanel)keyboardScrollers.get(scrollingPanel)?.cancel();
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
+  if(viewingPendingSend()){
+    panel.classList.remove('mail-reader');
+    if(!panel.querySelector('.mail-send-progress'))panel.innerHTML='<div class="empty mail-send-progress" role="status" tabindex="-1"><span class="connection-opening-spinner" aria-hidden="true"></span><h2>Sending message…</h2><p>You can keep working while Office sends this message.</p></div>';
+    return;
+  }
   if(state.app==='calendar'){panel.hidden=!r;if(!r){panel.innerHTML='';return;}}
   const contentFocused=!!r&&document.activeElement===contentEntry();
   const openedMail=state.app==='mail'&&r?r.id:null, newlyOpened=openedMail!==displayedMailId;
@@ -1182,7 +1196,7 @@ async function sendMail() {
   const form=document.querySelector<HTMLFormElement>('#record-form')!;
   if(!form||!form.reportValidity())return;
   sendingMail=true;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,true);
-  let closeProgress: (()=>void)|undefined,returnedToFolder=false;
+  let accepted=false;
   try{
     await waitForAttachments();
     if(state.app!=='mail'||state.current!==record)return;
@@ -1201,20 +1215,32 @@ async function sendMail() {
       if(!confirmed)return;
     }
     if(state.app!=='mail'||state.current!==record)return;
-    closeProgress=showProgressDialog('mail-sending','Sending message…','Waiting for the mail provider to accept your message.');
+    pendingSend=record;
+    state.selected.delete(record.id);
+    renderList();renderDetail();setMode('normal');
+    document.querySelector<HTMLElement>('.mail-send-progress')?.focus({preventScroll:true});
     await commit(true);
-    if(state.app!=='mail'||state.current!==record)return;
     try{
-      await api('send',{id:record.id,revision:record.revision,account:record.meta.sendAccount});
-      if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise){returnFromMailDraft(record.id);returnedToFolder=true;await load(state.current?.id);}
-      else mailDraftOrigins.delete(record.id);
-    }finally{
-      if(state.app==='mail'&&state.current?.id===record.id&&!state.dirty&&!state.savePromise)await load();
+      const result=await api('send',{id:record.id,revision:record.revision,account:record.meta.sendAccount});
+      mailReadVersion++;refreshMailRecord(result.record);
+      accepted=true;
+    }catch(cause){
+      const error=asError(cause);
+      // Reconcile the draft when a connection drops before a result arrives.
+      const latest=error.record??(error.status===undefined?await api(`record&id=${encodeURIComponent(record.id)}`).then(result=>result.record,()=>undefined):undefined);
+      if(latest){mailReadVersion++;refreshMailRecord(latest);}
+      throw error;
     }
   }finally{
-    closeProgress?.();
-    if(returnedToFolder)focusList();
+    const stayed=viewingPendingSend(),started=!!pendingSend;
+    pendingSend=null;renderSendStatus();
     sendingMail=false;busyButton(document.querySelector<HTMLButtonElement>('#detail [data-action="send"]')!,false);
+    if(stayed&&accepted)returnFromMailDraft(record.id);
+    else if(started&&state.app==='mail'&&document.querySelector('#detail[aria-label="Selected message"]')){
+      renderList();
+      if(stayed){const focused=document.activeElement?.matches('.mail-send-progress');renderDetail();if(focused)focusContent();}
+    }
+    if(accepted)mailDraftOrigins.delete(record.id);
   }
   notice('Message accepted by the provider.');
 }
@@ -1223,7 +1249,7 @@ async function deleteSelectedMail() {
   if(isUnsavedDraft()){document.querySelector<HTMLButtonElement>('#detail [data-action="delete"]')?.click();return;}
   await commit();
   const visible=filteredRows();
-  const rows=state.selected.size?visible.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
+  const rows=state.selected.size?visible.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent).filter(r=>!isPendingSend(r.id));
   if(!rows.length)return;
   const protectedMail=(r: OfficeRecord)=>r.meta.remote&&['Trash','Recovery copies','Not in Inbox'].includes(r.meta.folder||'');
   if(rows.some(protectedMail)){
@@ -1243,7 +1269,8 @@ async function deleteSelectedMail() {
   await connections.confirmDeletion(rows,singleDraft?'Discard Draft':local?(rows.length===1?'Delete item':'Delete selected messages'):'Move to Trash',singleDraft?'Discard this saved draft? Undo is available for fifteen minutes.':`Delete ${local} local message(s)${local<rows.length?` and move ${rows.length-local} provider message(s) to Trash`:''}? Undo is available for fifteen minutes.`,apply,!local);
 }
 async function archiveLocal() {
-  if(state.app!=='mail')return;await commit();const ids=state.selected.size?[...state.selected]:[state.current?.id].filter(isPresent);let count=0;
+  if(state.app!=='mail')return;await commit();const ids=(state.selected.size?[...state.selected]:[state.current?.id].filter(isPresent)).filter(id=>!isPendingSend(id));let count=0;
+  if(!ids.length)return;
   const rows=ids.map(id=>state.rows.find(r=>r.id===id)).filter(isPresent);
   if(rows.length && rows.every(r=>r.meta.remote && r.meta.folder!=='Archive')){
     await deleteMailImmediately(rows,r=>api('mail-action',{id:r.id,revision:r.revision,action:'archive'}));

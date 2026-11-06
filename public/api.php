@@ -326,8 +326,10 @@ try {
         if (!filter_var($r['meta']['to']??'',FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/',$r['title']) || strlen($r['body'])>1000000) fail('Use one valid recipient, a one-line subject and a plain-text message up to 1 MB.');
         // Persist an uncertain state before networking; a dropped response must not trigger an automatic resend.
         $r['meta']['folder']='Sending'; $r=save_record($r);
-        try { $raw=send_mail($a,(string)($r['meta']['to']??''),$r['title'],$r['body'],attachment_draft_files($r)); $r['meta']['folder']='Sent'; $r['meta']['filePartsLocal']=true; $r['meta']['hasHtml']=false; $r['meta']['sentAt']=gmdate('c'); $r['meta']['from']=$a['config']['email']; $r['meta']['rawBase64']=base64_encode($raw); $r['meta']['read']=true; save_record($r); json_response(['ok'=>true]); }
-        catch(Throwable $e) { $r['meta']['folder']='Delivery uncertain'; save_record($r); fail($e->getMessage().' Check the recipient/provider before creating another send attempt.'); }
+        session_write_close();
+        try { $raw=send_mail($a,(string)($r['meta']['to']??''),$r['title'],$r['body'],attachment_draft_files($r)); $r['meta']['folder']='Sent'; $r['meta']['filePartsLocal']=true; $r['meta']['hasHtml']=false; $r['meta']['sentAt']=gmdate('c'); $r['meta']['from']=$a['config']['email']; $r['meta']['rawBase64']=base64_encode($raw); $r['meta']['read']=true; $r=save_record($r); }
+        catch(Throwable $e) { $r['meta']['folder']='Delivery uncertain'; $r=save_record($r); json_response(['error'=>$e->getMessage().' Check the recipient/provider before creating another send attempt.','record'=>mail_list_record($r)],400); }
+        json_response(['ok'=>true,'record'=>mail_list_record($r)]);
     }
     if ($route==='mail-action' && $method==='POST') {
         $r=get_record((string)($input['id']??'')); if ((int)($input['revision']??0)!==$r['revision'])json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$r],409);
