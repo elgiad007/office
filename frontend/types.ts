@@ -161,6 +161,7 @@ export type ConfirmDeletion = (rows: OfficeRecord[],title: string,message: strin
 export type DeleteResult = {ok?: boolean; record?: OfficeRecord | null; removedIds?: string[]; undoToken?: string};
 export type DeleteMail = (rows: OfficeRecord[], operation: (row: OfficeRecord) => Promise<DeleteResult>, undoable?: boolean) => Promise<void>;
 export interface FolderEnvironment {
+  captureSidebarFocus?: () => () => void;
   state: AppState; api: RequestApi; commit: () => Promise<void>; load: (preferId?: string, options?: {preserveSelection?: boolean}) => Promise<void>;
   notice: (text: string, error?: boolean) => void; modal: (title: string, body: string) => void;
   dialog: HTMLDialogElement; e: (value: unknown) => string;

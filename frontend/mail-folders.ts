@@ -9,9 +9,10 @@ export function matchesMailScope(row: OfficeRecord,scope: MailScope,accounts: Ac
 async function busy<T>(env: FolderEnvironment,run: () => Promise<T>): Promise<T> {
   if(env.state.syncing)throw Error('Wait for the current mail operation to finish.');
   env.state.syncing=true;
+  const restoreSidebar=env.captureSidebarFocus?.();
   const buttons=[...document.querySelectorAll<HTMLButtonElement>('#sync-button, #folder-refresh, #folder-more, [data-open-folder], [data-refresh-folders], [data-manage-folder]')].map(button=>[button,button.disabled] as const);
   buttons.forEach(([button])=>button.disabled=true);
-  try {return await run();} finally {env.state.syncing=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);}
+  try {return await run();} finally {env.state.syncing=false;buttons.forEach(([button,disabled])=>button.disabled=disabled);restoreSidebar?.();}
 }
 async function reloadMail(env: FolderEnvironment,preserveSelection=false) {
   // A request may finish after the owner has opened an editor in another app.
@@ -37,7 +38,7 @@ function tree(folders: MailFolder[],e: (value: unknown) => string,account: strin
   }
   return [...nodes.values()].map(n=>{
     const button=n.folder?`<button class="folder-link" data-open-folder="${e(n.folder.id)}" data-folder-account="${e(account)}">${e(n.name)}</button>`:`<span>${e(n.name)}</span>`;
-    return n.children.length?`<details open><summary>${button}</summary><div class="folder-children">${tree(n.children,e,account,n.key,depth+1)}</div></details>`:button;
+    return n.children.length?`<details open data-folder-path="${e(n.key)}" data-folder-account="${e(account)}"><summary>${button}</summary><div class="folder-children">${tree(n.children,e,account,n.key,depth+1)}</div></details>`:button;
   }).join('');
 }
 export function renderMailFolders(env: FolderEnvironment) {

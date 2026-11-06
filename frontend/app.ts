@@ -329,7 +329,9 @@ function setMailFolderPanel(open: boolean) {
   document.querySelector<HTMLElement>('.shell')!?.classList.toggle('folders-open',open);
   document.querySelector<HTMLElement>('#mail-folders-toggle')!?.setAttribute('aria-expanded',String(open));
 }
-function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,closeFolderPanel:()=>setMailFolderPanel(false)}; }
+function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,captureSidebarFocus,closeFolderPanel:()=>{
+  const restoreSidebar=captureSidebarFocus();setMailFolderPanel(false);restoreSidebar();
+}}; }
 function mailLocation(record: OfficeRecord) {
   const m=record.meta, account=state.accounts.find(a=>a.id===m.account);
   if(!m.remote || ['Recovery copies','Not in Inbox'].includes(m.folder||''))return m.folder||'';
@@ -499,7 +501,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   }
   return snapshot;
 }
-async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false}={},initialRecords?: OfficeRecord[]) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,keepSidebar=false}={},initialRecords?: OfficeRecord[]) {
   await waitForAttachments();
   // A background refresh must never replace an in-memory draft.
   if(isUnsavedDraft() || (preserveSelection && state.dirty))return;
@@ -571,11 +573,13 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
     }
   }
   const reuseWorkspace=preserveSelection&&state.app==='mail'&&!!readerSnapshot&&!!document.querySelector('#detail.mail-reader');
+  const restoreSidebar=captureSidebarFocus();
   if(reuseWorkspace){document.querySelectorAll('#mail-folder-navigation .account-folders,.search-wrap .folder-current').forEach(node=>node.remove());renderMailFolders(mailFolderEnv());renderList();renderDetail(readerSnapshot);}else renderWorkspace(readerSnapshot);
+  restoreSidebar();
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
   restoreMailListViewport(listViewport);
   if(contentFocused&&!document.activeElement?.closest('#detail'))restorePane('content');
-  if(enteringApp){setMode('normal');focusList();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}
+  if(enteringApp){setMode('normal');if(!keepSidebar)focusList();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}
 }
 function renderAppHeader() {
   const toolbar=document.querySelector<HTMLElement>('#app-toolbar')!;
@@ -600,14 +604,14 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
     folderNavigation.innerHTML='<div class="mail-folder-panel-head"><strong>Mail folders</strong><button data-action="close-mail-folders" aria-label="Close mail folders">✕</button></div>';
     folderNavigation.insertAdjacentHTML('beforeend',`<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox','Drafts','Sent','Archive','Junk','Local Junk','Suspected Junk','Trash','Local mail','Recovery copies','Sending','Delivery uncertain'].map(folder=>`<option ${state.mailFolder===folder?'selected':''}>${folder}</option>`).join('')}</select>`);
     document.querySelector<HTMLSelectElement>('#mail-folder')!.onchange=event=>void attempt(async()=>{
-      const select=(event.target as HTMLSelectElement), folder=select.value; select.disabled=true;
+      const select=(event.target as HTMLSelectElement), folder=select.value, restoreSidebar=captureSidebarFocus(); select.disabled=true;
       try {
         await leaveEditor();
         state.mailFolder=folder; state.mailScope=null;mailListLimit=100; state.current=navigableRows()[0]||null; state.selected.clear(); selectionAnchor=null;keyboardSelection=false;setMode('normal');
         if(state.current?.meta.folder==='Drafts')mailDraftOrigins.set(state.current.id,mailDraftOrigin(false));
         renderWorkspace();
         if(matchMedia('(max-width: 800px)').matches)setMailFolderPanel(false);
-      } finally { select.value=state.mailFolder; select.disabled=false; }
+      } finally { select.value=state.mailFolder; select.disabled=false; restoreSidebar(); }
     });
     if(state.mailScope){const select=document.querySelector<HTMLSelectElement>('#mail-folder')!;select.insertAdjacentHTML('afterbegin','<option value="account-folder">Selected account folder</option>');select.value='account-folder';}
     renderMailFolders(mailFolderEnv());
@@ -928,7 +932,7 @@ async function openConnectedRecord(id:string){
   focusList();
   document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
 }
-async function changeApp(name: AppName) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(undefined,{enteringApp:true}); }
+async function changeApp(name: AppName,keepSidebar=false) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if(name==='mail'&&state.app!=='mail'){state.mailFolder='Inbox';state.mailScope=null;} state.app=name; state.current=null; state.search=''; state.sheet=0; state.cell='A1'; state.mode='normal'; location.hash=name; await load(undefined,{enteringApp:true,keepSidebar}); }
 function updateMailListItem(id: string) {
   const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
   if(!row||!button)return;
@@ -1103,7 +1107,7 @@ async function handleClick(event: MouseEvent) {
   if((event.target as HTMLElement).closest('#mail-actions-menu button')&&mailMenu)mailMenu.open=false;
   const button=(event.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button)return;
   await attempt(async()=>{
-    if(button.dataset.app!){await changeApp(button.dataset.app! as AppName);return;}
+    if(button.dataset.app!){await changeApp(button.dataset.app! as AppName,event.detail===0&&document.activeElement===button);return;}
     if(button.dataset.id!){await clickRecord(button.dataset.id!,event);return;}
     if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
@@ -1117,7 +1121,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='help')help();
     if(action==='sync')await syncAccounts();
     if(action==='file-mail')await fileMail(mailFolderEnv());
-    if(action.startsWith('mail-junk-')&&state.current)await itemMenus.run(action.slice('mail-junk-'.length),[state.current.id],'mail');
+    if(action?.startsWith('mail-junk-')&&state.current)await itemMenus.run(action.slice('mail-junk-'.length),[state.current.id],'mail');
     if(action==='trash-mail')await deleteSelectedMail();
     if(action==='restore-mail')await mailAction('restore');
     if(action==='keep-local')await mailAction('keep-local');
@@ -1398,6 +1402,54 @@ function focusList() {
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
+let lastSidebarEntry='';
+function sidebarEntries() {
+  return [...document.querySelectorAll<HTMLElement>('.sidebar :is(button,summary,select):not(:disabled)')].filter(node=>{
+    if(!node.getClientRects().length||getComputedStyle(node).visibility!=='visible')return false;
+    for(const group of document.querySelectorAll('.sidebar details:not([open])')){
+      if(group.contains(node)&&!group.querySelector(':scope > summary')?.contains(node))return false;
+    }
+    return !node.closest('[popover]:not(:popover-open)');
+  });
+}
+function sidebarEntrySelector(entry: HTMLElement) {
+  const owner=entry.matches('summary')?entry.parentElement!:entry;
+  if(owner.id)return '#'+CSS.escape(owner.id);
+  const attributes=owner.getAttributeNames().filter(name=>name.startsWith('data-'));
+  return attributes.length?owner.localName+attributes.map(name=>'['+name+'="'+CSS.escape(owner.getAttribute(name)!)+'"]').join('')+(owner!==entry?' > summary':''):'';
+}
+function focusSidebar(selector=lastSidebarEntry) {
+  const entries=sidebarEntries();
+  const entry=(selector&&entries.find(node=>node.matches(selector)))||
+    (selector&&entries.find(node=>node.id==='mail-folders-toggle'))||
+    entries.find(node=>node.matches('[data-app][aria-current="page"]'))||entries[0];
+  if(entry){entry.focus({preventScroll:true});entry.scrollIntoView({block:'nearest',inline:'nearest'});}
+}
+function captureSidebarFocus() {
+  const entry=document.activeElement?.closest<HTMLElement>('.sidebar :is(button,summary,select)');
+  const selector=entry&&sidebarEntrySelector(entry);
+  return ()=>{
+    if(!selector)return;
+    if(document.activeElement===document.body||document.activeElement===entry&&!sidebarEntries().includes(entry))focusSidebar(selector);
+  };
+}
+function handleSidebarKey(event: KeyboardEvent,target: HTMLElement) {
+  if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
+  const k=keys(), key=event.key;
+  if(key===k.left||key===k.right){
+    event.preventDefault();
+    if(key===k.right)focusList();
+    return;
+  }
+  if(key===k.help){event.preventDefault();if(!event.repeat)help();return;}
+  const next=key===k.down||key==='ArrowDown', previous=key===k.up||key==='ArrowUp';
+  if(!next&&!previous)return;
+  if(target.matches('select')&&key.startsWith('Arrow'))return;
+  event.preventDefault();
+  const entries=sidebarEntries(), index=entries.indexOf(target);
+  const entry=entries[Math.max(0,Math.min(entries.length-1,index+(next?1:-1)))];
+  if(entry){entry.focus({preventScroll:true});entry.scrollIntoView({block:'nearest',inline:'nearest'});}
+}
 const keyboardScrollers=new WeakMap<HTMLElement,ReturnType<typeof createKeyboardScroller>>();
 function scrollMailBody(target: HTMLElement,direction: ScrollDirection) {
   const frame=target.closest<HTMLIFrameElement>('.mail-html');
@@ -1423,7 +1475,12 @@ function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
 }
 let lastPane: 'content'|'list'='list';
 function activePane(): 'content'|'list' {const node=document.activeElement;if(node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
-document.addEventListener('focusin',event=>{const node=event.target as HTMLElement;if(node.closest('#detail'))lastPane='content';else if(node.closest('#items'))lastPane='list';});
+document.addEventListener('focusin',event=>{
+  const node=event.target as HTMLElement;
+  if(node.closest('#detail'))lastPane='content';
+  else if(node.closest('#items,#main'))lastPane='list';
+  else if(node.closest('.sidebar')){lastSidebarEntry=sidebarEntrySelector(node);keySequence='';setMode('normal');}
+});
 function restorePane(pane: 'content'|'list') {
   if(pane==='content'){if(state.current)focusContent();else{const panel=document.querySelector<HTMLElement>(state.app==='calendar'?'#items':'#detail');if(panel){panel.tabIndex=-1;panel.focus({preventScroll:true});}}}
   else focusList();
@@ -1437,18 +1494,22 @@ document.addEventListener('keydown',event=>{
   if(event.key==='Escape'&&mailMenu?.open){mailMenu.open=false;mailMenu.querySelector<HTMLElement>('summary')!.focus();event.preventDefault();return;}
   if((event.target as HTMLElement).closest('#mail-actions-menu'))return;
   if((event.target as HTMLElement).closest('[data-mail-disclosure]'))return;
+  const target=event.target as HTMLElement;
+  if(event.key==='Escape'&&document.querySelector<HTMLElement>('.shell')!?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();event.preventDefault();return;}
+  const inSidebar=!!target.closest('.sidebar');
+  if(inSidebar&&event.key!==':'&&event.key!=='g'&&!(keySequence==='g'&&/^[1-7]$/.test(event.key))){
+    keySequence='';handleSidebarKey(event,target);return;
+  }
   if(event.key==='Enter'&&event.ctrlKey&&!event.altKey&&!event.metaKey&&!event.shiftKey&&!event.isComposing&&state.app==='mail'&&state.current?.meta.folder==='Drafts'&&!state.current!.meta.remote){
     event.preventDefault();if(!event.repeat)void attempt(sendMail);return;
   }
-  if(event.key==='Escape'&&document.querySelector<HTMLElement>('.shell')!?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();event.preventDefault();return;}
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(()=>commit(true));return;}
   if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
-  if(editable((event.target as HTMLElement))){setMode('insert');return;}
+  if(editable(target)&&!inSidebar){setMode('insert');return;}
   const vimDirection=vimScrollDirection(event);
   if(vimDirection){if(scrollFocusedPane(event.target as HTMLElement,vimDirection)!==false){event.preventDefault();keySequence='';}return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
   if((event.target as HTMLElement).closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
-  const target=event.target as HTMLElement;
   if(event.key==='Tab'&& !event.shiftKey && (target.matches('#selected-item')||state.current&&target.id==='items')){event.preventDefault();keySequence='';focusContent();return;}
   if(event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';focusList();return;}
   if(event.key===':'&&!event.isComposing&&state.mode==='normal'){event.preventDefault();if(!event.repeat)openCommand();return;}
@@ -1457,7 +1518,7 @@ document.addEventListener('keydown',event=>{
   if(Date.now()-sequenceTime>900)keySequence='';sequenceTime=Date.now();
   if(event.repeat&&key==='g'){event.preventDefault();return;}
   if(keySequence==='g'&&/^[1-7]$/.test(key)){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
-  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(mailBody){scrollMailBody(target,'start');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
+  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inSidebar){focusSidebar('');return;}if(mailBody){scrollMailBody(target,'start');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
   const listArrow=activePane()==='list'?(key==='ArrowUp'||key==='ArrowLeft'?'up':key==='ArrowDown'||key==='ArrowRight'?'down':undefined):undefined;
   const action=listArrow||Object.keys(k).find(action=>k[action]===key);
@@ -1467,6 +1528,8 @@ document.addEventListener('keydown',event=>{
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}
+  if(action==='left'){event.preventDefault();if(state.app!=='settings'&&activePane()==='content')focusList();else focusSidebar();return;}
+  if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
   if(state.app==='settings')return;
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
   if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
@@ -1488,11 +1551,9 @@ document.addEventListener('keydown',event=>{
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector<HTMLButtonElement>('[data-action=reply]')!?.click();return;}
   if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);const pane=activePane();renderList();restorePane(pane);return;}
   if(state.app==='sheets'&&state.current&&target.closest<HTMLElement>('[data-cell]')&&(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key==='ArrowRight'||key==='Tab')c++;else if(key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
-  if(action==='left'){event.preventDefault();focusList();return;}
-  if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=navigableRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
 });
-document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view')&&target.id!=='command-input'&&editable(target))setMode('insert');});
+document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view,.sidebar')&&target.id!=='command-input'&&editable(target))setMode('insert');});
 document.addEventListener('pointerdown',()=>state.lastActivity=Date.now(),{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});
 window.addEventListener('beforeunload',event=>{if(state.dirty||state.savePromise){event.preventDefault();event.returnValue='';}});

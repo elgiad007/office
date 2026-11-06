@@ -11,6 +11,7 @@ async function busy(env, run) {
     if (env.state.syncing)
         throw Error('Wait for the current mail operation to finish.');
     env.state.syncing = true;
+    const restoreSidebar = env.captureSidebarFocus?.();
     const buttons = [...document.querySelectorAll('#sync-button, #folder-refresh, #folder-more, [data-open-folder], [data-refresh-folders], [data-manage-folder]')].map(button => [button, button.disabled]);
     buttons.forEach(([button]) => button.disabled = true);
     try {
@@ -19,6 +20,7 @@ async function busy(env, run) {
     finally {
         env.state.syncing = false;
         buttons.forEach(([button, disabled]) => button.disabled = disabled);
+        restoreSidebar?.();
     }
 }
 async function reloadMail(env, preserveSelection = false) {
@@ -61,7 +63,7 @@ function tree(folders, e, account, path = '', depth = 0) {
     }
     return [...nodes.values()].map(n => {
         const button = n.folder ? `<button class="folder-link" data-open-folder="${e(n.folder.id)}" data-folder-account="${e(account)}">${e(n.name)}</button>` : `<span>${e(n.name)}</span>`;
-        return n.children.length ? `<details open><summary>${button}</summary><div class="folder-children">${tree(n.children, e, account, n.key, depth + 1)}</div></details>` : button;
+        return n.children.length ? `<details open data-folder-path="${e(n.key)}" data-folder-account="${e(account)}"><summary>${button}</summary><div class="folder-children">${tree(n.children, e, account, n.key, depth + 1)}</div></details>` : button;
     }).join('');
 }
 export function renderMailFolders(env) {

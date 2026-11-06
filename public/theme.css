@@ -174,6 +174,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .folder-account summary { cursor: pointer; padding: 5px 0; overflow-wrap: anywhere; }
 .folder-link { display: block; text-align: left; width: 100%; padding: 6px 9px; font-size: 12px; border: 0; background: transparent; overflow-wrap: anywhere; }
 .folder-link:hover, .folder-link:focus-visible { background: var(--wash); }
+.sidebar :is(button, summary, select):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .folder-link[aria-current="location"] { background: var(--wash); font-weight: 650; }
 .folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
 /* Keep the current item identifiable when focus moves into its content. */

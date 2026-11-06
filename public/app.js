@@ -491,7 +491,13 @@ function setMailFolderPanel(open) {
     document.querySelector('.shell')?.classList.toggle('folders-open', open);
     document.querySelector('#mail-folders-toggle')?.setAttribute('aria-expanded', String(open));
 }
-function mailFolderEnv() { return { state, api, commit: leaveEditor, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, closeFolderPanel: () => setMailFolderPanel(false) }; }
+function mailFolderEnv() {
+    return { state, api, commit: leaveEditor, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, captureSidebarFocus, closeFolderPanel: () => {
+            const restoreSidebar = captureSidebarFocus();
+            setMailFolderPanel(false);
+            restoreSidebar();
+        } };
+}
 function mailLocation(record) {
     const m = record.meta, account = state.accounts.find(a => a.id === m.account);
     if (!m.remote || ['Recovery copies', 'Not in Inbox'].includes(m.folder || ''))
@@ -746,7 +752,7 @@ function captureMailReader() {
     }
     return snapshot;
 }
-async function load(preferId, { selectFirst = true, preserveSelection = false, enteringApp = false, revealMail = false } = {}, initialRecords) {
+async function load(preferId, { selectFirst = true, preserveSelection = false, enteringApp = false, revealMail = false, keepSidebar = false } = {}, initialRecords) {
     await waitForAttachments();
     // A background refresh must never replace an in-memory draft.
     if (isUnsavedDraft() || (preserveSelection && state.dirty))
@@ -853,6 +859,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
         }
     }
     const reuseWorkspace = preserveSelection && state.app === 'mail' && !!readerSnapshot && !!document.querySelector('#detail.mail-reader');
+    const restoreSidebar = captureSidebarFocus();
     if (reuseWorkspace) {
         document.querySelectorAll('#mail-folder-navigation .account-folders,.search-wrap .folder-current').forEach(node => node.remove());
         renderMailFolders(mailFolderEnv());
@@ -861,6 +868,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     }
     else
         renderWorkspace(readerSnapshot);
+    restoreSidebar();
     if (focusedId)
         document.querySelector(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
     restoreMailListViewport(listViewport);
@@ -868,7 +876,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
         restorePane('content');
     if (enteringApp) {
         setMode('normal');
-        focusList();
+        if (!keepSidebar)
+            focusList();
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     }
 }
@@ -900,7 +909,7 @@ function renderWorkspace(readerSnapshot) {
         folderNavigation.innerHTML = '<div class="mail-folder-panel-head"><strong>Mail folders</strong><button data-action="close-mail-folders" aria-label="Close mail folders">✕</button></div>';
         folderNavigation.insertAdjacentHTML('beforeend', `<select id="mail-folder" aria-label="Mail folder"><option value="all">All cached mail</option>${['Inbox', 'Drafts', 'Sent', 'Archive', 'Junk', 'Local Junk', 'Suspected Junk', 'Trash', 'Local mail', 'Recovery copies', 'Sending', 'Delivery uncertain'].map(folder => `<option ${state.mailFolder === folder ? 'selected' : ''}>${folder}</option>`).join('')}</select>`);
         document.querySelector('#mail-folder').onchange = event => void attempt(async () => {
-            const select = event.target, folder = select.value;
+            const select = event.target, folder = select.value, restoreSidebar = captureSidebarFocus();
             select.disabled = true;
             try {
                 await leaveEditor();
@@ -921,6 +930,7 @@ function renderWorkspace(readerSnapshot) {
             finally {
                 select.value = state.mailFolder;
                 select.disabled = false;
+                restoreSidebar();
             }
         });
         if (state.mailScope) {
@@ -1478,10 +1488,10 @@ async function openConnectedRecord(id) {
     focusList();
     document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
 }
-async function changeApp(name) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if (name === 'mail' && state.app !== 'mail') {
+async function changeApp(name, keepSidebar = false) { await waitForAttachments(); await leaveEditor(); rememberSelection(); if (name === 'mail' && state.app !== 'mail') {
     state.mailFolder = 'Inbox';
     state.mailScope = null;
-} state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(undefined, { enteringApp: true }); }
+} state.app = name; state.current = null; state.search = ''; state.sheet = 0; state.cell = 'A1'; state.mode = 'normal'; location.hash = name; await load(undefined, { enteringApp: true, keepSidebar }); }
 function updateMailListItem(id) {
     const row = state.rows.find(r => r.id === id), button = document.querySelector(`#items [data-id="${CSS.escape(id)}"]`);
     if (!row || !button)
@@ -1898,7 +1908,7 @@ async function handleClick(event) {
         return;
     await attempt(async () => {
         if (button.dataset.app) {
-            await changeApp(button.dataset.app);
+            await changeApp(button.dataset.app, event.detail === 0 && document.activeElement === button);
             return;
         }
         if (button.dataset.id) {
@@ -1947,7 +1957,7 @@ async function handleClick(event) {
             await syncAccounts();
         if (action === 'file-mail')
             await fileMail(mailFolderEnv());
-        if (action.startsWith('mail-junk-') && state.current)
+        if (action?.startsWith('mail-junk-') && state.current)
             await itemMenus.run(action.slice('mail-junk-'.length), [state.current.id], 'mail');
         if (action === 'trash-mail')
             await deleteSelectedMail();
@@ -2447,6 +2457,74 @@ function focusList() {
         entry.focus({ preventScroll: true });
     }
 }
+let lastSidebarEntry = '';
+function sidebarEntries() {
+    return [...document.querySelectorAll('.sidebar :is(button,summary,select):not(:disabled)')].filter(node => {
+        if (!node.getClientRects().length || getComputedStyle(node).visibility !== 'visible')
+            return false;
+        for (const group of document.querySelectorAll('.sidebar details:not([open])')) {
+            if (group.contains(node) && !group.querySelector(':scope > summary')?.contains(node))
+                return false;
+        }
+        return !node.closest('[popover]:not(:popover-open)');
+    });
+}
+function sidebarEntrySelector(entry) {
+    const owner = entry.matches('summary') ? entry.parentElement : entry;
+    if (owner.id)
+        return '#' + CSS.escape(owner.id);
+    const attributes = owner.getAttributeNames().filter(name => name.startsWith('data-'));
+    return attributes.length ? owner.localName + attributes.map(name => '[' + name + '="' + CSS.escape(owner.getAttribute(name)) + '"]').join('') + (owner !== entry ? ' > summary' : '') : '';
+}
+function focusSidebar(selector = lastSidebarEntry) {
+    const entries = sidebarEntries();
+    const entry = (selector && entries.find(node => node.matches(selector))) ||
+        (selector && entries.find(node => node.id === 'mail-folders-toggle')) ||
+        entries.find(node => node.matches('[data-app][aria-current="page"]')) || entries[0];
+    if (entry) {
+        entry.focus({ preventScroll: true });
+        entry.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+}
+function captureSidebarFocus() {
+    const entry = document.activeElement?.closest('.sidebar :is(button,summary,select)');
+    const selector = entry && sidebarEntrySelector(entry);
+    return () => {
+        if (!selector)
+            return;
+        if (document.activeElement === document.body || document.activeElement === entry && !sidebarEntries().includes(entry))
+            focusSidebar(selector);
+    };
+}
+function handleSidebarKey(event, target) {
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey)
+        return;
+    const k = keys(), key = event.key;
+    if (key === k.left || key === k.right) {
+        event.preventDefault();
+        if (key === k.right)
+            focusList();
+        return;
+    }
+    if (key === k.help) {
+        event.preventDefault();
+        if (!event.repeat)
+            help();
+        return;
+    }
+    const next = key === k.down || key === 'ArrowDown', previous = key === k.up || key === 'ArrowUp';
+    if (!next && !previous)
+        return;
+    if (target.matches('select') && key.startsWith('Arrow'))
+        return;
+    event.preventDefault();
+    const entries = sidebarEntries(), index = entries.indexOf(target);
+    const entry = entries[Math.max(0, Math.min(entries.length - 1, index + (next ? 1 : -1)))];
+    if (entry) {
+        entry.focus({ preventScroll: true });
+        entry.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+}
 const keyboardScrollers = new WeakMap();
 function scrollMailBody(target, direction) {
     const frame = target.closest('.mail-html');
@@ -2493,10 +2571,18 @@ let lastPane = 'list';
 function activePane() { const node = document.activeElement; if (node?.closest('#detail'))
     return 'content'; if (node?.closest('#items'))
     return 'list'; return lastPane; }
-document.addEventListener('focusin', event => { const node = event.target; if (node.closest('#detail'))
-    lastPane = 'content';
-else if (node.closest('#items'))
-    lastPane = 'list'; });
+document.addEventListener('focusin', event => {
+    const node = event.target;
+    if (node.closest('#detail'))
+        lastPane = 'content';
+    else if (node.closest('#items,#main'))
+        lastPane = 'list';
+    else if (node.closest('.sidebar')) {
+        lastSidebarEntry = sidebarEntrySelector(node);
+        keySequence = '';
+        setMode('normal');
+    }
+});
 function restorePane(pane) {
     if (pane === 'content') {
         if (state.current)
@@ -2538,16 +2624,23 @@ document.addEventListener('keydown', event => {
         return;
     if (event.target.closest('[data-mail-disclosure]'))
         return;
-    if (event.key === 'Enter' && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && state.app === 'mail' && state.current?.meta.folder === 'Drafts' && !state.current.meta.remote) {
-        event.preventDefault();
-        if (!event.repeat)
-            void attempt(sendMail);
-        return;
-    }
+    const target = event.target;
     if (event.key === 'Escape' && document.querySelector('.shell')?.classList.contains('folders-open')) {
         setMailFolderPanel(false);
         document.querySelector('#mail-folders-toggle')?.focus();
         event.preventDefault();
+        return;
+    }
+    const inSidebar = !!target.closest('.sidebar');
+    if (inSidebar && event.key !== ':' && event.key !== 'g' && !(keySequence === 'g' && /^[1-7]$/.test(event.key))) {
+        keySequence = '';
+        handleSidebarKey(event, target);
+        return;
+    }
+    if (event.key === 'Enter' && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !event.isComposing && state.app === 'mail' && state.current?.meta.folder === 'Drafts' && !state.current.meta.remote) {
+        event.preventDefault();
+        if (!event.repeat)
+            void attempt(sendMail);
         return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -2575,7 +2668,7 @@ document.addEventListener('keydown', event => {
         }
         return;
     }
-    if (editable(event.target)) {
+    if (editable(target) && !inSidebar) {
         setMode('insert');
         return;
     }
@@ -2591,7 +2684,6 @@ document.addEventListener('keydown', event => {
         return;
     if (event.target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input') && ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key))
         return;
-    const target = event.target;
     if (event.key === 'Tab' && !event.shiftKey && (target.matches('#selected-item') || state.current && target.id === 'items')) {
         event.preventDefault();
         keySequence = '';
@@ -2629,6 +2721,10 @@ document.addEventListener('keydown', event => {
     if (keySequence === 'g' && key === 'g') {
         keySequence = '';
         event.preventDefault();
+        if (inSidebar) {
+            focusSidebar('');
+            return;
+        }
         if (mailBody) {
             scrollMailBody(target, 'start');
             return;
@@ -2669,6 +2765,22 @@ document.addEventListener('keydown', event => {
     if (action === 'help') {
         event.preventDefault();
         help();
+        return;
+    }
+    if (action === 'left') {
+        event.preventDefault();
+        if (state.app !== 'settings' && activePane() === 'content')
+            focusList();
+        else
+            focusSidebar();
+        return;
+    }
+    if (action === 'right') {
+        event.preventDefault();
+        if (state.app === 'sheets' && state.current)
+            selectCell(state.cell, true);
+        else
+            focusContent();
         return;
     }
     if (state.app === 'settings')
@@ -2766,19 +2878,6 @@ document.addEventListener('keydown', event => {
         selectCell(colName(Math.max(0, Math.min(11, c))) + (Math.max(0, Math.min(29, r)) + 1), true);
         return;
     }
-    if (action === 'left') {
-        event.preventDefault();
-        focusList();
-        return;
-    }
-    if (action === 'right') {
-        event.preventDefault();
-        if (state.app === 'sheets' && state.current)
-            selectCell(state.cell, true);
-        else
-            focusContent();
-        return;
-    }
     if (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G') {
         event.preventDefault();
         const rows = navigableRows();
@@ -2788,7 +2887,7 @@ document.addEventListener('keydown', event => {
             void attempt(() => selectRecord(rows[next].id, true));
     }
 });
-document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view') && target.id !== 'command-input' && editable(target))
+document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view,.sidebar') && target.id !== 'command-input' && editable(target))
     setMode('insert'); });
 document.addEventListener('pointerdown', () => state.lastActivity = Date.now(), { passive: true });
 document.addEventListener('wheel', () => state.lastActivity = Date.now(), { passive: true });

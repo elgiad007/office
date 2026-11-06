@@ -5,7 +5,9 @@ export function helpEntries(k) {
     const add = (shortcut, action, context = 'Normal mode', options = '') => rows.push({ shortcut, action, context, options });
     add(k.help, 'Open keyboard and command help', 'Normal mode, including Settings', 'Remappable in Settings.');
     add(k.down + ' / ' + k.up, 'Next / previous item', 'Normal mode', 'Works from the list and nonediting content; scrolls a focused read-only mail body. Use arrows or Tab for spreadsheet cells.');
-    add(k.left + ' / ' + k.right, 'Focus list / selected item');
+    add(k.left + ' / ' + k.right, 'Focus the pane to the left / right', 'Normal mode', 'Move between the application sidebar, item list, and selected content.');
+    add(k.down + ' / ' + k.up + '; ArrowDown / ArrowUp', 'Focus next / previous sidebar entry', 'Application sidebar', 'Navigate apps, mail accounts, and visible folders. The Mail folder dropdown uses arrow keys to choose a folder.');
+    add('Enter / Space', 'Activate the focused sidebar entry', 'Application sidebar', 'Open an app or folder, or expand or collapse a group. Use the Mail folders button on narrow screens.');
     add('ArrowDown / ArrowRight; ArrowUp / ArrowLeft', 'Next / previous item', 'Item lists', 'Down or Right moves to the next item; Up or Left moves to the previous item.');
     add('Ctrl+f / Ctrl+b', 'Page down / up', 'Focused list or nonediting content', 'Scrolls the focused pane, including HTML mail. Repeating the key continues scrolling.');
     add('Ctrl+d / Ctrl+u', 'Half page down / up', 'Focused list or nonediting content', 'Uses half the pane height. Editors and typing fields retain their native shortcuts.');
