@@ -2,6 +2,12 @@
 
 A personal office suite for a folder on your own computer or a PHP shared-hosting account. Mail, calendar, tasks, contacts, documents, wiki and simple spreadsheets share one keyboard-oriented interface. This is an initial implementation, with the limitations below.
 
+## License
+
+Portable Office is proprietary software with source available for review. The [Source Review Terms](LICENSE) allow inspection of the source. Running, deploying, modifying, or redistributing this version requires a separate written license from the copyright holder, except as permitted by the terms or applicable law.
+
+Versions previously distributed under GPLv3 retain that license. [Commit `a6a71cd`](https://github.com/elgiad007/office/tree/a6a71cd8925a6a8be4d378591784bcd2afbfabe1) is the last commit before the licensing change. Third-party components retain their own terms and notices.
+
 ## Run on Windows
 
 Extract **the Windows release ZIP** into a writable folder, then double-click **Start Office.bat**. It starts the bundled local server on `127.0.0.1:8765` and opens your browser. Releases with portable Apache use four PHP FastCGI workers; other releases use PHP's built-in development server. The console displays a one-time setup token. Create your owner password in the browser. Use **Stop Office.bat** before moving the folder or removing a USB drive. Save work before stopping it. No Windows service, Docker, database server or system PHP installation is needed.
