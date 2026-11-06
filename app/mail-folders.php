@@ -202,7 +202,8 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
 }
 function sync_mail_folder(array $a,string $id,int $limit): int {
     if ($limit<10 || $limit>500 || $limit%10!==0) fail('Load between 10 and 500 messages in steps of 10.');
-    mail_folder_find(setting('mail-folders:'.$a['id'],[]),$id);
+    // Inbox is a built-in mailbox for both providers, even before folder discovery.
+    if ($id!=='INBOX') mail_folder_find(setting('mail-folders:'.$a['id'],[]),$id);
     if ($a['type']==='imap') return with_imap_folders($a,fn($s)=>imap_sync_stream($a,$s,false,$id,$limit));
     if ($a['type']==='google') {
         $token=google_token($a); return sync_gmail_folder($a,$id,$limit,fn($path)=>google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages'.$path,$token));

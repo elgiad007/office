@@ -13,7 +13,7 @@ type MailSnapshot = Pick<OfficeRecord, 'id' | 'kind' | 'contentHash' | 'meta'>;
 import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
-import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail} from './mail-folders.js';
+import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
 import {mailBody, mailDisplayControls, bindMailReader} from './mail-reader.js';
 import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
 import {attachmentSection, bindAttachments, waitForAttachments} from './mail-attachments.js';
@@ -1436,6 +1436,17 @@ function captureSidebarFocus() {
 function handleSidebarKey(event: KeyboardEvent,target: HTMLElement) {
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
   const k=keys(), key=event.key;
+  const account=target.matches('[data-account-tree] > summary')?target.parentElement?.dataset.accountTree:undefined;
+  if(key==='Enter'&&account){
+    event.preventDefault();
+    if(!event.repeat)void attempt(()=>openAccountInbox(mailFolderEnv(),account));
+    return;
+  }
+  if(key==='Backspace'&&state.app==='mail'){
+    event.preventDefault();
+    if(!event.repeat)void attempt(()=>backOutOfMailFolder(mailFolderEnv()));
+    return;
+  }
   if(key===k.left||key===k.right){
     event.preventDefault();
     if(key===k.right)focusList();
