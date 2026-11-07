@@ -1082,10 +1082,10 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus=false) { const pane=activePane(); await waitForAttachments(); await leaveEditor(); const previous=state.current?.id,origin=mailDraftOrigin(false);state.current=state.rows.find(r=>r.id===id)||null;if(state.app==='wiki'){state.wikiEditing=false;setMode('normal');}if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin); state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
+async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false) { const pane=activePane(); await waitForAttachments(); await leaveEditor(); const previous=state.current?.id,origin=mailDraftOrigin(false);state.current=state.rows.find(r=>r.id===id)||null;if(state.app==='wiki'){state.wikiEditing=false;setMode('normal');}if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin); state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus===true&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
   const selected=document.querySelector<HTMLElement>('#selected-item');
   selected?.focus({preventScroll:true});
-  selected?.scrollIntoView({block:'nearest',inline:'nearest'});
+  if(focus===true)selected?.scrollIntoView({block:'nearest',inline:'nearest'});
 } }
 async function clickRecord(id: string,event: MouseEvent) {
   await leaveEditor();
@@ -1811,6 +1811,39 @@ function scrollMailBody(target: HTMLElement,direction: ScrollDirection) {
   if(!scroll){scroll=createKeyboardScroller(panel);keyboardScrollers.set(panel,scroll);}
   scroll(direction);
 }
+let pendingListPage: Promise<unknown> | undefined;
+function afterListPage(action: () => unknown,track=false) {
+  const previous=pendingListPage;
+  const app=state.app;
+  const pending=previous?previous.then(()=>{
+    if(state.app===app&&activePane()==='list')return attempt(action);
+  }):attempt(action);
+  if(!previous&&!track)return;
+  pendingListPage=pending;
+  void pending.then(()=>{if(pendingListPage===pending)pendingListPage=undefined;});
+}
+async function pageItemList(list: HTMLElement,down: boolean) {
+  keyboardScrollers.get(list)?.cancel();
+  const height=list.clientHeight;
+  const top=Math.max(0,Math.min(list.scrollHeight-height,list.scrollTop+(down?1:-1)*Math.max(1,height/2)));
+  const bounds=list.getBoundingClientRect();
+  const viewportTop=bounds.top+list.clientTop;
+  const selected=list.querySelector('#selected-item')?.getBoundingClientRect();
+  const anchor=selected&&selected.bottom>viewportTop&&selected.top<viewportTop+height?
+    Math.max(0,Math.min(height,(selected.top+selected.bottom)/2-viewportTop)):height/2;
+  const nextTop=viewportTop+top-list.scrollTop;
+  let closest: HTMLElement | undefined;
+  let distance=Infinity;
+  for(const row of list.querySelectorAll<HTMLElement>('.item[data-id]')){
+    const rect=row.getBoundingClientRect();
+    if(rect.bottom<=nextTop||rect.top>=nextTop+height)continue;
+    const offset=Math.abs((rect.top+rect.bottom)/2-nextTop-anchor);
+    if(offset<distance){closest=row;distance=offset;}
+  }
+  if(closest&&closest.id!=='selected-item')await selectRecord(closest.dataset.id!,'list-without-scroll');
+  const updatedList=list.isConnected?list:document.activeElement?.closest<HTMLElement>('#items');
+  updatedList?.scrollTo({top,behavior:'instant'});
+}
 function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
   if(target.closest('.mail-html')){scrollMailBody(target,direction);return;}
   const pane=state.app==='settings'&&target.matches('[data-settings-page]')?
@@ -1820,6 +1853,14 @@ function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
   for(let node: HTMLElement|null=target;node&&pane.contains(node);node=node.parentElement){
     if(node.scrollHeight>node.clientHeight&&/auto|scroll/.test(getComputedStyle(node).overflowY)){panel=node;break;}
     if(node===pane)break;
+  }
+  if(panel.id==='items'&&(direction==='half-page-down'||direction==='half-page-up')&&
+    (state.app!=='calendar'||panel.querySelector('.calendar-agenda'))){
+    afterListPage(()=>{
+      const list=document.querySelector<HTMLElement>('#items');
+      if(list)return pageItemList(list,direction==='half-page-down');
+    },true);
+    return true;
   }
   let scroll=keyboardScrollers.get(panel);
   if(!scroll){scroll=createKeyboardScroller(panel);keyboardScrollers.set(panel,scroll);}
@@ -1883,7 +1924,7 @@ document.addEventListener('keydown',event=>{
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}
   if(action==='left'){event.preventDefault();if(state.app!=='settings'&&activePane()==='content')focusList();else focusSidebar();return;}
-  if(action==='right'){event.preventDefault();if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();return;}
+  if(action==='right'){event.preventDefault();afterListPage(()=>{if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();});return;}
   if(state.app==='settings')return;
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
   if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
@@ -1905,7 +1946,7 @@ document.addEventListener('keydown',event=>{
   if(action==='reply'&&state.app==='mail'){event.preventDefault();document.querySelector<HTMLButtonElement>('[data-action=reply]')!?.click();return;}
   if(action==='select'&&state.current){event.preventDefault();const id=state.current!.id;selectionAnchor=id;keyboardSelection=true;if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);const pane=activePane();renderList();restorePane(pane);return;}
   if(state.app==='sheets'&&state.current&&target.closest<HTMLElement>('[data-cell]')&&(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp','Tab'].includes(key))){event.preventDefault();let [r,c]=cellPosition(state.cell);if(key==='ArrowLeft'||key==='Tab'&&event.shiftKey)c--;else if(key==='ArrowRight'||key==='Tab')c++;else if(key==='ArrowUp')r--;else r++;selectCell(colName(Math.max(0,Math.min(11,c)))+(Math.max(0,Math.min(29,r))+1),true);return;}
-  if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();const rows=navigableRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])void attempt(()=>selectRecord(rows[next].id,true));}
+  if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();afterListPage(()=>{const rows=navigableRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])return selectRecord(rows[next].id,true);});}
 });
 document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view,.sidebar')&&target.id!=='command-input'&&editable(target))setMode('insert');});
 document.addEventListener('pointerdown',()=>state.lastActivity=Date.now(),{passive:true});

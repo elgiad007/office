@@ -1718,14 +1718,15 @@ async function selectRecord(id, focus = false) {
     if (state.app === 'calendar')
         calendar.ensureVisible(id);
     renderDetail();
-    if (focus && pane === 'content') {
+    if (focus === true && pane === 'content') {
         focusContent();
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     }
     else if (focus) {
         const selected = document.querySelector('#selected-item');
         selected?.focus({ preventScroll: true });
-        selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        if (focus === true)
+            selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
 }
 async function clickRecord(id, event) {
@@ -2983,6 +2984,47 @@ function scrollMailBody(target, direction) {
     }
     scroll(direction);
 }
+let pendingListPage;
+function afterListPage(action, track = false) {
+    const previous = pendingListPage;
+    const app = state.app;
+    const pending = previous ? previous.then(() => {
+        if (state.app === app && activePane() === 'list')
+            return attempt(action);
+    }) : attempt(action);
+    if (!previous && !track)
+        return;
+    pendingListPage = pending;
+    void pending.then(() => { if (pendingListPage === pending)
+        pendingListPage = undefined; });
+}
+async function pageItemList(list, down) {
+    keyboardScrollers.get(list)?.cancel();
+    const height = list.clientHeight;
+    const top = Math.max(0, Math.min(list.scrollHeight - height, list.scrollTop + (down ? 1 : -1) * Math.max(1, height / 2)));
+    const bounds = list.getBoundingClientRect();
+    const viewportTop = bounds.top + list.clientTop;
+    const selected = list.querySelector('#selected-item')?.getBoundingClientRect();
+    const anchor = selected && selected.bottom > viewportTop && selected.top < viewportTop + height ?
+        Math.max(0, Math.min(height, (selected.top + selected.bottom) / 2 - viewportTop)) : height / 2;
+    const nextTop = viewportTop + top - list.scrollTop;
+    let closest;
+    let distance = Infinity;
+    for (const row of list.querySelectorAll('.item[data-id]')) {
+        const rect = row.getBoundingClientRect();
+        if (rect.bottom <= nextTop || rect.top >= nextTop + height)
+            continue;
+        const offset = Math.abs((rect.top + rect.bottom) / 2 - nextTop - anchor);
+        if (offset < distance) {
+            closest = row;
+            distance = offset;
+        }
+    }
+    if (closest && closest.id !== 'selected-item')
+        await selectRecord(closest.dataset.id, 'list-without-scroll');
+    const updatedList = list.isConnected ? list : document.activeElement?.closest('#items');
+    updatedList?.scrollTo({ top, behavior: 'instant' });
+}
 function scrollFocusedPane(target, direction) {
     if (target.closest('.mail-html')) {
         scrollMailBody(target, direction);
@@ -3000,6 +3042,15 @@ function scrollFocusedPane(target, direction) {
         }
         if (node === pane)
             break;
+    }
+    if (panel.id === 'items' && (direction === 'half-page-down' || direction === 'half-page-up') &&
+        (state.app !== 'calendar' || panel.querySelector('.calendar-agenda'))) {
+        afterListPage(() => {
+            const list = document.querySelector('#items');
+            if (list)
+                return pageItemList(list, direction === 'half-page-down');
+        }, true);
+        return true;
     }
     let scroll = keyboardScrollers.get(panel);
     if (!scroll) {
@@ -3222,10 +3273,10 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'right') {
         event.preventDefault();
-        if (state.app === 'sheets' && state.current)
+        afterListPage(() => { if (state.app === 'sheets' && state.current)
             selectCell(state.cell, true);
         else
-            focusContent();
+            focusContent(); });
         return;
     }
     if (state.app === 'settings')
@@ -3325,11 +3376,8 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G') {
         event.preventDefault();
-        const rows = navigableRows();
-        const index = rows.findIndex(r => r.id === state.current?.id);
-        const next = key === 'G' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (action === 'up' || key === 'N' ? -1 : 1)));
-        if (rows[next])
-            void attempt(() => selectRecord(rows[next].id, true));
+        afterListPage(() => { const rows = navigableRows(); const index = rows.findIndex(r => r.id === state.current?.id); const next = key === 'G' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (action === 'up' || key === 'N' ? -1 : 1))); if (rows[next])
+            return selectRecord(rows[next].id, true); });
     }
 });
 document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view,.sidebar') && target.id !== 'command-input' && editable(target))

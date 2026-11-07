@@ -23,6 +23,9 @@ export async function testDeleteHotkey(page,url) {
     await page.locator('#main').focus();
     await page.keyboard.press('d');
     assert.equal(await page.locator('#dialog[open]').count(),0,'lowercase d never deletes');
+    if(!await page.locator('#selected-item').filter({hasText:title}).count()){
+      await page.locator('.item').filter({hasText:title}).click();
+    }
     await page.keyboard.press('Shift+D');
     await page.getByRole('heading',{name:'Delete item',exact:true}).waitFor();
     await page.keyboard.press('D');

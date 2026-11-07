@@ -63,10 +63,13 @@ export async function testKeyboardScroll(page,url) {
       await page.emulateMedia({reducedMotion:'no-preference'});
       assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected);
     }
-    const response=await page.request.post(url+'api.php?r=import-items',{headers:{'X-CSRF-Token':status.csrf},data:{records:Array.from({length:80},(_,i)=>({kind:'tasks',title:'Vim page fixture '+i,body:'',meta:{}}))}});
+    const response=await page.request.post(url+'api.php?r=import-items',{headers:{'X-CSRF-Token':status.csrf},data:{records:Array.from({length:80},(_,i)=>({kind:'tasks',title:'Vim page fixture '+i,body:'',meta:{priority:i<6?'High':'Normal'}}))}});
     assert.equal(response.status(),200);
     await page.getByRole('button',{name:'Tasks',exact:true}).click();
-    await page.locator('.item').filter({hasText:'Vim page fixture 0'}).first().click();
+    await page.locator('#task-list-view summary').click();
+    await page.getByLabel('Group tasks by').selectOption('priority');
+    await page.locator('#items [data-mail-group-key]').nth(1).waitFor();
+    await page.locator('#items .item').first().click();
     const list=page.locator('#items'),selectedTask=await page.locator('#selected-item').getAttribute('data-id');
     await list.evaluate(node=>{node.scrollTop=0;});
     await page.locator('#selected-item').focus();
@@ -75,10 +78,40 @@ export async function testKeyboardScroll(page,url) {
       await list.evaluate(node=>{node.scrollTop=0;});
       await page.keyboard.press(key);await settleScroll(list);
       assert.ok(Math.abs(await list.evaluate(node=>node.scrollTop)-distance)<=1,key+' scrolls focused list');
+      if(key!=='Control+f'){
+        assert.notEqual(await page.locator('#selected-item').getAttribute('data-id'),selectedTask);
+        assert.ok(await page.locator('#selected-item').evaluate(node=>{
+          const row=node.getBoundingClientRect(),pane=node.closest('#items').getBoundingClientRect();
+          return document.activeElement===node&&row.bottom>pane.top&&row.top<pane.bottom;
+        }),key+' focuses a row in the new viewport');
+      }
       await page.keyboard.press(key==='d'?'u':key==='Control+d'?'Control+u':'Control+b');await settleScroll(list);
       assert.ok(await list.evaluate(node=>node.scrollTop)<=1,'reverse returns to top within pixel rounding');
     }
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selectedTask);
+    await page.keyboard.down('d');
+    await page.keyboard.down('d');
+    await page.keyboard.up('d');
+    const index=()=>list.evaluate(node=>[...node.querySelectorAll('.item')].indexOf(node.querySelector('#selected-item')));
+    await page.waitForFunction(height=>document.querySelector('#items').scrollTop>=height-1,listHeight);
+    const pagedIndex=await index();
+    await page.keyboard.press('k');
+    await page.waitForFunction(expected=>{
+      const rows=[...document.querySelectorAll('#items .item')];
+      return rows.indexOf(document.querySelector('#selected-item'))===expected;
+    },pagedIndex-1);
+    await page.keyboard.press('l');
+    assert.equal(await index(),pagedIndex-1);
+    assert.ok(await list.evaluate(node=>node.scrollTop)>listHeight/2,'k and l continue from the paged selection');
+    await page.locator('#selected-item').evaluate(node=>node.focus({preventScroll:true}));
+    await list.evaluate(node=>{node.scrollTop=node.scrollHeight;});
+    await page.keyboard.press('d');
+    await page.waitForFunction(()=>{
+      const list=document.querySelector('#items'),selected=list.querySelector('#selected-item');
+      return list.scrollTop===list.scrollHeight-list.clientHeight &&
+        selected.getBoundingClientRect().bottom>list.getBoundingClientRect().top &&
+        document.activeElement===selected;
+    });
     assert.equal(await page.locator('#dialog[open]').count(),0,'Ctrl+d does not delete');
     for(const field of [page.locator('#search'),page.locator('#detail textarea').first()]){
       await field.focus();
