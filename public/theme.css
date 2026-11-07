@@ -319,6 +319,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .header-action:focus-visible .header-action-label { display: block; }
 .mail-export-status { min-width: 0; font-size: 12px; color: var(--muted); }
 .mail-export-status:empty { position: absolute; }
+#cancel-mail-export[hidden] { display: none; }
 @media (hover: hover) {
   .header-action:hover .header-action-label { display: block; }
 }

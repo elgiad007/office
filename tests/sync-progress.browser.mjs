@@ -81,13 +81,14 @@ async function testMailExport(page,url){
   const available={id:'available',kind:'mail',title:'Available message',body:'Original body',revision:1,meta:{folder:'Inbox',read:true,raw}};
   const unavailable={id:'unavailable',kind:'mail',title:'Unavailable message',body:'',revision:1,meta:{folder:'Recovery copies',headerOnly:true,remote:true,account:'export-fixture',read:true}};
   const failure='This message is no longer in its synchronized folder.';
-  let records=[available,unavailable],releaseFetch;
+  let records=[available,unavailable],releaseFetch,stall=false;
   const blockedFetch=new Promise(resolve=>releaseFetch=resolve);
   const routes=t=>t.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');
     if(action==='mail-content'){
       assert.equal(route.request().postDataJSON().id,unavailable.id);
+      if(stall)return;
       await blockedFetch;
       return route.fulfill({status:400,json:{error:failure}});
     }
@@ -105,7 +106,7 @@ async function testMailExport(page,url){
     const status=page.locator('#mail-export-status');
     const downloading=page.waitForEvent('download');
     await exportAll.click();
-    await status.getByText('Preparing mail export…',{exact:true}).waitFor();
+    await status.getByText('Preparing mail export · 1 of 2 checked',{exact:true}).waitFor();
     assert.equal(await exportAll.isDisabled(),true);
     releaseFetch();
     const download=await downloading;
@@ -138,6 +139,42 @@ async function testMailExport(page,url){
       assert.equal(await exportAll.isEnabled(),true);
       assert.deepEqual(downloads,[]);
     }finally{page.off('download',recordDownload);}
-    console.log('PASS mail export: progress, partial archive, single-message EML and all-failed feedback.');
+
+    records=[available,unavailable];
+    stall=true;
+    await page.reload();
+    await page.locator('#list-count').getByText('1 cached message',{exact:true}).waitFor();
+    const cancel=page.getByRole('button',{name:'Cancel export',exact:true});
+    const isMailContent=request=>new URL(request.url()).searchParams.get('r')==='mail-content';
+    await Promise.all([page.waitForRequest(isMailContent),exportAll.click()]);
+    await status.getByText('Preparing mail export · 1 of 2 checked',{exact:true}).waitFor();
+    page.on('download',recordDownload);
+    try{
+      await Promise.all([page.waitForEvent('requestfailed',isMailContent),cancel.click()]);
+      await status.getByText('Mail export canceled',{exact:true}).waitFor();
+      assert.equal(await exportAll.isEnabled(),true);
+      assert.equal(await cancel.isVisible(),false);
+      assert.deepEqual(downloads,[]);
+    }finally{page.off('download',recordDownload);}
+
+    const restoreTimeout=await page.evaluateHandle(()=>{
+      const original=AbortSignal.timeout;
+      AbortSignal.timeout=milliseconds=>original(Math.min(milliseconds,300));
+      return ()=>{AbortSignal.timeout=original;};
+    });
+    try{
+      const timedDownload=page.waitForEvent('download');
+      await Promise.all([page.waitForEvent('requestfailed',isMailContent),exportAll.click()]);
+      const partial=JSON.parse(await readFile(await (await timedDownload).path(),'utf8'));
+      assert.deepEqual(partial.records.map(record=>record.id),[available.id]);
+      await status.getByText('Download started · mail.json · 1 skipped',{exact:true}).waitFor();
+      assert.match(await page.locator('#notice').textContent(),/A message fetch timed out/);
+      assert.equal(await cancel.isVisible(),false);
+      assert.equal(await exportAll.isEnabled(),true);
+    }finally{
+      await restoreTimeout.evaluate(restore=>restore());
+      await restoreTimeout.dispose();
+    }
+    console.log('PASS mail export: counted progress, partial archive, EML, failure, cancellation and timeout.');
   }finally{releaseFetch();await page.unroute(routes);}
 }

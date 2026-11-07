@@ -352,11 +352,11 @@ function refreshMailRecord(record) {
     if (state.current?.id === record.id)
         state.current = state.rows.find(row => row.id === record.id) || null;
 }
-async function requestApi(route, data) {
+async function requestApi(route, data, signal) {
     let payload = data;
     if (route === 'mail-action')
         payload = { ...payload, summary: true };
-    const response = await fetch('api.php?r=' + route, { method: payload === undefined ? 'GET' : 'POST', headers: payload === undefined ? {} : { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf, 'X-Office-Progress': '1' }, body: payload === undefined ? undefined : JSON.stringify(payload), cache: 'no-store' });
+    const response = await fetch('api.php?r=' + route, { method: payload === undefined ? 'GET' : 'POST', headers: payload === undefined ? {} : { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf, 'X-Office-Progress': '1' }, body: payload === undefined ? undefined : JSON.stringify(payload), cache: 'no-store', signal });
     let result, status = response.status;
     let cacheRefresh;
     if (response.headers.get('Content-Type')?.includes('application/x-ndjson')) {
@@ -400,6 +400,7 @@ async function requestApi(route, data) {
             result = await response.json();
         }
         catch {
+            signal?.throwIfAborted();
             throw Error('The server did not return JSON. Check PHP configuration and upload limits.');
         }
     await cacheRefresh;
@@ -435,7 +436,7 @@ async function requestApi(route, data) {
     }
     return result;
 }
-async function api(route, data) {
+async function api(route, data, signal) {
     let payload = data;
     const expected = mailSnapshots.get(payload?.id)?.get(payload?.revision);
     // Let an in-flight read update finish before another mutation uses its revision.
@@ -458,7 +459,7 @@ async function api(route, data) {
             payload = { ...payload, revision: latest.revision };
         for (let attempt = 0;; attempt++) {
             try {
-                return await requestApi(route, payload);
+                return await requestApi(route, payload, signal);
             }
             catch (cause) {
                 const error = asError(cause);
@@ -475,6 +476,7 @@ async function api(route, data) {
         }
     };
     const trackedRun = async () => {
+        signal?.throwIfAborted();
         activity.running(tracking);
         if (data) {
             pendingWrites++;
@@ -581,7 +583,7 @@ function shell() {
     const syncStatus = document.querySelector('#sync-status');
     syncStatus.textContent = 'Automatic sync';
     syncStatus.hidden = false;
-    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${headerAction('export-all', 'Export all mail')}<span class="mail-export-status" id="mail-export-status" role="status"></span></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${headerAction('export-all', 'Export all mail')}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
     panelSizing = setupPanelSizing(root.querySelector('.shell'), () => setMailFolderPanel(false));
     setupTopAgenda();
     root.onclick = handleClick;
@@ -1972,30 +1974,45 @@ async function viewMessageHeaders() {
         }
     }, { once: true });
 }
-async function fullMailRecord(record) {
+async function fullMailRecord(record, signal) {
     if (record.meta.headerOnly) {
         await pendingMailReads.get(record.id);
-        return (await api('mail-content', { id: record.id, account: record.meta.account })).record;
+        signal?.throwIfAborted();
+        return (await api('mail-content', { id: record.id, account: record.meta.account }, signal)).record;
     }
     if (!record.summary)
         return record;
     const cached = latestMail(record.id);
     if (cached && !cached.summary && cached.revision === record.revision && sameMailTarget(record, cached))
         return cached;
-    return (await api(`record&id=${encodeURIComponent(record.id)}`)).record;
+    return (await api(`record&id=${encodeURIComponent(record.id)}`, undefined, signal)).record;
 }
 function downloadRecordArchive(name, records) {
     download(name + '.json', JSON.stringify({ format: 'portable-office-items', version: 1, records }, null, 2), 'application/json');
+}
+function waitForMailExport(work, signal) {
+    return new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        if (signal.aborted)
+            abort();
+        else
+            signal.addEventListener('abort', abort, { once: true });
+        void work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
 }
 async function exportAllMail(button) {
     if (button.disabled)
         return;
     const status = document.querySelector('#mail-export-status');
+    const cancel = document.querySelector('#cancel-mail-export');
+    const controller = new AbortController(), signal = controller.signal;
     const initialRows = state.rows;
     button.disabled = true;
+    cancel.hidden = false;
+    cancel.onclick = () => controller.abort();
     status.textContent = 'Preparing mail export…';
     try {
-        await commit();
+        await waitForMailExport(commit(), signal);
         const rows = (state.app === 'mail' ? state.rows : initialRows).slice();
         if (!rows.length) {
             status.textContent = 'There is nothing to export yet.';
@@ -2003,12 +2020,32 @@ async function exportAllMail(button) {
         }
         const records = [];
         let firstFailure;
+        let checked = 0;
+        const showProgress = () => { status.textContent = `Preparing mail export · ${checked} of ${rows.length} checked`; };
+        showProgress();
         // Keep large mailboxes from filling the account request queues all at once.
         const batchSize = 4;
         for (let offset = 0; offset < rows.length; offset += batchSize) {
             if (!button.isConnected)
                 return;
-            const results = await Promise.allSettled(rows.slice(offset, offset + batchSize).map(fullMailRecord));
+            const results = await Promise.allSettled(rows.slice(offset, offset + batchSize).map(async (record) => {
+                const deadline = AbortSignal.timeout(60_000);
+                const fetchSignal = AbortSignal.any([signal, deadline]);
+                try {
+                    return await waitForMailExport(fullMailRecord(record, fetchSignal), fetchSignal);
+                }
+                catch (cause) {
+                    if (deadline.aborted)
+                        throw new Error('A message fetch timed out.');
+                    throw cause;
+                }
+                finally {
+                    checked++;
+                    if (!signal.aborted)
+                        showProgress();
+                }
+            }));
+            signal.throwIfAborted();
             for (const result of results) {
                 if (result.status === 'fulfilled')
                     records.push(result.value);
@@ -2030,11 +2067,20 @@ async function exportAllMail(button) {
     catch (cause) {
         if (!button.isConnected)
             return;
+        if (signal.aborted) {
+            status.textContent = 'Mail export canceled';
+            return;
+        }
         status.textContent = 'Mail export failed';
         notice(`Mail export failed: ${asError(cause).message}`, true);
     }
     finally {
+        const restoreFocus = document.activeElement === cancel;
+        cancel.hidden = true;
+        cancel.onclick = null;
         button.disabled = false;
+        if (restoreFocus)
+            button.focus();
     }
 }
 async function exportRecords(all = false, selectedRecords = null) {
@@ -2045,7 +2091,7 @@ async function exportRecords(all = false, selectedRecords = null) {
         return;
     }
     if (state.app === 'mail')
-        records = await Promise.all(records.map(fullMailRecord));
+        records = await Promise.all(records.map(record => fullMailRecord(record)));
     all = all || records.length > 1;
     const name = all ? state.app : records[0].title;
     if (state.app === 'calendar')
