@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__.'/mail-junk.php';
+require_once __DIR__.'/mail-rules.php';
 
 const MAIL_FOLDERS = ['Inbox','Archive','Trash','Junk'];
 const IMAP_BODY_LIMIT = 1400000;
@@ -113,6 +114,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
             }
         }
         $rules=$downloads?mail_block_rules($a['id']):[];
+        $routing=$downloads?mail_rules_config():['rules'=>[]];
         $incomingHashes=[];
         foreach ($downloads as $source=>$r) if (!isset($bySource[$source]) && isset($r['meta']['rawBase64'])) $incomingHashes[hash('sha256',$r['meta']['rawBase64'])][]=$source;
         foreach ($downloads as $source=>$r) {
@@ -131,6 +133,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
                     if(isset($old['meta']['mimeParts']))$r['meta']['hasAttachments']=$old['meta']['hasAttachments'];
                 }
             }
+            mail_rule_sync_meta($r,$old['meta']??null,$routing);
             mail_junk_sync_meta($r['meta'],$old['meta']??null,$rules);
             validate_record($r);
             // Re-downloading unchanged mail must not invalidate an open reader.
@@ -142,7 +145,7 @@ function publish_mail_snapshot_unlocked(array $a,array $membership,array $downlo
             if (isset($downloads[$source]) || !isset($membership[$source])) continue;
             $meta=array_merge($r['meta'],$membership[$source],['source'=>$source]);
             unset($meta['recoveryFrom']);
-            if ($meta['folder']!=='Inbox') unset($meta['junkPending'],$meta['junkAttempted']);
+            if ($meta['folder']!=='Inbox') unset($meta['junkPending'],$meta['junkAttempted'],$meta['rulePending'],$meta['ruleAttempted']);
             if ($meta!==$r['meta']) { $r['meta']=$meta; save_record($r,true,false); }
         }
         $keep=(setting('preferences',[])['keepRecoveryCopies']??true)!==false;
@@ -250,7 +253,7 @@ function imap_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath
     if (count(array_unique($paths))!==count($paths)) fail('Inbox, Archive and Trash must use different server folders.');
     $junk=imap_junk_path($a,$folders);
     if ($junk!==null && !in_array($junk,$paths,true)) $paths['Junk']=$junk;
-    $arrivalField=mail_block_rules($a['id'])?' INTERNALDATE':'';
+    $arrivalField=mail_block_rules($a['id']) || mail_rules_for_account(mail_rules_config(),$a['id'])?' INTERNALDATE':'';
     if ($onlyPath!==null) {
         if (!isset($folders[$onlyPath])) fail('Folder no longer exists. Refresh the folder list.',409);
         $label=array_search($onlyPath,$paths,true);

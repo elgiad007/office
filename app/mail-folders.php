@@ -166,6 +166,7 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
     $refresh=array_slice($relevant,0,$limit);
     $batchIds=array_unique(array_merge($recent,array_slice($bodyIds,0,$limit),$refresh));$batchPosition=0;$remaining=count($unknown);
     $rules=mail_block_rules($a['id']);
+    $routing=mail_rules_config();
     foreach ($batchIds as $id) {
         if(microtime(true)>$deadline-10){$pending=true;break;}
         $batchPosition++;
@@ -188,6 +189,7 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
         } elseif ($new) { $r=gmail_header_download($a,(string)$id,$msg,$meta);$r['id']=remote_id($a['id'],'gmail:'.$id); }
         elseif (isset($cached[$id])) { $r=$cached[$id]; $r['meta']=array_merge($r['meta'],$meta); unset($r['meta']['recoveryFrom']); }
         else continue;
+        mail_rule_sync_meta($r,$cached[$id]['meta']??null,$routing);
         mail_junk_sync_meta($r['meta'],$cached[$id]['meta']??null,$rules);
         $updates[]=$r;
     }
@@ -210,7 +212,7 @@ function sync_mail_folder(array $a,string $id,int $limit): int {
     }
     fail('Choose a mail account.');
 }
-function file_remote_mail(array $r,string $action,string $folder,bool $quickMove=false,bool $junkAction=false): array {
+function file_remote_mail(array $r,string $action,string $folder,bool $quickMove=false,bool $junkAction=false,bool $ruleMove=false): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote']) || in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('Choose a synchronized message.');
     $a=account($r['meta']['account']);
     if (!$junkAction) mail_folder_find(setting('mail-folders:'.$a['id'],[]),$folder);
@@ -223,16 +225,19 @@ function file_remote_mail(array $r,string $action,string $folder,bool $quickMove
         }
         $body=$action==='unlabel'?['removeLabelIds'=>[$folder]]:['addLabelIds'=>[$folder]];
         if ($action==='move') $body['removeLabelIds']=array_values(array_diff($quickMove?['INBOX','TRASH','SPAM']:['INBOX','TRASH'],[$folder]));
-        $msg=google_json('https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($r['meta']['providerId']).'/modify',$token,'POST',$body);
+        $base='https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($r['meta']['providerId']);
+        if ($ruleMove) gmail_require_inbox($base,$token);
+        $msg=google_json($base.'/modify',$token,'POST',$body);
         if (!is_array($msg['labelIds']??null) || (in_array($folder,$msg['labelIds'],true)===($action==='unlabel'))) fail('Label action could not be confirmed. Sync before retrying.');
         if ($junkAction && array_intersect($body['removeLabelIds'],$msg['labelIds'])) fail('Junk move could not be confirmed. Sync before retrying.');
+        if ($ruleMove && in_array('INBOX',$msg['labelIds'],true)) fail('Rule move could not be confirmed. Sync before retrying.');
         $r['meta']['labelIds']=$msg['labelIds']; $r['meta']['folder']=gmail_folder($msg['labelIds'])??'Custom folder'; $r['meta']['read']=!in_array('UNREAD',$msg['labelIds'],true);
     } elseif ($a['type']==='imap') {
         if ($action!=='move') fail('IMAP supports moving messages; labels are available for Gmail.');
         $path=$r['meta']['serverFolder']??null; $uid=(string)($r['meta']['providerId']??'');
         if ($path===null || !ctype_digit($uid)) fail('Repair / resync this message before moving it.');
         if (!$junkAction && $path===$folder) return $r;
-        $r=with_imap_folders($a,function($s) use($a,$r,$path,$uid,$folder,$junkAction) {
+        $r=with_imap_folders($a,function($s) use($a,$r,$path,$uid,$folder,$junkAction,$ruleMove) {
             $catalog=imap_folder_catalog($a,$s);
             if ($junkAction) {
                 $matches=array_values(array_filter($catalog,fn($f)=>$f['role']===$folder));
@@ -240,6 +245,7 @@ function file_remote_mail(array $r,string $action,string $folder,bool $quickMove
                 $folder=$matches[0]['id'];
             }
             $destination=mail_folder_find($catalog,$folder);
+            if ($ruleMove && $destination['protected']) fail('Choose a custom destination folder.');
             $cap=imap_command($s,'CAPABILITY');
             if (!preg_match('/\b(?:MOVE|IMAP4REV2)\b/i',implode('',$cap['lines']))) fail('This IMAP server does not support MOVE.');
             $validity=imap_validity(imap_command($s,'SELECT '.imap_quote($path)));

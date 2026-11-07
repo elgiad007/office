@@ -283,6 +283,22 @@ try {
             return $read();
         }));
     }
+    if ($route==='mail-rules' && $method==='GET') {
+        $config=mail_rules_config();
+        json_response(['version'=>$config['version'],'rules'=>array_column($config['rules'],'definition')]);
+    }
+    if ($route==='mail-rules' && $method==='POST') {
+        $config=save_mail_rules($input);
+        json_response(['version'=>$config['version'],'rules'=>array_column($config['rules'],'definition')]);
+    }
+    if ($route==='mail-rule-review' && $method==='POST') {
+        if (!in_array($input['operation']??'',['preview','apply'],true)) fail('Unknown mail rule operation.');
+        $a=mail_rule_account((string)($input['account']??''));
+        session_write_close();
+        $apply=$input['operation']==='apply';
+        if ($apply) activity_begin('Apply mail rule',$a['label']);
+        json_response(mail_rule_existing($a,$input,$apply));
+    }
     if (in_array($route,['mail-folders','mail-folder-manage','mail-folder-sync'],true) && $method==='POST') {
         $a=account((string)($input['account']??'')); session_write_close();
         $operation=function() use($route,$a,$input) {
@@ -320,7 +336,10 @@ try {
         try {
             $operation=function() use (&$a,$repair,$batches) {
                 $count=match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair,$batches),'caldav'=>sync_caldav($a) };
-                if ($a['type']!=='caldav') apply_mail_blocks($a);
+                if ($a['type']!=='caldav') {
+                    apply_mail_blocks($a);
+                    apply_mail_rules($a);
+                }
                 return $count;
             };
             $count=$a['type']==='caldav'?with_account_mail_lock($a['id'],$operation):with_account_mail_sync($a['id'],$operation);

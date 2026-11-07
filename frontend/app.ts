@@ -13,6 +13,7 @@ import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, ce
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
 import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
+import {renderMailRules} from './mail-rules.js';
 import {mailBody, mailDisplayControls, bindMailReader} from './mail-reader.js';
 import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
 import {attachmentSection, bindAttachments, waitForAttachments} from './mail-attachments.js';
@@ -1545,7 +1546,7 @@ function renderJunkSettings() {
   select.onchange=()=>void render();
   void render();
 }
-const settingsPages=[['appearance','Appearance'],['mail','Mail'],['accounts','Accounts'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups']] as const;
+const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['accounts','Accounts'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups']] as const;
 const settingsPageKey='office-settings-page';
 let settingsPage='appearance';
 try {
@@ -1590,6 +1591,9 @@ function renderSettings(entryVersion?: number) {
       <section class="card" id="mail-list-settings"></section>
       <section class="card"><h2>Junk and recovery</h2><div id="mail-junk-settings"></div><h3>Recovery copies</h3><label class="check-label"><input id="keep-recovery" type="checkbox" ${p.keepRecoveryCopies!==false?'checked':''}> Keep recovery copies of messages absent from synchronized folders</label><p>Recovery copies are excluded from All cached mail. Save them in Local mail or discard them. Turning this off removes absent cached copies on the next successful sync; local mail is kept.</p></section>
     </section>
+    <section class="settings-grid" id="settings-mail-rules" data-settings-page="mail-rules"${settingsPage==='mail-rules'?'':' hidden'}>
+      <section class="card" id="mail-rules-panel"><h2>Mail Rules</h2><p>Loading rules…</p></section>
+    </section>
     <section class="settings-grid" id="settings-accounts" data-settings-page="accounts"${settingsPage==='accounts'?'':' hidden'}>
       <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a=>`<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync?'Last checked '+timestampLabel(a.last_sync,new Date(a.last_sync).toLocaleString()):'Not checked yet'}${a.error?' · '+e(a.error):''}</small></div><div class="actions">${['imap','google'].includes(a.type)?`<button data-repair-account="${a.id}">Repair / resync</button>`:''}${a.type==='google'?`<button data-google="${a.id}">Authorize</button>`:''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('')||'<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button></section>
       <section class="card" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section>
@@ -1611,6 +1615,13 @@ function renderSettings(entryVersion?: number) {
   </div>`;
   const categories=main.querySelectorAll<HTMLButtonElement>('[data-settings-category]');
   const pages=main.querySelectorAll<HTMLElement>('[data-settings-page]');
+  let rulesLoaded=false;
+  const loadRules=()=>{
+    if(settingsPage!=='mail-rules'||rulesLoaded)return;
+    rulesLoaded=true;
+    void renderMailRules(main.querySelector<HTMLElement>('#mail-rules-panel')!,{request:api,accounts:mailAccounts(),escape:e,notice});
+  };
+  loadRules();
   pages.forEach(page=>{
     page.tabIndex=-1;
     page.setAttribute('aria-label',settingsPages.find(([id])=>id===page.dataset.settingsPage)![1]+' settings');
@@ -1624,6 +1635,7 @@ function renderSettings(entryVersion?: number) {
     try {sessionStorage.setItem(settingsPageKey,settingsPage);} catch {/* Keep the in-page choice. */}
     categories.forEach(category=>category.setAttribute('aria-current',category===button?'page':'false'));
     pages.forEach(page=>page.hidden=page.dataset.settingsPage!==settingsPage);
+    loadRules();
     main.scrollTop=0;
   });
   bindMailListSettings(document.querySelector<HTMLElement>('#mail-list-settings')!,p.mailList,async layout=>{await attempt(async()=>{const preferences={...state.prefs,mailList:layout};await api('preferences',{preferences});state.prefs=preferences;notice('List appearance saved.');});});

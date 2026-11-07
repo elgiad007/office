@@ -368,6 +368,48 @@ try {
     forget_deleted_junk(['account'=>$gmailImap['id'],'type'=>'imap','gmailApi'=>true],['ffffffffffffffff']);
     $remaining=mail_cache_rows($gmailImap['id']);
     check(count($remaining)===1 && $remaining[0]['title']==='Keep Inbox','Gmail API deletion evicts the exact unsigned IMAP identity and preserves an unrelated matching UID');
+    $routing=make_account('rule-fixture','google')+['type'=>'google'];
+    $definition=[
+        'id'=>'b0d030f1-0de2-4352-9a95-8d7565abc123','name'=>'Evening reports','enabled'=>true,'account'=>'',
+        'folder'=>'','zone'=>'America/New_York','mode'=>'all','conditions'=>[
+            ['field'=>'domain','operator'=>'is','value'=>'EXAMPLE.COM'],
+            ['field'=>'date','operator'=>'is','value'=>'2026-11-06'],
+            ['field'=>'time','operator'=>'after','value'=>'19:00'],
+            ['field'=>'body','operator'=>'contains','value'=>'ready for review'],
+        ],
+    ];
+    $config=save_mail_rules(['version'=>'','rules'=>[$definition]]);
+    refused(fn()=>save_mail_rules(['version'=>'','rules'=>[]]),'Mail rules changed');
+    $receipt=strtotime('2026-11-07T01:00:00Z');
+    $aRule=$config['rules'][0]['definition'];
+    $raw="From: Alice <alice@example.com>\r\nSubject: Report\r\nDate: Mon, 1 Jan 2001 00:00:00 +0000\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<p>Ready for <b>review</b></p>";
+    $messages=[];
+    foreach (['current'=>$receipt,'historical'=>$receipt-3600,'blocked'=>$receipt] as $id=>$arrived) {
+        $messages['gmail:'.$id]=mail_download($routing,'gmail:'.$id,$raw,['providerId'=>$id,'folder'=>'Inbox','junkArrival'=>$arrived]);
+    }
+    $config['rules'][0]['since']=$receipt-1800;
+    set_setting('mail-rules',$config);
+    update_mail_block($routing['id'],'sender','alice@example.com');
+    $blocks=mail_block_rules($routing['id']);
+    $blocks['sender:alice@example.com']['since']=$receipt-60;
+    set_setting('mail-blocks:'.$routing['id'],$blocks);
+    $messages['gmail:current']['meta']['from']='Bob <bob@example.com>';
+    $membership=array_fill_keys(array_keys($messages),['folder'=>'Inbox']);
+    publish_mail_snapshot($routing,$membership,$messages);
+    $current=get_record(remote_id($routing['id'],'gmail:current'));
+    $historical=get_record(remote_id($routing['id'],'gmail:historical'));
+    $blocked=get_record(remote_id($routing['id'],'gmail:blocked'));
+    check($current['meta']['receivedAt']===$receipt && $current['meta']['rulePending'] &&
+        empty($historical['meta']['rulePending']) && !empty($blocked['meta']['junkPending']),'queue only arrivals after rule creation and preserve junk priority');
+    check(mail_rule_match($aRule,$current)===null && mail_rule_evaluate($aRule,$routing,$current),'provider receipt crosses the local date boundary and HTML body text matches');
+    $any=$aRule;
+    $any['mode']='any';
+    check(mail_rule_match($any,$current)===true,'any-mode can decide from headers without fetching the body');
+    $request=['version'=>$config['version'],'id'=>$aRule['id']];
+    $preview=mail_rule_existing($routing,$request,false);
+    check(array_column($preview['matches'],'id')===[$current['id']] && $preview['destination']==='Archive','existing-mail preview omits blocked mail and shows the destination');
+    $result=mail_rule_existing($routing,$request+['destinationId'=>'','messages'=>[['id'=>$current['id'],'revision'=>0]]],true);
+    check($result['moved']===0 && count($result['errors'])===1,'a stale preview cannot move mail');
     echo "PASS mail synchronization, custom folders, repair, recovery and resumable header fixtures (no live provider calls).\n";
 } finally {
     foreach (glob($testDir.'/locks/*')?:[] as $file) @unlink($file); @rmdir($testDir.'/locks');

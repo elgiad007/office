@@ -146,7 +146,7 @@ function mail_list_record(array $row): array {
     $row['bodyHash']=isset($row['meta']['bodyRawBase64'])?hash('sha256',$row['meta']['bodyRawBase64']):$row['contentHash'];
     $row['hasOriginal']=isset($row['meta']['rawBase64']) || isset($row['meta']['raw']);
     $row['summary']=true;
-    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts'],$row['meta']['junkPending'],$row['meta']['junkAttempted']);
+    unset($row['meta']['rawBase64'],$row['meta']['raw'],$row['meta']['headersBase64'],$row['meta']['bodyRawBase64'],$row['meta']['mimeParts'],$row['meta']['junkPending'],$row['meta']['junkAttempted'],$row['meta']['rulePending'],$row['meta']['ruleAttempted']);
     return $row;
 }
 function get_record(string $id): array {
@@ -159,6 +159,7 @@ function validate_record(array $input): array {
     $body=(string)($input['body']??''); if (strlen($body)>2*1024*1024) fail('Item exceeds 2 MB.');
     $meta=$input['meta']??[]; if (!is_array($meta) || strlen(json_encode($meta))>($kind==='mail'?40:2)*1024*1024) fail('Invalid item metadata.');
     unset($meta['attachments']); // Derived from the file table, never accepted from clients.
+    if ($kind==='mail' && ($meta['folder']??'')!=='Inbox') unset($meta['rulePending'],$meta['ruleAttempted']);
     if ($kind==='sheets') {
         $sheets=$meta['workbook']['sheets']??null;
         if (!is_array($sheets) || !array_is_list($sheets) || count($sheets)<1 || count($sheets)>10) fail('A workbook needs 1–10 sheets.');

@@ -412,7 +412,14 @@ function smtp_expect(mixed $s,array $allowed): void {
     do { $line=fgets($s,8192); if ($line===false || ++$count>100) fail('SMTP connection interrupted. Delivery may be uncertain; check Sent before retrying.'); } while (isset($line[3]) && $line[3]==='-');
     if (!in_array((int)substr($line,0,3),$allowed,true)) fail('SMTP server rejected this operation.');
 }
-function remote_mail_action(array $r,string $action,?array &$undoBefore=null): array {
+function gmail_require_inbox(string $base,string $token): void {
+    $live=google_json($base.'?format=minimal',$token);
+    $labels=$live['labelIds']??null;
+    if (!is_array($labels)) fail('Inbox membership could not be verified.');
+    if (!in_array('INBOX',$labels,true) || array_intersect(['TRASH','SPAM'],$labels)) fail('The message left the Inbox. Sync before applying rules.',409);
+}
+
+function remote_mail_action(array $r,string $action,?array &$undoBefore=null,bool $ruleMove=false): array {
     if ($r['kind']!=='mail' || empty($r['meta']['remote'])) fail('Choose a synchronized message.');
     if (!in_array($action,['archive','trash','restore','read','unread'],true)) fail('Unknown mail action.');
     if (in_array($r['meta']['folder']??'',['Recovery copies','Not in Inbox'],true)) fail('This is a recovery copy. Save it locally or discard it.');
@@ -423,6 +430,7 @@ function remote_mail_action(array $r,string $action,?array &$undoBefore=null): a
     if ($a['type']==='google') {
         $base='https://gmail.googleapis.com/gmail/v1/users/me/messages/'.rawurlencode($id);
         $token=google_token($a);
+        if ($ruleMove) gmail_require_inbox($base,$token);
         $msg=match($action) {
             'trash'=>google_json($base.'/trash',$token,'POST'),
             'restore'=>google_json($base.'/modify',$token,'POST',['removeLabelIds'=>['TRASH'],'addLabelIds'=>['INBOX']]),
@@ -431,6 +439,7 @@ function remote_mail_action(array $r,string $action,?array &$undoBefore=null): a
             'unread'=>google_json($base.'/modify',$token,'POST',['addLabelIds'=>['UNREAD']]),
         };
         if (!is_array($msg['labelIds']??null)) fail('The provider action could not be confirmed. Use Repair / resync before retrying.');
+        if ($ruleMove && gmail_folder($msg['labelIds'])!=='Archive') fail('Archive could not be confirmed. Sync before retrying.');
         $r['meta']['folder']=gmail_folder($msg['labelIds'])??'Recovery copies';
         $r['meta']['labelIds']=$msg['labelIds'];
         $r['meta']['read']=!in_array('UNREAD',$msg['labelIds'],true);

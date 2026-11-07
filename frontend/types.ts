@@ -1,6 +1,7 @@
 /** Browser-facing contracts. PHP remains the authority for validation and storage. */
 export type {ItemKind} from './item-types.js';
 import type {ItemKind} from './item-types.js';
+import type {MailRule, MailRulePreview} from './mail-rules.js';
 export type AppName = ItemKind | 'settings';
 export type Cells = Record<string, string>;
 export interface Workbook { sheets: {name: string; cells: Cells}[] }
@@ -122,6 +123,8 @@ export interface ApiResponses {
   save: MutationResult; delete: { ok: boolean; undoToken?: string }; 'mail-action': MailActionResult;
   'mail-undo': MutationResult;
   'mail-junk-settings': {rules: {type: 'sender' | 'domain'; target: string}[]; folder: string};
+  'mail-rules': {version:string;rules:MailRule[]};
+  'mail-rule-review': MailRulePreview;
   'mail-empty-junk': {authorize: true} | {count: number; name: string; token: string} | {deleted: number; skipped: number; unconfirmed: number; warning?: string};
   send: { ok: boolean; record: OfficeRecord };
   'mail-folders': { folders: MailFolder[] };
