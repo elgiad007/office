@@ -401,7 +401,7 @@ window.addEventListener('resize',()=>panelSizing?.refresh());
 function shell() {
   const syncStatus=document.querySelector<HTMLElement>('#sync-status')!;
   syncStatus.textContent='Automatic sync';syncStatus.hidden=false;
-  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new','Compose','compose')}${headerAction('import','Import')}${headerAction('export-all','Export')}</div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new','Compose','compose')}${headerAction('import','Import')}${headerAction('export-all','Export all mail')}<span class="mail-export-status" id="mail-export-status" role="status"></span></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
   panelSizing=setupPanelSizing(root.querySelector<HTMLElement>('.shell')!,()=>setMailFolderPanel(false));
   setupTopAgenda();
   root.onclick=handleClick;
@@ -1259,6 +1259,49 @@ async function fullMailRecord(record: OfficeRecord) {
   if(cached && !cached.summary && cached.revision===record.revision && sameMailTarget(record,cached))return cached;
   return (await api(`record&id=${encodeURIComponent(record.id)}`)).record;
 }
+function downloadRecordArchive(name: string, records: OfficeRecord[]) {
+  download(name+'.json',JSON.stringify({format:'portable-office-items',version:1,records},null,2),'application/json');
+}
+async function exportAllMail(button: HTMLButtonElement) {
+  if(button.disabled)return;
+  const status=document.querySelector<HTMLElement>('#mail-export-status')!;
+  const initialRows=state.rows;
+  button.disabled=true;
+  status.textContent='Preparing mail export…';
+  try {
+    await commit();
+    const rows=(state.app==='mail'?state.rows:initialRows).slice();
+    if(!rows.length){
+      status.textContent='There is nothing to export yet.';
+      return;
+    }
+    const records: OfficeRecord[]=[];
+    let firstFailure: Error | undefined;
+    // Keep large mailboxes from filling the account request queues all at once.
+    const batchSize=4;
+    for(let offset=0;offset<rows.length;offset+=batchSize){
+      if(!button.isConnected)return;
+      const results=await Promise.allSettled(rows.slice(offset,offset+batchSize).map(fullMailRecord));
+      for(const result of results){
+        if(result.status==='fulfilled')records.push(result.value);
+        else firstFailure??=asError(result.reason);
+      }
+    }
+    if(!button.isConnected)return;
+    if(!records.length)throw new Error(firstFailure?.message||'No message bodies are available.');
+    downloadRecordArchive('mail',records);
+    const skipped=rows.length-records.length;
+    const result=skipped?`Download started · mail.json · ${skipped} skipped`:'Download started · mail.json';
+    status.textContent=result;
+    if(firstFailure)notice(`${result}. First failure: ${firstFailure.message}`);
+  } catch(cause) {
+    if(!button.isConnected)return;
+    status.textContent='Mail export failed';
+    notice(`Mail export failed: ${asError(cause).message}`,true);
+  } finally {
+    button.disabled=false;
+  }
+}
 async function exportRecords(all=false,selectedRecords: OfficeRecord[] | null=null) {
   await commit(); let records=selectedRecords|| (all?state.rows:[state.current].filter(isPresent)); if(!records.length){notice('There is nothing to export yet.');return;}
   if(state.app==='mail')records=await Promise.all(records.map(fullMailRecord));
@@ -1270,7 +1313,7 @@ async function exportRecords(all=false,selectedRecords: OfficeRecord[] | null=nu
   else if(state.app==='wiki'&&!all)download(name+'.md',records[0].body,'text/markdown');
   else if(state.app==='documents'&&!all)download(name+'.html','<!doctype html><html lang="en"><meta charset="utf-8"><title>'+e(name)+'</title><body>'+safeDocument(records[0].body)+'</body></html>','text/html');
   else if(state.app==='mail'&&!all&&(records[0].meta.rawBase64||records[0].meta.raw))download(name+'.eml',originalMail(records[0]),'message/rfc822');
-  else download(name+'.json',JSON.stringify({format:'portable-office-items',version:1,records},null,2),'application/json');
+  else downloadRecordArchive(name,records);
 }
 async function importFile() {
   await leaveEditor();const input=document.createElement('input');input.type='file';input.accept='.json,.md,.txt,.html,.htm,.csv,.ics,.vcf,.eml';
@@ -1386,7 +1429,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='discard-copy'){const record=state.current!;await connections.confirmDeletion([record],'Discard copy','Permanently remove this cached recovery copy from Office? Your server mailbox is unaffected.',choices=>mailAction('discard',record,choices));}
     if(action==='import')await importFile();
     if(action==='export')await exportRecords();
-    if(action==='export-all')await exportRecords(true);
+    if(action==='export-all')await (state.app==='mail'?exportAllMail(button):exportRecords(true));
     if(action==='print'){await commit();window.print();}
     if(action==='image')insertImage();
     if(action==='link')insertLink();

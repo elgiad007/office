@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 
 export async function testSyncProgress(page,url){
   let calls=0,releaseFirst,releaseSecond;const batchCounts=[];
@@ -29,8 +30,8 @@ export async function testSyncProgress(page,url){
     const toolbar=page.locator('#mail-toolbar');
     const compose=toolbar.getByRole('button',{name:'Compose',exact:true});
     const importButton=toolbar.getByRole('button',{name:'Import',exact:true});
-    const exportButton=toolbar.getByRole('button',{name:'Export',exact:true});
-    assert.deepEqual(await toolbar.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label'))),['Compose','Import','Export']);
+    const exportButton=toolbar.getByRole('button',{name:'Export all mail',exact:true});
+    assert.deepEqual(await toolbar.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label'))),['Compose','Import','Export all mail']);
     assert.equal(await page.locator('#list-count').textContent(),'0 cached messages');
     assert.match(await page.locator('#list-count').getAttribute('title'),/older mail/);
     releaseFirst();await page.locator('#sync-status').filter({hasText:'batch 2 · downloading older mail'}).waitFor();
@@ -46,9 +47,8 @@ export async function testSyncProgress(page,url){
     await compose.focus();
     await page.keyboard.press('Tab');
     assert.equal(await importButton.getByText('Import',{exact:true}).isVisible(),true);
-    const chooser=page.waitForEvent('filechooser');
-    await page.keyboard.press('Enter');
-    await (await chooser).setFiles([]);
+    const [chooser]=await Promise.all([page.waitForEvent('filechooser'),importButton.click()]);
+    await chooser.setFiles([]);
     await exportButton.click();
     await page.getByText('There is nothing to export yet.',{exact:true}).waitFor();
     await page.locator('[data-app="wiki"]').click();
@@ -73,4 +73,71 @@ export async function testSyncProgress(page,url){
     await page.locator('#notice').filter({hasText:'Ready.'}).waitFor();
     console.log('PASS sync progress: cached counts, account batches, older-mail continuation, released sync button, persistent folder progress and idle completion.');
   }finally{releaseFirst();releaseSecond();await page.unroute(routes);}
+  await testMailExport(page,url);
+}
+
+async function testMailExport(page,url){
+  const raw='Subject: Available message\r\n\r\nOriginal body';
+  const available={id:'available',kind:'mail',title:'Available message',body:'Original body',revision:1,meta:{folder:'Inbox',read:true,raw}};
+  const unavailable={id:'unavailable',kind:'mail',title:'Unavailable message',body:'',revision:1,meta:{folder:'Recovery copies',headerOnly:true,remote:true,account:'export-fixture',read:true}};
+  const failure='This message is no longer in its synchronized folder.';
+  let records=[available,unavailable],releaseFetch;
+  const blockedFetch=new Promise(resolve=>releaseFetch=resolve);
+  const routes=t=>t.pathname.endsWith('/api.php');
+  await page.route(routes,async route=>{
+    const action=new URL(route.request().url()).searchParams.get('r');
+    if(action==='mail-content'){
+      assert.equal(route.request().postDataJSON().id,unavailable.id);
+      await blockedFetch;
+      return route.fulfill({status:400,json:{error:failure}});
+    }
+    const responses={
+      status:{authenticated:true,csrf:'fixture',activity:false,preferences:{}},
+      accounts:{accounts:[]},connections:{connections:[]},records:{records},activity:{entries:[]}
+    };
+    if(!responses[action])throw Error('Unexpected export fixture route '+action);
+    await route.fulfill({json:responses[action]});
+  });
+  try{
+    await page.goto(url+'?mail-export#mail');
+    await page.locator('#list-count').getByText('1 cached message',{exact:true}).waitFor();
+    const exportAll=page.getByRole('button',{name:'Export all mail',exact:true});
+    const status=page.locator('#mail-export-status');
+    const downloading=page.waitForEvent('download');
+    await exportAll.click();
+    await status.getByText('Preparing mail export…',{exact:true}).waitFor();
+    assert.equal(await exportAll.isDisabled(),true);
+    releaseFetch();
+    const download=await downloading;
+    assert.equal(download.suggestedFilename(),'mail.json');
+    const archive=JSON.parse(await readFile(await download.path(),'utf8'));
+    assert.equal(archive.format,'portable-office-items');
+    assert.deepEqual(archive.records.map(record=>[record.id,record.body]),[[available.id,available.body]]);
+    await status.getByText('Download started · mail.json · 1 skipped',{exact:true}).waitFor();
+    assert.equal(await exportAll.isEnabled(),true);
+
+    await page.locator('#items [data-id="available"]').click();
+    const more=page.locator('#detail [data-mail-disclosure="more"]');
+    await more.locator('summary').click();
+    const exportingOne=page.waitForEvent('download');
+    await more.getByRole('button',{name:'Export',exact:true}).click();
+    const message=await exportingOne;
+    assert.equal(message.suggestedFilename(),'Available message.eml');
+    assert.equal(await readFile(await message.path(),'utf8'),raw);
+
+    records=[unavailable];
+    await page.reload();
+    await page.locator('#list-count').getByText('0 cached messages',{exact:true}).waitFor();
+    const downloads=[];
+    const recordDownload=download=>downloads.push(download);
+    page.on('download',recordDownload);
+    try{
+      await exportAll.click();
+      await status.getByText('Mail export failed',{exact:true}).waitFor();
+      assert.equal(await page.locator('#notice').textContent(),'Mail export failed: '+failure);
+      assert.equal(await exportAll.isEnabled(),true);
+      assert.deepEqual(downloads,[]);
+    }finally{page.off('download',recordDownload);}
+    console.log('PASS mail export: progress, partial archive, single-message EML and all-failed feedback.');
+  }finally{releaseFetch();await page.unroute(routes);}
 }
