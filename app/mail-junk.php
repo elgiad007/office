@@ -103,7 +103,7 @@ function apply_mail_blocks(array $a): void {
     if (!mail_block_rules($a['id'])) return;
     with_account_mail_mutation($a['id'],function()use($a){
         $rules=mail_block_rules($a['id']);
-        $q=db()->prepare("SELECT id FROM records WHERE kind='mail' AND json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.folder')='Inbox' AND json_type(meta,'$.junkPending')='array' ORDER BY json_extract(meta,'$.junkAttempted'),updated,id LIMIT 3");
+        $q=db()->prepare("SELECT id FROM records WHERE id IN (SELECT id FROM mail_index WHERE account=? AND remote=1 AND folder='Inbox') AND json_type(meta,'$.junkPending')='array' ORDER BY json_extract(meta,'$.junkAttempted'),updated,id LIMIT 3");
         $q->execute([$a['id']]);
         $deadline=microtime(true)+8;
         foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {

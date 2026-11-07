@@ -5,6 +5,7 @@ import {testMessageHeaders} from './message-headers.browser.mjs';
 import {createRequire} from 'node:module';
 import {readFile,mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import {testMailPagination} from './mail-pagination.browser.mjs';
 import {openMailMore} from './mail-reader-ui.mjs';
 import {testMailCompact} from './mail-compact.browser.mjs';
 import {testHtmlReaderSync, testMailReaderSync} from './mail-reader-sync.browser.mjs';
@@ -117,6 +118,7 @@ try{
  await testMailList(page,url);
  await testMailRead(page,url);
  await testMailCache(page,url);
+ await testMailPagination(page,url);
  await testMailHeaders(page,url);
  await testMailOperationQueue(page,url);
  await testActivityKeyboard(page,url);

@@ -9,6 +9,7 @@ export async function testMailView(page,url) {
   await page.route(routes,async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',activity:false,preferences};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='accounts')json={accounts:[
       {id:'view-account',type:'imap',label:'View fixture',folders:[{id:'Junk',name:'Junk',role:'Junk',protected:true}]},
       {id:'gmail-imap',type:'imap',label:'Gmail IMAP',gmailImap:true,
@@ -52,6 +53,8 @@ export async function testMailView(page,url) {
   const header=label=>page.locator('[data-mail-group-key]').filter({has:page.locator('.mail-group-label',{hasText:new RegExp('^'+label+'$')})});
   const order=()=>page.locator('#items .item').evaluateAll(nodes=>nodes.map(n=>n.dataset.id));
   const selected=id=>page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id===id,id);
+  const ready=()=>page.waitForFunction(()=>document.querySelector('#sync-status')?.textContent.startsWith('Checked '));
+  const folder=async value=>{await page.locator('#mail-folder').selectOption(value);await page.waitForFunction(()=>!document.querySelector('#mail-folder')?.disabled);};
   const open=async()=>{if(!await page.locator('#mail-list-view').evaluate(node=>node.open))await page.locator('#mail-list-view > summary').click();};
   const save=async action=>{const before=writes;const response=page.waitForResponse(r=>r.url().includes('r=preferences'));await action();await(await response).finished();assert.ok(writes>before);};
   const choose=async(label,value)=>{await open();await save(()=>page.getByLabel(label,{exact:true}).selectOption(value));};
@@ -87,13 +90,13 @@ export async function testMailView(page,url) {
     await item('a').click();await save(()=>header('Today').click());
     await item('c').click();await page.keyboard.press('D');await selected('u');
     assert.deepEqual(await order(),['u'],'Delete advances within the expanded order');
-    await page.locator('#mail-folder').selectOption('Trash');assert.equal(await page.getByLabel('Group mail by').inputValue(),'date');
-    await page.locator('#mail-folder').selectOption('Inbox');assert.equal(await header('Today').getAttribute('aria-expanded'),'false');
+    await folder('Trash');assert.equal(await page.getByLabel('Group mail by').inputValue(),'date');
+    await folder('Inbox');assert.equal(await header('Today').getAttribute('aria-expanded'),'false');
 
     // Paging counts messages, skips collapsed rows, and can navigate past the cutoff.
     preferences={mailView:{group:'sender',sort:'date-desc',collapsed:[]}};
     records=Array.from({length:220},(_,n)=>mail((n<110?'a':'b')+String(n%110).padStart(3,'0'),'invalid',n<110?'Amy <a@example.com>':'Beta <b@example.com>','Page '+n));
-    await page.reload();await selected('a000');assert.equal((await order()).length,100);
+    await page.reload();await selected('a000');await ready();assert.equal((await order()).length,100);
     await page.getByRole('button',{name:'Show next 100 messages',exact:true}).click();assert.equal((await order()).length,200);
     await save(()=>header('Amy <a@example.com>').click());assert.equal((await order()).length,100);assert.equal((await order())[0],'b000');
     await page.getByRole('button',{name:'Show next 100 messages',exact:true}).click();assert.equal((await order()).length,110);
@@ -109,25 +112,25 @@ export async function testMailView(page,url) {
     records[0].meta.junkReason='Spam verdict in the message headers';
     await page.reload();await item('flagged').waitFor();
     await item('flagged').getByText('Suspected junk', {exact:false}).waitFor();
-    await page.locator('#mail-folder').selectOption('Suspected Junk');
+    await folder('Suspected Junk');
     assert.deepEqual(await order(),['flagged']);
     await item('flagged').click({button:'right'});
     await page.getByRole('menuitem',{name:'Mark as Junk',exact:true}).click();
     await item('flagged').waitFor({state:'detached'});
-    await page.locator('#mail-folder').selectOption('Junk');
+    await folder('Junk');
     await item('flagged').click({button:'right'});
     await page.getByRole('menuitem',{name:'Not Junk',exact:true}).click();
     await item('flagged').waitFor({state:'detached'});
-    await page.locator('#mail-folder').selectOption('Suspected Junk');
+    await folder('Suspected Junk');
     assert.deepEqual(await order(),[]);
-    await page.locator('#mail-folder').selectOption('Inbox');
+    await folder('Inbox');
     await item('flagged').click({button:'right'});
     await page.getByRole('menuitem',{name:'Block Domain…',exact:true}).click();
     await page.getByRole('dialog').getByText(/Block example\.com for this account/).waitFor();
     await page.getByRole('button',{name:'Block Domain',exact:true}).click();
     await item('flagged').waitFor({state:'detached'});
     console.log('PASS Junk browser flow: review filter, mark as Junk, restore and confirm exact domain.');
-    await page.locator('#mail-folder').selectOption('Junk');
+    await folder('Junk');
     await item('flagged').waitFor();
     await page.locator('[data-account-tree="view-account"] > summary').click();
     const junkFolder=page.getByRole('button',{name:'Junk',exact:true});

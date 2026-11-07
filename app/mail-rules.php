@@ -175,7 +175,7 @@ function mail_rule_evaluate(array $rule,array $a,array &$row): bool {
     return mail_rule_match($rule,$row,$body)===true;
 }
 
-const MAIL_RULE_INBOX = "kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.folder')='Inbox' AND json_extract(meta,'$.account')=?";
+const MAIL_RULE_INBOX = "id IN (SELECT id FROM mail_index WHERE account=? AND remote=1 AND folder='Inbox')";
 
 function mail_rule_move(array $a,array $row,array $rule,array $destination): void {
     unset($row['meta']['rulePending'],$row['meta']['ruleAttempted']);

@@ -141,6 +141,7 @@ export interface ApiResponses {
   preferences: { ok: boolean };
   import: { count: number }; 'import-items': { count: number }; restore: { count: number; preferences?: Preferences };
 }
+export interface RecordList {records: OfficeRecord[];mailPage?: {total: number;offset: number;more: boolean}}
 export type ConnectionVisibility='active'|'archived'|'all';
 export interface ConnectionItem {id:string;kind:string;title:string;excerpt:string;meta:Record<string,string>;degree?:number;activeDegree?:number;archivedDegree?:number}
 export interface ConnectionEdge {a:string;b:string;created:string;archived?:boolean}
@@ -150,7 +151,7 @@ export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${stri
 export type ApiResponse<R extends ApiRoute> = R extends keyof ApiResponses ? ApiResponses[R]
   : R extends `connection-search&${string}` ? {items:ConnectionItem[]}
   : R extends `connections&${string}` ? ConnectionList
-  : R extends `records&${string}` ? {records: OfficeRecord[]}
+  : R extends `records&${string}` ? RecordList
   : R extends `record&${string}` ? {record: OfficeRecord}
   : {revisions: {revision: number; snapshot: OfficeRecord}[]};
 /** Requests are serialized as JSON; individual endpoints validate their payloads in PHP. */

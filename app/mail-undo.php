@@ -67,6 +67,7 @@ function undo_mail_delete(string $token,?callable $googleRequest=null,?callable 
             try{
                 $r=$p['local'];$q=$db->prepare('SELECT 1 FROM records WHERE id=?');$q->execute([$r['id']]);if($q->fetchColumn())fail('A record already uses this message ID. Undo did not overwrite it.',409);
                 $db->prepare('INSERT INTO records(id,kind,title,body,meta,revision,updated) VALUES(?,?,?,?,?,?,?)')->execute(array_values($r));
+                mail_index_record($db,$r['id'],$r['kind'],json_decode($r['meta'],true,64,JSON_THROW_ON_ERROR));
                 $q=$db->prepare('INSERT INTO revisions(record_id,revision,snapshot) VALUES(?,?,?)');foreach($p['history'] as $h)$q->execute(array_values($h));
                 $q=$db->prepare('INSERT INTO mail_files(record_id,part,name,type,size,data) VALUES(?,?,?,?,?,?)');foreach($p['files'] as $f)$q->execute(array_values($f));
                 connection_restore($p['connections']??[]);

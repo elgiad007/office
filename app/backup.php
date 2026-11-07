@@ -140,6 +140,7 @@ function restore_office_backup(iterable $records,iterable $histories,mixed $pref
             }
             $updated=is_string($r['updated']??null)&&strlen($r['updated'])<=40?$r['updated']:gmdate('c');
             $insertRecord->execute([$id,$v['kind'],$v['title'],$v['body'],json_encode($v['meta'],JSON_THROW_ON_ERROR),max(1,(int)($r['revision']??1)),$updated]);
+            mail_index_record($db,$id,$v['kind'],$v['meta']);
         }
         $insertRevision=$db->prepare('INSERT INTO revisions VALUES(?,?,?)');
         foreach($histories as $h){

@@ -39,6 +39,67 @@ let backupMessage = '';
 const lastSelectedItems = new Map();
 let appEntryVersion = 0;
 let mailCache;
+let mailPage;
+let listLoadVersion = 0;
+let mailQueryTimer;
+function mailQueryContext() {
+    const p = mailViewPreferences(state.prefs.mailView);
+    return JSON.stringify([state.mailFolder, state.mailScope?.account, state.mailScope?.folder, state.search, p.group, p.sort, p.collapsed]);
+}
+function recordsRoute(fullMail = false) {
+    if (state.app !== 'mail')
+        return `records&kind=${state.app}`;
+    if (fullMail)
+        return 'records&kind=mail&summaries=1';
+    const prefs = mailViewPreferences(state.prefs.mailView);
+    const paged = !state.search && prefs.group !== 'sender' && prefs.sort === 'date-desc' && !prefs.collapsed.length && mailListLimit <= 10000;
+    const params = new URLSearchParams({ kind: 'mail', summaries: '1', view: '1', folder: state.mailScope?.folder ?? state.mailFolder });
+    if (state.mailScope)
+        params.set('account', state.mailScope.account);
+    if (paged) {
+        params.set('page', '1');
+        params.set('limit', String(mailListLimit));
+    }
+    return `records&${params}`;
+}
+function scheduleMailQuery() {
+    clearTimeout(mailQueryTimer);
+    mailQueryTimer = setTimeout(() => { if (state.app === 'mail')
+        void attempt(refreshMailQuery); }, 150);
+}
+async function refreshMailQuery() {
+    clearTimeout(mailQueryTimer);
+    const request = ++listLoadVersion, entry = appEntryVersion, context = mailQueryContext(), route = recordsRoute();
+    const viewport = captureMailListViewport();
+    let result, version;
+    try {
+        do {
+            version = mailDeleteVersion + mailReadVersion;
+            result = await api(route);
+            if (state.app !== 'mail' || entry !== appEntryVersion || request !== listLoadVersion || context !== mailQueryContext())
+                return;
+        } while (version !== mailDeleteVersion + mailReadVersion);
+    }
+    catch (error) {
+        if (state.app === 'mail' && entry === appEntryVersion && request === listLoadVersion && context === mailQueryContext()) {
+            const list = document.querySelector('#items');
+            list.innerHTML = '<div class="list-empty" role="alert">Couldn’t load messages. <button type="button">Try again</button></div>';
+            list.querySelector('button').onclick = () => { void attempt(refreshMailQuery); };
+        }
+        throw error;
+    }
+    mailPage = result.mailPage ? { ...result.mailPage, context } : undefined;
+    state.rows = result.records.filter(r => !pendingMailDeletes.has(r.id)).sort(compareMail);
+    if (state.current && !state.dirty && !isUnsavedDraft())
+        state.current = state.rows.find(row => row.id === state.current?.id) ?? state.current;
+    const visible = new Set(matchingRows().map(row => row.id));
+    for (const id of state.selected)
+        if (!visible.has(id))
+            state.selected.delete(id);
+    // A search or view change must never replace an editor or unsaved draft.
+    renderList();
+    restoreMailListViewport(viewport);
+}
 let mailCacheTimer;
 let pendingWrites = 0;
 const mailCacheLifetime = 30_000;
@@ -50,6 +111,8 @@ function clearMailCache() {
 function retainMailRows() {
     clearMailCache();
     if (pendingWrites || state.syncing)
+        return;
+    if (mailPage && (mailPage.context !== mailQueryContext() || (mailPage.more && state.rows.length < mailListLimit)))
         return;
     let remaining = mailCacheBudget;
     const fits = (value) => {
@@ -70,6 +133,7 @@ function retainMailRows() {
         return;
     mailCache = {
         rows: state.rows,
+        page: mailPage,
         expires: Date.now() + mailCacheLifetime,
         view: mailDraftOrigin(false),
         limit: mailListLimit,
@@ -576,11 +640,13 @@ async function boot() {
         applyTheme();
         const hash = location.hash.slice(1);
         state.app = apps[hash] || hash === 'settings' ? hash : 'mail';
-        const initial = state.app === 'settings' ? null : api(`records&kind=${state.app}${state.app === 'mail' ? '&summaries=1' : ''}`);
+        mailListLimit = 100;
+        mailPage = undefined;
+        const initial = state.app === 'settings' ? null : api(recordsRoute());
         const [accounts, records] = await Promise.all([api('accounts'), initial]);
         state.accounts = accounts.accounts;
         shell();
-        await load(undefined, { enteringApp: true }, records?.records);
+        await load(undefined, { enteringApp: true }, records ?? undefined);
         if (state.accounts.length)
             void syncAccounts(false);
     }
@@ -950,6 +1016,8 @@ function captureMailReader() {
     return snapshot;
 }
 async function load(preferId, { selectFirst = true, preserveSelection = false, enteringApp = false, revealMail = false, keepSidebar = false, entryVersion } = {}, initialRecords) {
+    clearTimeout(mailQueryTimer);
+    const requestVersion = ++listLoadVersion, queryContext = mailQueryContext();
     const versionAtStart = appEntryVersion;
     renderSendStatus();
     await waitForAttachments();
@@ -993,12 +1061,13 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     }
     // Retry snapshots taken across a deletion, rollback or read update.
     const app = state.app;
-    let records, version;
+    let result, version;
+    const route = recordsRoute(!!preferId && !initialRecords);
     do {
         version = mailDeleteVersion + mailReadVersion;
-        records = initialRecords ?? (await api(`records&kind=${app}${app === 'mail' ? '&summaries=1' : ''}`)).records;
+        result = initialRecords ?? await api(route);
         initialRecords = undefined;
-        if (state.app !== app || versionAtStart !== appEntryVersion)
+        if (state.app !== app || versionAtStart !== appEntryVersion || requestVersion !== listLoadVersion || (app === 'mail' && queryContext !== mailQueryContext()))
             return;
     } while (app === 'mail' && version !== mailDeleteVersion + mailReadVersion);
     if (isUnsavedDraft() || (preserveSelection && state.dirty))
@@ -1009,7 +1078,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     const listViewport = preserveSelection ? captureMailListViewport() : undefined;
     const readerSnapshot = preserveSelection ? captureMailReader() : undefined;
     const focusedId = preserveSelection ? document.activeElement?.closest('#items [data-id]')?.dataset.id : undefined;
-    state.rows = records.filter(r => !pendingMailDeletes.has(r.id));
+    mailPage = app === 'mail' && result.mailPage ? { ...result.mailPage, context: queryContext } : undefined;
+    state.rows = result.records.filter(r => !pendingMailDeletes.has(r.id));
     if (state.app === 'mail')
         state.rows.sort(compareMail);
     if (state.app === 'calendar')
@@ -1131,7 +1201,7 @@ function renderWorkspace(readerSnapshot) {
                 setMode('normal');
                 if (state.current?.meta.folder === 'Drafts')
                     mailDraftOrigins.set(state.current.id, mailDraftOrigin(false));
-                renderWorkspace();
+                await load();
                 setMailFolderPanel(false, true);
             }
             finally {
@@ -1235,6 +1305,12 @@ function taskBadges(row) {
     return `<span class="task-badges"><span class="badge task-status">${row.meta.done ? '✓ Completed' : '○ Unfinished'}</span><span class="badge task-priority ${['high', 'normal', 'low'].includes(level) ? 'task-priority-' + level : ''}">${level === 'high' ? '↑' : level === 'low' ? '↓' : '•'} ${e(priority)}</span>${!row.meta.done && ['overdue', 'today'].includes(due) ? `<span class="badge task-due-${due}">${due === 'overdue' ? '! Overdue' : '◷ Due today'}</span>` : ''}</span>`;
 }
 function renderList() {
+    if (state.app === 'mail' && mailPage && mailPage.context !== mailQueryContext()) {
+        document.querySelector('#items').innerHTML = '<div class="list-empty" role="status">Loading messages…</div>';
+        document.querySelector('#list-count').textContent = 'Loading…';
+        scheduleMailQuery();
+        return;
+    }
     if (state.app === 'mail' && (state.mailScope || state.mailFolder !== 'Drafts'))
         lastMailView = { folder: state.mailFolder, scope: structuredClone(state.mailScope), search: state.search, selectedId: state.current?.meta.folder === 'Drafts' ? undefined : state.current?.id };
     if (state.app === 'calendar') {
@@ -1243,7 +1319,7 @@ function renderList() {
     }
     const model = state.app === 'mail' ? mailView(matchingRows(), state.prefs.mailView) : state.app === 'tasks' ? taskView(matchingRows(), state.prefs.taskView) : undefined;
     const rows = model?.rows || filteredRows(), count = document.querySelector('#list-count');
-    count.textContent = state.app === 'mail' ? `${rows.length} cached ${rows.length === 1 ? 'message' : 'messages'}` : `${rows.length} ${rows.length === 1 ? apps[state.app].singular : 'items'}`;
+    count.textContent = state.app === 'mail' ? `${mailPage?.more ? rows.length + ' of ' + mailPage.total : rows.length} cached ${rows.length === 1 && !mailPage?.more ? 'message' : 'messages'}` : `${rows.length} ${rows.length === 1 ? apps[state.app].singular : 'items'}`;
     count.title = state.app === 'mail' ? 'Messages stored in Office for this view. This count can grow as older mail downloads.' : '';
     document.querySelector('#selection-count').textContent = state.selected.size ? `${state.selected.size} selected` : '';
     const expanded = model?.visible || rows;
@@ -1265,7 +1341,7 @@ function renderList() {
         const rendered = group.rows.filter(row => included.has(row.id));
         if (!group.collapsed && !rendered.length)
             return '';
-        return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed ? '▸' : '▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}</span></button>${rendered.map(item).join('')}`;
+        return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed ? '▸' : '▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}${state.app === 'mail' && mailPage?.more ? ' loaded' : ''}</span></button>${rendered.map(item).join('')}`;
     }).join('') : visible.map(item).join('')) : `<div class="list-empty">${state.app === 'tasks' ? 'No tasks match this view. Adjust List view filters or add a task.' : state.search ? 'No matching items. Try a different search.' : 'No items yet.'}</div>`;
     if (state.app === 'mail')
         bindMailFavicons(list);
@@ -1277,10 +1353,20 @@ function renderList() {
     });
     if (focusedGroup)
         list.querySelector(`[data-mail-group-key="${CSS.escape(focusedGroup)}"]`)?.focus({ preventScroll: true });
-    if (state.app === 'mail' && visible.length < expanded.length) {
+    if (state.app === 'mail' && (visible.length < expanded.length || mailPage?.more)) {
         const button = document.createElement('button');
         button.textContent = 'Show next 100 messages';
-        button.onclick = () => { mailListLimit += 100; renderList(); };
+        button.onclick = () => { mailListLimit += 100; if (mailPage?.more && mailListLimit > expanded.length) {
+            button.disabled = true;
+            void attempt(async () => { try {
+                await refreshMailQuery();
+            }
+            finally {
+                button.disabled = false;
+            } });
+        }
+        else
+            renderList(); };
         list.append(button);
     }
 }
@@ -1755,7 +1841,9 @@ async function changeApp(name, keepSidebar = false, mailScope, settingsDestinati
             state.search = view.search;
             mailListLimit = initial.limit;
         }
-        await load(view?.selectedId, { enteringApp: true, keepSidebar, entryVersion }, initial?.rows);
+        if (!initial)
+            mailListLimit = 100;
+        await load(view?.selectedId, { enteringApp: true, keepSidebar, entryVersion }, initial && !mailScope ? { records: initial.rows, mailPage: initial.page } : undefined);
         if (view && entryVersion === appEntryVersion) {
             const list = document.querySelector('#items');
             if (list)
@@ -2105,7 +2193,7 @@ async function exportAllMail(complete) {
 }
 async function exportRecords(all = false, selectedRecords = null) {
     await commit();
-    let records = selectedRecords || (all ? state.rows : [state.current].filter(isPresent));
+    let records = selectedRecords || (all && state.app === 'mail' ? (await api('records&kind=mail&summaries=1')).records : all ? state.rows : [state.current].filter(isPresent));
     if (!records.length) {
         notice('There is nothing to export yet.');
         return;
@@ -3680,8 +3768,22 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'down' || action === 'up' || key === 'n' || key === 'N' || key === 'G') {
         event.preventDefault();
-        afterListPage(() => { const rows = navigableRows(); const index = rows.findIndex(r => r.id === state.current?.id); const next = key === 'G' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (action === 'up' || key === 'N' ? -1 : 1))); if (rows[next])
-            return selectRecord(rows[next].id, true); });
+        afterListPage(async () => {
+            let rows = navigableRows();
+            const backwards = action === 'up' || key === 'N';
+            if (state.app === 'mail' && mailPage?.more && (key === 'G' || (!backwards && rows.at(-1)?.id === state.current?.id))) {
+                const context = mailQueryContext();
+                mailListLimit = key === 'G' ? mailPage.total : mailListLimit + 100;
+                await refreshMailQuery();
+                if (state.app !== 'mail' || context !== mailQueryContext())
+                    return;
+                rows = navigableRows();
+            }
+            const index = rows.findIndex(r => r.id === state.current?.id);
+            const next = key === 'G' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (backwards ? -1 : 1)));
+            if (rows[next])
+                return selectRecord(rows[next].id, true);
+        }, true);
     }
 });
 document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view,.sidebar') && target.id !== 'command-input' && editable(target))

@@ -158,6 +158,12 @@ Full backups include connections; older backups without them remain supported. D
 
 Connection storage references generic record IDs with no per-type columns. Frontend type labels, creation commands, and distinguishing fields live in `frontend/item-types.ts`; future applications register their type there, add their normal application/navigation behavior and backend validation, and reuse the same connection APIs and schema.
 
+## Mail database performance
+
+Mail browsing uses an indexed metadata table for account, folder, remote status and normalized message date. Normal newest-first lists fetch the first 100 messages in the selected view; **Show next 100 messages** expands that window. Counts distinguish loaded messages from the full cached folder. Searching, alternate sorts, sender grouping and collapsed groups load the complete selected view so matching and locale-aware ordering still cover all its cached messages. Keyboard navigation can continue beyond the loaded window.
+
+The metadata table is built automatically, in one transaction, the first time this version opens an existing database. Large caches may make that first request slower. JSON metadata remains authoritative: save, synchronization, restore and deletion undo update the derived columns in the same transaction, and deletions cascade. Backups keep their existing format and rebuild these fields on restore. See [mail database indexing](docs/mail-database-indexing.md) for query design, limitations and validation.
+
 ## Moving and backing up
 
 Use `:backup` or open **Settings → Backups**, then choose **Prepare backup**. Office shows progress while preparing and receiving the snapshot. Choose **Download SQLite backup** when the file is ready. Backups contain message and document contents, so store them privately.
@@ -187,6 +193,7 @@ Additional checks:
 
 ```sh
 php tests/backend.php
+php tests/mail-index.php
 php tests/connections.php
 php tests/connection-explorer.php
 php tests/connection-archive.php

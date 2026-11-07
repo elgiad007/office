@@ -119,6 +119,7 @@ try {
     if ($route==='records' && $method==='GET') {
         $kind=$_GET['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
         session_write_close();
+        if($kind==='mail' && ($_GET['view']??'')==='1')json_response(mail_list_page($_GET));
         $db=db();$q=$db->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC');$q->execute([$kind]);
         if($kind==='mail' && ($_GET['summaries']??'')==='1'){
             $cached=[];$files=$db->query('SELECT record_id,part,name,type,size FROM mail_files ORDER BY rowid');
@@ -354,7 +355,7 @@ try {
             $current=get_record($r['id']);
             if ((int)($input['revision']??0)!==$current['revision']) json_response(['error'=>'Message changed. Reopen it.','code'=>'mail_revision_conflict','record'=>$current],409);
             $accountId=(string)($current['meta']['account']??'');
-            $ids=db()->prepare("SELECT id FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
+            $ids=db()->prepare('SELECT id FROM mail_index WHERE account=? AND remote=1');
             $ids->execute([$accountId]);$before=$ids->fetchAll(PDO::FETCH_COLUMN);
             $destination=(string)($input['destinationAccount']??'');
             $undoBefore=null;

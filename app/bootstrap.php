@@ -4,6 +4,7 @@ declare(strict_types=1);
 const KINDS = ['tasks', 'contacts', 'calendar', 'documents', 'wiki', 'sheets', 'mail'];
 require_once __DIR__.'/attachments.php';
 require_once __DIR__.'/connections.php';
+require_once __DIR__.'/mail-index.php';
 
 function data_dir(): string {
     $dir = getenv('OFFICE_DATA_DIR') ?: dirname(__DIR__) . '/data';
@@ -33,6 +34,7 @@ function db(): PDO {
         }catch(Throwable $error){$db->exec('ROLLBACK');throw $error;}
     }
     $db->exec('CREATE INDEX IF NOT EXISTS connections_active_a ON connections(archived,a); CREATE INDEX IF NOT EXISTS connections_active_b ON connections(archived,b);');
+    ensure_mail_index($db);
     return $db;
 }
 function setting(string $key, mixed $fallback = null): mixed {
@@ -188,6 +190,7 @@ function save_record(array $input, bool $internal = false,bool $hydrate=true): a
         if ($old && !$internal && !empty(json_decode($old['meta'],true)['remote'])) fail('Synced items are read-only in this version.');
         $revision=$old?(int)$old['revision']+1:1;
         $db->prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,body=excluded.body,meta=excluded.meta,revision=excluded.revision,updated=excluded.updated')->execute([$id,$r['kind'],$r['title'],$r['body'],json_encode($r['meta'],JSON_THROW_ON_ERROR),$revision,gmdate('c')]);
+        mail_index_record($db,$id,$r['kind'],$r['meta']);
         if (in_array($r['kind'],['wiki','documents'],true)) $db->prepare('INSERT INTO revisions VALUES(?,?,?)')->execute([$id,$revision,json_encode($r,JSON_THROW_ON_ERROR)]);
         if (!$outer) $db->commit();
     } catch (Throwable $e) { if (!$outer && $db->inTransaction()) $db->rollBack(); throw $e; }

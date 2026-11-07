@@ -11,6 +11,7 @@ export async function testMailFolder(page,url) {
     const action=new URL(route.request().url()).searchParams.get('r');
     let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',preferences:{}};
+    else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='accounts')json={accounts:[]};
     else if(action==='records')json={records};
     else if(action==='save'){
@@ -33,7 +34,7 @@ export async function testMailFolder(page,url) {
     assert.equal(await page.locator('#selected-item').getAttribute('data-id'),second.id,'Reloading after an action preserves selection');
     await page.getByRole('button',{name:'Contacts',exact:true}).click();
     await page.getByRole('button',{name:'Mail',exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector('#selected-item')?.dataset.id==='inbox-message');
+    await page.waitForFunction(()=>document.querySelector('#selected-item')?.dataset.id==='second-inbox-message');
     await open(message.title);
     await page.locator('#main').focus();await page.keyboard.press('v');
     assert.equal(await page.locator('#selection-count').textContent(),'1 selected');

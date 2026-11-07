@@ -13,6 +13,7 @@ try{
     $deleted=delete_local_mail($r);check((int)db()->query('SELECT COUNT(*) FROM records')->fetchColumn()===0,'local mail deleted');
     $restored=undo_mail_delete($deleted['undoToken']);
     check($restored['record']['id']===$r['id']&&db()->query('SELECT * FROM records')->fetchAll()===$raw,'local undo restores full persisted record, same ID and revision');
+    check(mail_list_page(['folder'=>'Archive'])['records'][0]['id']===$r['id'],'local undo restores indexed mail listing');
     check(db()->query('SELECT * FROM revisions')->fetchAll()===$history&&db()->query('SELECT * FROM mail_files')->fetchAll()===$files,'local undo restores complete history and attachment bytes');
     refused(fn()=>undo_mail_delete($deleted['undoToken']),'already used');
     db()->prepare('UPDATE mail_undo SET expires=0')->execute();refused(fn()=>undo_mail_delete($deleted['undoToken']),'expired');

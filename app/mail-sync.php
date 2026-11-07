@@ -67,7 +67,7 @@ function imap_header_download(array $a,string $source,string $headers,array $met
         'account'=>$a['id'],'accountLabel'=>$a['label'],'source'=>$source])];
 }
 function mail_cache_rows(string $account,bool $hydrate=true): array {
-    $q=db()->prepare("SELECT * FROM records WHERE kind='mail' AND json_extract(meta,'$.remote')=1 AND json_extract(meta,'$.account')=?");
+    $q=db()->prepare('SELECT * FROM records WHERE id IN (SELECT id FROM mail_index WHERE account=? AND remote=1)');
     $q->execute([$account]);
     // Sync needs stored state, not reader hashes, MIME parsing or attachment queries.
     return array_map($hydrate?'record_row':static function(array $row):array {
