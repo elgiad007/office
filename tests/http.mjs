@@ -1,5 +1,5 @@
 import {spawn,execFileSync} from 'node:child_process';
-import {mkdtemp,mkdir,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,readdir,writeFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {once} from 'node:events';
 import assert from 'node:assert/strict';
@@ -29,15 +29,39 @@ try{
  const unrelated=(await a.call('save',{kind:'tasks',title:'Not mail',body:'',meta:{}})).record;
  await a.call('mail-export-batch',{account:'missing',ids:[headerOnly.id]},403,'bad-token');
  assert.deepEqual(await a.call('mail-export-plan'),{batches:[]});
- const cachedMail=await fetch(a.url+'mail-export',{headers:{Cookie:a.cookie}});
- assert.match(cachedMail.headers.get('content-disposition'),/mail-cached\.json/);
- assert.equal(cachedMail.headers.get('x-office-mail-count'),'2');
- assert.equal(cachedMail.headers.get('x-office-mail-header-only'),'1');
- const mailArchive=await cachedMail.json();
- assert.equal(mailArchive.format,'portable-office-items');
- assert.deepEqual(new Set(mailArchive.records.map(record=>record.id)),new Set([undoMail.id,headerOnly.id]));
- assert.equal(mailArchive.records.find(record=>record.id===undoMail.id).meta.rawBase64,undoMail.meta.rawBase64);
- assert.deepEqual((await a.call('mail-export&complete=1')).records.map(record=>record.id),[undoMail.id]);
+ const readMailArchive=async(complete,name,count)=>{
+   const response=await fetch(a.url+'mail-export'+(complete?'&complete=1':''),{headers:{Cookie:a.cookie}});
+   assert.equal(response.status,200);
+   assert.equal(response.headers.get('content-type'),'application/vnd.sqlite3');
+   assert.equal(response.headers.get('content-disposition'),`attachment; filename="${name}"`);
+   assert.equal(response.headers.get('x-office-mail-count'),String(count));
+   assert.equal(response.headers.get('x-office-mail-header-only'),'1');
+   const bytes=Buffer.from(await response.arrayBuffer());
+   assert.equal(Number(response.headers.get('content-length')),bytes.length);
+   const file=join(a.dir,name);
+   await writeFile(file,bytes);
+   const query=`
+     $db=new PDO('sqlite:'.$argv[1]);
+     echo json_encode([
+       'integrity'=>$db->query('PRAGMA integrity_check')->fetchColumn(),
+       'tables'=>$db->query("SELECT name FROM sqlite_schema WHERE type='table'")->fetchAll(PDO::FETCH_COLUMN),
+       'records'=>$db->query('SELECT id,body,meta FROM records')->fetchAll(PDO::FETCH_ASSOC)
+     ],JSON_THROW_ON_ERROR);
+   `;
+   const extensions=extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite']:[];
+   const archive=JSON.parse(execFileSync(php,[...extensions,'-r',query,'--',file],{encoding:'utf8',windowsHide:true}));
+   assert.equal(archive.integrity,'ok');
+   assert.deepEqual(archive.tables,['records']);
+   return archive.records;
+ };
+ const cachedRecords=await readMailArchive(false,'mail-cached.sqlite',2);
+ assert.deepEqual(new Set(cachedRecords.map(record=>record.id)),new Set([undoMail.id,headerOnly.id]));
+ const exportedBody=cachedRecords.find(record=>record.id===undoMail.id);
+ assert.equal(exportedBody.body,undoMail.body);
+ assert.equal(JSON.parse(exportedBody.meta).rawBase64,undoMail.meta.rawBase64);
+ assert.equal(JSON.parse(cachedRecords.find(record=>record.id===headerOnly.id).meta).headerOnly,true);
+ assert.deepEqual((await readMailArchive(true,'mail.sqlite',1)).map(record=>record.id),[undoMail.id]);
+ assert.ok(!(await readdir(a.dir)).some(file=>file.startsWith('mail-export-')));
  await a.call('delete',{id:headerOnly.id,revision:headerOnly.revision});
  await a.call('delete',{id:unrelated.id,revision:unrelated.revision});
  console.log('PASS HTTP cached mail export, complete filtering and authenticated access');

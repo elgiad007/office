@@ -85,6 +85,7 @@ async function testMailExport(page,url){
   const recovered={...missing,body:'Recovered body',meta:{...missing.meta,headerOnly:false}};
   const recovery={...missing,id:'recovery',meta:{...missing.meta,folder:'Recovery copies'}};
   const folderError='This message is no longer in its synchronized folder.';
+  const archiveBytes=Buffer.from([0x00,0x53,0x51,0x4c,0xff]);
   let records=[available,missing,recovery],batchMode='hydrate';
   let batchCalls=0,planCalls=0,archiveCalls=0;
   const routes=t=>t.pathname.endsWith('/api.php');
@@ -109,7 +110,7 @@ async function testMailExport(page,url){
       archiveCalls++;
       const included=url.searchParams.get('complete')==='1'?records.filter(row=>!row.meta.headerOnly):records;
       return route.fulfill({
-        json:{format:'portable-office-items',version:1,records:included},
+        body:archiveBytes,contentType:'application/vnd.sqlite3',
         headers:{'X-Office-Mail-Count':String(included.length),'X-Office-Mail-Header-Only':String(records.filter(row=>row.meta.headerOnly).length)}
       });
     }
@@ -129,25 +130,25 @@ async function testMailExport(page,url){
   };
   const cached=()=>choose('Export cached mail');
   const complete=()=>choose('Export with missing bodies');
-  const readArchive=async downloading=>JSON.parse(await readFile(await (await downloading).path(),'utf8')).records;
+  const readArchive=async downloading=>readFile(await (await downloading).path());
   const isBatch=request=>new URL(request.url()).searchParams.get('r')==='mail-export-batch';
   try{
     await page.goto(url+'?mail-export#mail');
     await page.locator('#items [data-id="available"]').waitFor();
     const [cachedDownload]=await Promise.all([page.waitForEvent('download'),cached()]);
-    assert.equal(cachedDownload.suggestedFilename(),'mail-cached.json');
-    assert.deepEqual(await readArchive(cachedDownload),records);
+    assert.equal(cachedDownload.suggestedFilename(),'mail-cached.sqlite');
+    assert.deepEqual(await readArchive(cachedDownload),archiveBytes);
     assert.deepEqual([archiveCalls,planCalls,batchCalls],[1,0,0],'Cached export uses one request and no provider work');
-    const confirmation=status.getByText('Download started · mail-cached.json · 2 header-only',{exact:true});
+    const confirmation=status.getByText('Download started · mail-cached.sqlite · 2 header-only',{exact:true});
     await confirmation.waitFor();
     await confirmation.waitFor({state:'hidden',timeout:7000});
     assert.equal(await status.textContent(),'');
 
     const [completeDownload]=await Promise.all([page.waitForEvent('download'),complete()]);
-    assert.equal(completeDownload.suggestedFilename(),'mail.json');
-    assert.deepEqual(await readArchive(completeDownload),[available,recovered]);
+    assert.equal(completeDownload.suggestedFilename(),'mail.sqlite');
+    assert.deepEqual(await readArchive(completeDownload),archiveBytes);
     assert.deepEqual([archiveCalls,planCalls,batchCalls],[2,1,1]);
-    await status.getByText('Download started · mail.json · 1 skipped',{exact:true}).waitFor();
+    await status.getByText('Download started · mail.sqlite · 1 skipped',{exact:true}).waitFor();
 
     await page.locator('#items [data-id="available"]').click();
     const more=page.locator('#detail [data-mail-disclosure="more"]');
@@ -180,8 +181,8 @@ async function testMailExport(page,url){
     try{
       const downloading=page.waitForEvent('download');
       await Promise.all([page.waitForEvent('requestfailed',isBatch),complete()]);
-      assert.deepEqual(await readArchive(downloading),[available]);
-      await status.getByText('Download started · mail.json · 1 skipped',{exact:true}).waitFor();
+      assert.deepEqual(await readArchive(downloading),archiveBytes);
+      await status.getByText('Download started · mail.sqlite · 1 skipped',{exact:true}).waitFor();
       assert.match(await page.locator('#notice').textContent(),/A message batch timed out/);
       assert.equal(await cancel.isVisible(),false);
     }finally{

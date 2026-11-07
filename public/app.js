@@ -2064,8 +2064,8 @@ async function exportAllMail(complete) {
         signal.throwIfAborted();
         if (!menu.isConnected)
             return;
-        const name = complete ? 'mail.json' : 'mail-cached.json';
-        download(name, archive, 'application/json');
+        const name = complete ? 'mail.sqlite' : 'mail-cached.sqlite';
+        download(name, archive, 'application/vnd.sqlite3');
         const result = `Download started · ${name}` + (missing ? ` · ${missing} ${complete ? 'skipped' : 'header-only'}` : '');
         status.textContent = result;
         mailExportStatusTimer = setTimeout(() => { status.textContent = ''; }, 5000);

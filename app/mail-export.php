@@ -5,30 +5,42 @@ const MAIL_EXPORT_BATCH = 16;
 const MAIL_EXPORT_HEADER_ONLY = "COALESCE(json_extract(records.meta,'$.headerOnly'),0)<>0";
 
 function stream_mail_export(bool $complete): never {
-    $db=db();
-    $db->beginTransaction();
-    $headerOnly=MAIL_EXPORT_HEADER_ONLY;
-    $counts=$db->query("SELECT COUNT(*) AS total, COALESCE(SUM($headerOnly),0) AS missing FROM records WHERE kind='mail'")->fetch();
-    $count=(int)$counts['total'];
-    $missing=(int)$counts['missing'];
-    if($complete)$count-=$missing;
-    $records=$db->query("SELECT * FROM records WHERE kind='mail'".($complete?" AND NOT ($headerOnly)":"").' ORDER BY updated DESC, id');
-    $name=$complete?'mail.json':'mail-cached.json';
-    header('Content-Type: application/json; charset=utf-8');
-    header('Content-Disposition: attachment; filename="'.$name.'"');
-    header('X-Office-Mail-Count: '.$count);
-    header('X-Office-Mail-Header-Only: '.$missing);
-    header('X-Accel-Buffering: no');
-    echo '{"format":"portable-office-items","version":1,"records":[';
-    $separator='';
-    while($row=$records->fetch()){
-        $row['meta']=json_decode($row['meta'],false,64,JSON_THROW_ON_ERROR);
-        $row['revision']=(int)$row['revision'];
-        echo $separator,json_encode($row,JSON_THROW_ON_ERROR|JSON_INVALID_UTF8_SUBSTITUTE);
-        $separator=',';
+    $path=tempnam(data_dir(),'mail-export-');
+    if($path===false)fail('Cannot create the mail archive.',500);
+    try{
+        $db=db();
+        $db->prepare('ATTACH DATABASE ? AS mail_archive')->execute([$path]);
+        try{
+            $db->beginTransaction();
+            $headerOnly=MAIL_EXPORT_HEADER_ONLY;
+            $missing=(int)$db->query("SELECT COUNT(*) FROM main.records WHERE kind='mail' AND ($headerOnly)")->fetchColumn();
+            $db->exec('CREATE TABLE mail_archive.records (
+                id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
+                meta TEXT NOT NULL, revision INTEGER NOT NULL, updated TEXT NOT NULL
+            )');
+            $filter=$complete?" AND NOT ($headerOnly)":"";
+            $count=$db->exec("INSERT INTO mail_archive.records (id,kind,title,body,meta,revision,updated)
+                SELECT id,kind,title,body,meta,revision,updated FROM main.records WHERE kind='mail'$filter");
+            $db->commit();
+        }finally{
+            if($db->inTransaction())$db->rollBack();
+            $db->exec('DETACH DATABASE mail_archive');
+        }
+        $size=filesize($path);
+        if($size===false)fail('Cannot read the mail archive.',500);
+        $name=$complete?'mail.sqlite':'mail-cached.sqlite';
+        header('Content-Type: application/vnd.sqlite3');
+        header('Content-Disposition: attachment; filename="'.$name.'"');
+        header('Content-Length: '.$size);
+        header('X-Office-Mail-Count: '.$count);
+        header('X-Office-Mail-Header-Only: '.$missing);
+        header('X-Accel-Buffering: no');
+        // Let the file close and the temporary copy be removed after a canceled download.
+        ignore_user_abort(true);
+        readfile($path);
+    }finally{
+        unlink($path);
     }
-    echo ']}';
-    $db->commit();
     exit;
 }
 
