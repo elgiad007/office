@@ -14,6 +14,13 @@ export function eventBounds(record: OfficeRecord) {
   return {start,end,allDay:dateOnly(record.meta.start)};
 }
 export function eventsOn(rows: OfficeRecord[],day: Date) {const end=addDays(day,1);return rows.filter(r=>{const b=eventBounds(r);return b&&b.start<end&&b.end>day;}).sort((a,b)=>+(eventBounds(b)!.allDay)-+(eventBounds(a)!.allDay)||+eventBounds(a)!.start-+eventBounds(b)!.start);}
+export function upcomingEvents(rows: OfficeRecord[],now: Date) {
+  const until=addDays(now,7);
+  return rows.flatMap(record=>{
+    const bounds=eventBounds(record);
+    return bounds&&bounds.end>now&&bounds.start<until?[{record,...bounds}]:[];
+  }).sort((a,b)=>+a.start-+b.start);
+}
 /** Assign overlapping intervals stable columns; touching endpoints can share a column. */
 export function timedLayout(rows: OfficeRecord[],day: Date) {
   const entries=eventsOn(rows,day).filter(r=>!eventBounds(r)!.allDay).map(record=>{const b=eventBounds(record)!;const start=b.start<day?0:b.start.getHours()*60+b.start.getMinutes();const end=b.end>=addDays(day,1)?1440:b.end.getHours()*60+b.end.getMinutes();return {record,start,end:Math.max(start+15,end),column:0,columns:1};});

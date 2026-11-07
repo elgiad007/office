@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {calendarDate,dayKey,addDays,eventBounds,eventsOn,timedLayout} from '../public/calendar.js';
+import {calendarDate,dayKey,addDays,eventBounds,eventsOn,timedLayout,upcomingEvents} from '../public/calendar.js';
 process.env.TZ='America/New_York';
 const event=(id,start,end)=>({id,title:id,meta:{start,end}});
 test('date-only events use local dates and exclusive ends across DST',()=>{
@@ -26,4 +26,18 @@ test('overlap groups use separate columns and touching events share full width',
 test('missing dates remain identifiable and missing all-day ends last one date',()=>{
  assert.equal(eventBounds(event('bad','','')),null);
  assert.equal(dayKey(eventBounds(event('one','2026-11-03','')).end),'2026-11-04');
+});
+test('upcoming events include ongoing and all-day events within seven local days',()=>{
+ const rows=[
+   event('later','2026-03-12T10:00','2026-03-12T11:00'),
+   event('outside','2026-03-14T10:00','2026-03-14T11:00'),
+   event('ongoing','2026-03-07T09:00','2026-03-07T11:00'),
+   event('ended','2026-03-07T09:00','2026-03-07T10:00'),
+   event('today','2026-03-07','2026-03-08'),
+   event('undated','',''),
+ ];
+ const entries=upcomingEvents(rows,calendarDate('2026-03-07T10:00'));
+ assert.deepEqual(entries.map(({record,allDay})=>[record.id,allDay]),[
+   ['today',true],['ongoing',false],['later',false],
+ ]);
 });

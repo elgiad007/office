@@ -18,7 +18,7 @@ import { mailView, mailViewPreferences, revealMailGroup } from './mail-view.js';
 import { taskView, taskViewPreferences, taskPriority, taskDue } from './task-view.js';
 import { renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
-import { createCalendar, dateOnly } from './calendar.js';
+import { createCalendar, dateOnly, upcomingEvents } from './calendar.js';
 import { timestampLabel, configureTimeLabels, refreshTimeLabels } from './time-labels.js';
 const apps = {
     mail: { name: 'Mail', singular: 'message', empty: 'No messages yet.', hint: 'Connect an account in Settings, import an EML file, or compose your first message.', icon: 'M3 5h18v14H3z M3 5l9 7 9-7' },
@@ -569,8 +569,74 @@ function shell() {
     const syncStatus = document.querySelector('#sync-status');
     syncStatus.textContent = 'Automatic sync';
     syncStatus.hidden = false;
-    root.innerHTML = `<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div><div class="app-toolbar" id="app-toolbar" hidden></div></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div><div class="app-toolbar" id="app-toolbar" hidden></div></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    setupTopAgenda();
     root.onclick = handleClick;
+}
+let topClockTimer;
+function updateTopClock() {
+    window.clearTimeout(topClockTimer);
+    const clock = document.querySelector('#top-agenda time');
+    if (!clock)
+        return;
+    const now = new Date();
+    clock.dateTime = now.toISOString();
+    clock.textContent = now.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    topClockTimer = window.setTimeout(updateTopClock, 60000 - now.getTime() % 60000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden)
+    updateTopClock(); });
+function setupTopAgenda() {
+    const agenda = document.querySelector('#top-agenda');
+    const trigger = agenda.querySelector('summary');
+    const events = agenda.querySelector('.top-agenda-events');
+    let request = 0;
+    async function loadAgenda() {
+        const version = ++request;
+        const isCurrent = () => agenda.isConnected && agenda.open && version === request;
+        events.innerHTML = '<p role="status">Loading events…</p>';
+        try {
+            const { records } = await api('records&kind=calendar');
+            if (!isCurrent())
+                return;
+            events.innerHTML = upcomingEvents(records, new Date()).map(({ record, start, allDay }) => {
+                const date = start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                const time = allDay ? 'All day' : start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+                return `<button type="button" data-agenda-event="${e(record.id)}"><strong>${e(record.title || 'Untitled event')}</strong><small>${e(date)} · ${e(time)}</small></button>`;
+            }).join('') || '<p role="status">No events in the next seven days.</p>';
+        }
+        catch {
+            if (isCurrent())
+                events.innerHTML = '<p role="status">Could not load calendar events.</p><button type="button" data-agenda-retry>Retry</button>';
+        }
+    }
+    agenda.ontoggle = () => { if (agenda.open)
+        void loadAgenda();
+    else
+        request++; };
+    agenda.onkeydown = event => {
+        if (event.key !== 'Tab')
+            event.stopPropagation();
+        if (event.key === 'Escape' && agenda.open) {
+            event.preventDefault();
+            agenda.open = false;
+            trigger.focus();
+        }
+    };
+    events.onclick = event => {
+        const button = event.target.closest('button');
+        if (!button)
+            return;
+        if (button.hasAttribute('data-agenda-retry')) {
+            trigger.focus();
+            void loadAgenda();
+            return;
+        }
+        agenda.open = false;
+        trigger.focus();
+        void attempt(() => openConnectedRecord(button.dataset.agendaEvent));
+    };
+    updateTopClock();
 }
 function setMailFolderPanel(open) {
     document.querySelector('.shell')?.classList.toggle('folders-open', open);
@@ -2115,6 +2181,9 @@ async function syncAccounts(manual = true, accountQuery) {
 function help() { openHelp(dialog, keys(), e, () => setMode('normal')); }
 async function history() { await requireSaved(); const r = await api(`history&id=${state.current.id}`); modal('Revision history', r.revisions.map(h => `<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('') || '<p>No saved revisions.</p>'); dialog.querySelectorAll('[data-revision]').forEach(b => b.onclick = () => { const h = r.revisions.find(x => x.revision === Number(b.dataset.revision)); modal('Revision ' + h.revision, `<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`); dialog.querySelector('#restore-revision').onclick = () => void attempt(async () => { state.current.title = h.snapshot.title; state.current.body = h.snapshot.body; state.current.meta = h.snapshot.meta; state.dirty = true; dialog.close(); renderDetail(); await commit(); }); }); }
 async function handleClick(event) {
+    const agenda = document.querySelector('#top-agenda');
+    if (agenda?.open && !event.composedPath().includes(agenda))
+        agenda.open = false;
     const disclosure = event.target.closest('[data-mail-disclosure]')?.dataset.mailDisclosure;
     document.querySelectorAll('#detail [data-mail-disclosure][open]').forEach(d => { if (d.dataset.mailDisclosure !== disclosure)
         d.open = false; });
