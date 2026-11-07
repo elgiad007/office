@@ -398,7 +398,7 @@ function updateTopClock() {
   if(!clock)return;
   const now=new Date();
   clock.dateTime=now.toISOString();
-  clock.textContent=now.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  clock.textContent=now.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   topClockTimer=window.setTimeout(updateTopClock,60000-now.getTime()%60000);
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateTopClock();});
