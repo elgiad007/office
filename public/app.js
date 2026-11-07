@@ -126,6 +126,15 @@ let mailReadVersion = 0, displayedMailId = null;
 function icon(name) {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${apps[name]?.icon || 'M12 3v18 M3 12h18'}"/></svg>`;
 }
+const headerActionPaths = {
+    compose: 'M13 5H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9 M10 14l1-4 8-8 3 3-8 8-4 1z',
+    new: 'M12 5v14 M5 12h14',
+    import: 'M12 3v12 M8 11l4 4 4-4 M4 15v5h16v-5',
+    'export-all': 'M12 15V3 M8 7l4-4 4 4 M4 15v5h16v-5',
+};
+function headerAction(action, label, glyph = action) {
+    return `<button class="header-action ${action === 'new' ? 'primary' : 'quiet'}" data-action="${action}" aria-label="${e(label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${headerActionPaths[glyph]}"/></svg><span class="header-action-label" aria-hidden="true">${e(label)}</span></button>`;
+}
 const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => {
     const saved = state.prefs.keys?.[action];
     // Upgrade the former defaults when reading older saved bindings. Settings
@@ -572,7 +581,7 @@ function shell() {
     const syncStatus = document.querySelector('#sync-status');
     syncStatus.textContent = 'Automatic sync';
     syncStatus.hidden = false;
-    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div><div class="app-toolbar" id="app-toolbar" hidden></div></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${headerAction('export-all', 'Export')}</div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
     panelSizing = setupPanelSizing(root.querySelector('.shell'), () => setMailFolderPanel(false));
     setupTopAgenda();
     root.onclick = handleClick;
@@ -951,8 +960,6 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     document.querySelector('.shell').classList.toggle('mail-active', state.app === 'mail');
     panelSizing.refresh();
     document.querySelector('#mail-toolbar').hidden = state.app !== 'mail';
-    if (state.app !== 'mail')
-        document.querySelector('#mail-actions-menu').open = false;
     document.querySelector('#mail-folder-navigation').hidden = state.app !== 'mail';
     if (state.app !== 'mail')
         setMailFolderPanel(false);
@@ -1070,7 +1077,7 @@ function renderAppHeader() {
     const toolbar = document.querySelector('#app-toolbar');
     const a = apps[state.app];
     toolbar.hidden = state.app === 'mail' || state.app === 'settings';
-    toolbar.innerHTML = toolbar.hidden ? '' : `${state.app === 'calendar' ? `<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">` : ''}<button class="quiet" data-action="import">↑ Import</button><button class="quiet" data-action="export-all">↓ Export</button><button class="primary" data-action="new">+ New ${a.singular}</button>`;
+    toolbar.innerHTML = toolbar.hidden ? '' : `${state.app === 'calendar' ? `<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">` : ''}<div class="header-action-group">${headerAction('new', 'New ' + a.singular)}${headerAction('import', 'Import')}${headerAction('export-all', 'Export')}</div>`;
 }
 function renderWorkspace(readerSnapshot) {
     renderAppHeader();
@@ -2207,11 +2214,6 @@ async function handleClick(event) {
     const disclosure = event.target.closest('[data-mail-disclosure]')?.dataset.mailDisclosure;
     document.querySelectorAll('#detail [data-mail-disclosure][open]').forEach(d => { if (d.dataset.mailDisclosure !== disclosure)
         d.open = false; });
-    const mailMenu = document.querySelector('#mail-actions-menu');
-    if (mailMenu?.open && !event.target.closest('#mail-actions-menu'))
-        mailMenu.open = false;
-    if (event.target.closest('#mail-actions-menu button') && mailMenu)
-        mailMenu.open = false;
     const button = event.target.closest('button');
     if (!button)
         return;
@@ -3208,15 +3210,6 @@ document.addEventListener('keydown', event => {
         return;
     state.lastActivity = Date.now();
     if (document.querySelector('dialog[open]'))
-        return;
-    const mailMenu = document.querySelector('#mail-actions-menu');
-    if (event.key === 'Escape' && mailMenu?.open) {
-        mailMenu.open = false;
-        mailMenu.querySelector('summary').focus();
-        event.preventDefault();
-        return;
-    }
-    if (event.target.closest('#mail-actions-menu'))
         return;
     if (event.target.closest('[data-mail-disclosure]'))
         return;

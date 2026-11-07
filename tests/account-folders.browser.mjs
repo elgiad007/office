@@ -93,7 +93,7 @@ export async function testAccountFolders(page,url) {
     await page.setViewportSize({width:1440,height:1000});await open('imap-a','Orders');await page.screenshot({path:'test-results/account-folders.png',fullPage:true});
     holdNext=true;await page.locator('#folder-refresh').click();
     await page.waitForFunction(()=>document.querySelector('#folder-refresh').disabled);
-    await page.getByRole('button',{name:'+ Compose',exact:true}).click();
+    await page.getByRole('button',{name:'Compose',exact:true}).click();
     await page.locator('[name="body"]').fill('Keep typing while a folder request finishes.');
     const refreshed=page.waitForResponse(r=>r.url().includes('r=mail-folder-sync'));releaseSync();await refreshed;
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

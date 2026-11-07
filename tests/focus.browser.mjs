@@ -19,7 +19,7 @@ try{
   }else if(await page.getByRole('button',{name:'Open workspace',exact:true}).count()){
     await page.getByLabel('Password',{exact:true}).fill('test-only-password-123');await page.getByRole('button',{name:'Open workspace',exact:true}).click();
   }
-  await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Compose',exact:true}).waitFor();
   await testSettingsNavigation(page,url);
   console.log('PASS Settings keyboard navigation, native controls, scrolling, and focus after refresh.');
   await testFocusNavigation(page,url);

@@ -14,7 +14,7 @@ try {
   await page.getByLabel('Setup token',{exact:true}).fill((await readFile(process.env.OFFICE_TEST_DATA+'/setup-token.txt','utf8')).trim());
   await page.getByLabel('Create password (at least 12 characters)',{exact:true}).fill('task-completion-tests-123');
   await page.getByRole('button',{name:'Create workspace',exact:true}).click();
-  await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Compose',exact:true}).waitFor();
   await testTaskCompletion(page,url);
   assert.deepEqual(errors,[]);
   console.log('PASS task completion: empty PHP metadata, checkbox autosave, unchecking, shortcut, reopening and reload persistence.');

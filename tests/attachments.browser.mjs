@@ -15,7 +15,7 @@ export async function testAttachments(page,url){
   const pixel=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=','base64');
   const file=Buffer.alloc(2*1048576,0x42);file[0]=0;file[1]=255;
   await page.goto(url+'#mail');await page.reload();
-  await page.getByRole('button',{name:'+ Compose',exact:true}).click();
+  await page.getByRole('button',{name:'Compose',exact:true}).click();
   await page.getByLabel('Title',{exact:true}).fill('Attachment workflow test');
   await page.getByLabel('To (one recipient)',{exact:true}).fill('recipient@example.com');
   await page.getByLabel('Message',{exact:true}).fill('Text stays intact while attaching.');

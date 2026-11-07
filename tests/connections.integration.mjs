@@ -23,7 +23,7 @@ try{
  browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
  page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',error=>errors.push(error.message));
  await page.goto(url);await page.getByLabel('Setup token',{exact:true}).fill((await readFile(data+'/setup-token.txt','utf8')).trim());
- await page.getByLabel('Create password (at least 12 characters)',{exact:true}).fill('connection-tests-only-123');await page.getByRole('button',{name:'Create workspace',exact:true}).click();await page.getByRole('button',{name:'+ Compose',exact:true}).waitFor();
+ await page.getByLabel('Create password (at least 12 characters)',{exact:true}).fill('connection-tests-only-123');await page.getByRole('button',{name:'Create workspace',exact:true}).click();await page.getByRole('button',{name:'Compose',exact:true}).waitFor();
  const api=async(route,body)=>{
   const csrf=(await (await page.request.get(url+'api.php?r=status')).json()).csrf;
   const response=body?await page.request.post(url+'api.php?r='+route,{data:body,headers:{'X-CSRF-Token':csrf}}):await page.request.get(url+'api.php?r='+route);

@@ -28,7 +28,7 @@ export async function testDraftFolders(page,url) {
     await route.fulfill({json});
   });
   const folder=page.locator('#mail-folder');
-  const compose=async()=>{await page.getByRole('button',{name:'+ Compose',exact:true}).click();await page.locator('#save-status').filter({hasText:'Unsaved draft'}).waitFor();};
+  const compose=async()=>{await page.getByRole('button',{name:'Compose',exact:true}).click();await page.locator('#save-status').filter({hasText:'Unsaved draft'}).waitFor();};
   const save=async()=>{await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();};
   const discard=async()=>{await page.locator('#detail [data-action="delete"]').click();await page.locator('#confirm').click();await page.locator('#record-form').waitFor({state:'detached'});};
   const send=async()=>{

@@ -33,7 +33,7 @@ export async function testMailSend(page,url) {
   const progress=page.locator('#detail .mail-send-progress');
   const background=page.locator('#mail-send-status');
   const compose=async(save=true)=>{
-    await page.getByRole('button',{name:'+ Compose',exact:true}).click();await body.waitFor();
+    await page.getByRole('button',{name:'Compose',exact:true}).click();await body.waitFor();
     await page.getByLabel('To (one recipient)',{exact:true}).fill('recipient@example.com');
     if(save){await page.keyboard.press('Control+s');await page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();}
     await body.fill('Send body '+sequence);

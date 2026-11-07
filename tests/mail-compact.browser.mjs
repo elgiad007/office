@@ -77,7 +77,7 @@ export async function testMailCompact(page,url) {
     assert.equal(await page.locator('.mail-html').count(),1,'Keyboard selection still changes display mode');
     await firstFrameMenu();await page.getByRole('button',{name:'Original colors',exact:true}).click();await assertClosed();
     await firstFrameMenu();await page.getByRole('button',{name:'Load images',exact:true}).click();await assertClosed();
-    await firstFrameMenu();await page.getByRole('button',{name:'Export',exact:true}).click();await assertClosed();
+    await firstFrameMenu();await more.getByRole('button',{name:'Export',exact:true}).click();await assertClosed();
     // Pointer events cover taps without needing a separate touch browser context.
     await firstFrameMenu();await page.locator('.mail-subject-row h1').dispatchEvent('pointerdown',{pointerType:'touch'});await assertClosed();
     await firstFrameMenu();await page.frameLocator('.mail-html').getByText('HTML message body',{exact:true}).dispatchEvent('pointerdown',{pointerType:'touch'});await assertClosed();

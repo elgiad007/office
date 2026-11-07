@@ -120,7 +120,7 @@ export async function testPanelSizing(page, url) {
     assert.equal(await folders.isVisible(), true);
     assert.equal(await mail.getAttribute('aria-expanded'), null);
 
-    await page.getByRole('button', {name: '+ Compose', exact: true}).click();
+    await page.getByRole('button', {name: 'Compose', exact: true}).click();
     const draft = page.locator('#detail [name="body"]');
     await draft.fill('Keep this unsaved draft while resizing.');
     await drag(list, 60);
