@@ -24,7 +24,7 @@ async function reloadMail(env: FolderEnvironment,preserveSelection=false) {
 async function openFolder(env: FolderEnvironment,scope: MailScope,closePanel: boolean) {
   await env.commit();
   env.state.mailScope=scope;env.state.current=null;env.state.selected.clear();
-  if(closePanel&&matchMedia('(max-width: 800px)').matches)env.closeFolderPanel?.();
+  if(closePanel)env.closeFolderPanel?.();
   await reloadMail(env);
   if(env.state.app==='mail'&&env.state.mailScope===scope)await syncOpenFolder(env);
 }
@@ -34,7 +34,7 @@ export function accountInboxScope(account: Account): MailScope {
 }
 export function openAccountInbox(env: FolderEnvironment,id: string) {
   const account=env.state.accounts.find(account=>account.id===id);
-  if(account)return openFolder(env,accountInboxScope(account),false);
+  if(account)return openFolder(env,accountInboxScope(account),true);
 }
 export function backOutOfMailFolder(env: FolderEnvironment) {
   const scope=env.state.mailScope;

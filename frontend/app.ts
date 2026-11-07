@@ -25,6 +25,7 @@ import {renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSe
 import {createActivity} from './activity.js';
 import {agendaEventLabel,createCalendar,dateOnly,upcomingEvents} from './calendar.js';
 import {timestampLabel, configureTimeLabels, refreshTimeLabels} from './time-labels.js';
+import {panelSplitter, setupPanelSizing} from './panel-sizing.js';
 
 const apps: Record<string, {name: string; singular: string; empty: string; hint: string; icon: string}> = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -384,10 +385,13 @@ async function boot() {
     if (state.accounts.length) void syncAccounts(false);
   } catch(cause) { const error=asError(cause); root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector<HTMLElement>('#retry')!.onclick=boot; }
 }
+let panelSizing: ReturnType<typeof setupPanelSizing>;
+window.addEventListener('resize',()=>panelSizing?.refresh());
 function shell() {
   const syncStatus=document.querySelector<HTMLElement>('#sync-status')!;
   syncStatus.textContent='Automatic sync';syncStatus.hidden=false;
-  root.innerHTML=`<div class="shell"><aside class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<button id="mail-folders-toggle" class="mail-folders-toggle" data-action="toggle-mail-folders" aria-label="Show mail folders" aria-controls="mail-folder-navigation" aria-expanded="false">▤</button><section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div></aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div><div class="app-toolbar" id="app-toolbar" hidden></div></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="topbar-primary"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="mail-toolbar" id="mail-toolbar" hidden><button class="primary" data-action="new">+ Compose</button><details class="mail-actions-menu" id="mail-actions-menu"><summary aria-label="More mail actions" title="More mail actions">⋯</summary><div class="mail-actions-popover"><button data-action="import">↑ Import</button><button data-action="export-all">↓ Export</button></div></details></div><div class="app-toolbar" id="app-toolbar" hidden></div></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  panelSizing=setupPanelSizing(root.querySelector<HTMLElement>('.shell')!,()=>setMailFolderPanel(false));
   setupTopAgenda();
   root.onclick=handleClick;
 }
@@ -438,12 +442,29 @@ function setupTopAgenda() {
   };
   updateTopClock();
 }
-function setMailFolderPanel(open: boolean) {
-  document.querySelector<HTMLElement>('.shell')!?.classList.toggle('folders-open',open);
-  document.querySelector<HTMLElement>('#mail-folders-toggle')!?.setAttribute('aria-expanded',String(open));
+function setMailFolderPanel(open: boolean,restoreFocus=false) {
+  const shell=root.querySelector<HTMLElement>('.shell')!;
+  const trigger=shell.querySelector<HTMLButtonElement>('[data-app="mail"]')!;
+  const panel=shell.querySelector<HTMLElement>('#mail-folder-navigation')!;
+  const collapsed=shell.classList.contains('sidebar-collapsed');
+  const wasOpen=shell.classList.contains('folders-open');
+  shell.classList.toggle('folders-open',open);
+  if(collapsed){
+    trigger.setAttribute('aria-controls',panel.id);
+    trigger.setAttribute('aria-expanded',String(open));
+  }else{
+    trigger.removeAttribute('aria-controls');
+    trigger.removeAttribute('aria-expanded');
+  }
+  if(open){
+    panel.style.setProperty('--folder-flyout-top',`${trigger.getBoundingClientRect().top}px`);
+    panel.querySelector<HTMLElement>('#mail-folder')?.focus({preventScroll:true});
+  }else if(wasOpen&&restoreFocus){
+    trigger.focus({preventScroll:true});
+  }
 }
 function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,captureSidebarFocus,closeFolderPanel:()=>{
-  const restoreSidebar=captureSidebarFocus();setMailFolderPanel(false);restoreSidebar();
+  setMailFolderPanel(false,true);
 }}; }
 function mailLocation(record: OfficeRecord) {
   const m=record.meta, account=state.accounts.find(a=>a.id===m.account);
@@ -629,10 +650,10 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   document.querySelectorAll<HTMLElement>('[data-app]').forEach(b=>{ const active=b.dataset.app===state.app; b.classList.toggle('active',active); if (active) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); });
   document.querySelector<HTMLElement>('#crumb')!.textContent=apps[state.app]?.name||'Settings';
   document.querySelector<HTMLElement>('.shell')!.classList.toggle('mail-active',state.app==='mail');
+  panelSizing.refresh();
   document.querySelector<HTMLElement>('#mail-toolbar')!.hidden=state.app!=='mail';
   if(state.app!=='mail')document.querySelector<HTMLDetailsElement>('#mail-actions-menu')!.open=false;
   document.querySelector<HTMLElement>('#mail-folder-navigation')!.hidden=state.app!=='mail';
-  document.querySelector<HTMLElement>('#mail-folders-toggle')!.hidden=state.app!=='mail';
   if(state.app!=='mail')setMailFolderPanel(false);
   if(entryVersion!==undefined&&!initialRecords&&!document.hidden){
     // Let the loading screen paint before a fast response triggers rendering.
@@ -721,7 +742,8 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
     document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;renderList();};
     calendar.render();if(state.current)calendar.ensureVisible(state.current.id);renderDetail();return;
   }
-  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid"><section class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div></section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid"><section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+  panelSizing.bindList(document.querySelector<HTMLElement>('[data-resize-panel="list"]')!);
   document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;mailListLimit=100;renderList();};
   if(state.app==='tasks')bindTaskViewControls();
   if(state.app==='mail'){
@@ -736,7 +758,7 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
         state.mailFolder=folder; state.mailScope=null;mailListLimit=100; state.current=navigableRows()[0]||null; state.selected.clear(); selectionAnchor=null;keyboardSelection=false;setMode('normal');
         if(state.current?.meta.folder==='Drafts')mailDraftOrigins.set(state.current.id,mailDraftOrigin(false));
         renderWorkspace();
-        if(matchMedia('(max-width: 800px)').matches)setMailFolderPanel(false);
+        setMailFolderPanel(false,true);
       } finally { select.value=state.mailFolder; select.disabled=false; restoreSidebar(); }
     });
     if(state.mailScope){const select=document.querySelector<HTMLSelectElement>('#mail-folder')!;select.insertAdjacentHTML('afterbegin','<option value="account-folder">Selected account folder</option>');select.value='account-folder';}
@@ -1108,7 +1130,7 @@ async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope) 
 async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>,warm=false) {
   const version=++appEntryVersion;
   const main=document.querySelector<HTMLElement>('#main')!;
-  const controls=document.querySelectorAll<HTMLElement>('#app-toolbar,#mail-toolbar,#mail-folder-navigation,#mail-folders-toggle');
+  const controls=document.querySelectorAll<HTMLElement>('#app-toolbar,#mail-toolbar,#mail-folder-navigation');
   controls.forEach(control=>{control.inert=true;});
   main.dataset.appEntry='';
   const label=apps[name]?.name||'Settings';
@@ -1329,7 +1351,14 @@ async function handleClick(event: MouseEvent) {
   if((event.target as HTMLElement).closest('#mail-actions-menu button')&&mailMenu)mailMenu.open=false;
   const button=(event.target as HTMLElement).closest<HTMLButtonElement>('button');if(!button)return;
   await attempt(async()=>{
-    if(button.dataset.app!){await changeApp(button.dataset.app! as AppName,event.detail===0&&document.activeElement===button);return;}
+    if(button.dataset.app){
+      const app=button.dataset.app as AppName;
+      if(app==='mail'&&button.closest('.sidebar-collapsed')){
+        if(state.app===app&&!appEntryVisible())setMailFolderPanel(!button.closest('.folders-open'));
+        else if(await changeApp(app,true)&&button.closest('.sidebar-collapsed'))setMailFolderPanel(true);
+      }else await changeApp(app,event.detail===0&&document.activeElement===button);
+      return;
+    }
     if(appEntryVisible()&&button.dataset.action!=='logout')return;
     if(button.dataset.id!){await clickRecord(button.dataset.id!,event);return;}
     if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
@@ -1337,8 +1366,7 @@ async function handleClick(event: MouseEvent) {
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet!);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action!;
     if(action==='connections'){await connections.view(true);return;}
-    if(action==='toggle-mail-folders')setMailFolderPanel(!document.querySelector<HTMLElement>('.shell')!.classList.contains('folders-open'));
-    if(action==='close-mail-folders'){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();}
+    if(action==='close-mail-folders')setMailFolderPanel(false,true);
     if(action==='new')await createRecord();
     if(action==='save')await commit(true);
     if(action==='help')help();
@@ -1790,7 +1818,6 @@ function sidebarEntrySelector(entry: HTMLElement) {
 function focusSidebar(selector=lastSidebarEntry) {
   const entries=sidebarEntries();
   const entry=(selector&&entries.find(node=>node.matches(selector)))||
-    (selector&&entries.find(node=>node.id==='mail-folders-toggle'))||
     entries.find(node=>node.matches('[data-app][aria-current="page"]'))||entries[0];
   if(entry){entry.focus({preventScroll:true});entry.scrollIntoView({block:'nearest',inline:'nearest'});}
 }
@@ -1949,7 +1976,7 @@ document.addEventListener('keydown',event=>{
   if((event.target as HTMLElement).closest('[data-mail-disclosure]'))return;
   const target=event.target as HTMLElement;
   if(appEntryVisible()&&!['g',':'].includes(event.key)&&!(keySequence==='g'&&/^[1-7]$/.test(event.key)))return;
-  if(event.key==='Escape'&&document.querySelector<HTMLElement>('.shell')!?.classList.contains('folders-open')){setMailFolderPanel(false);document.querySelector<HTMLElement>('#mail-folders-toggle')!?.focus();event.preventDefault();return;}
+  if(event.key==='Escape'&&document.querySelector('.folders-open')){setMailFolderPanel(false,true);event.preventDefault();return;}
   const inSidebar=!!target.closest('.sidebar');
   if(inSidebar&&event.key!==':'&&event.key!=='g'&&!(keySequence==='g'&&/^[1-7]$/.test(event.key))){
     keySequence='';handleSidebarKey(event,target);return;
@@ -2008,7 +2035,10 @@ document.addEventListener('keydown',event=>{
   if(action==='down'||action==='up'||key==='n'||key==='N'||key==='G'){event.preventDefault();afterListPage(()=>{const rows=navigableRows();const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(action==='up'||key==='N'?-1:1)));if(rows[next])return selectRecord(rows[next].id,true);});}
 });
 document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view,.sidebar')&&target.id!=='command-input'&&editable(target))setMode('insert');});
-document.addEventListener('pointerdown',()=>state.lastActivity=Date.now(),{passive:true});
+document.addEventListener('pointerdown',event=>{
+  state.lastActivity=Date.now();
+  if(document.querySelector('.folders-open')&&!(event.target as Element).closest('#mail-folder-navigation,[data-app="mail"]'))setMailFolderPanel(false);
+},{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});
 window.addEventListener('beforeunload',event=>{if(state.dirty||state.savePromise){event.preventDefault();event.returnValue='';}});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);

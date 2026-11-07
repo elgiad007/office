@@ -36,7 +36,7 @@ async function openFolder(env, scope, closePanel) {
     env.state.mailScope = scope;
     env.state.current = null;
     env.state.selected.clear();
-    if (closePanel && matchMedia('(max-width: 800px)').matches)
+    if (closePanel)
         env.closeFolderPanel?.();
     await reloadMail(env);
     if (env.state.app === 'mail' && env.state.mailScope === scope)
@@ -49,7 +49,7 @@ export function accountInboxScope(account) {
 export function openAccountInbox(env, id) {
     const account = env.state.accounts.find(account => account.id === id);
     if (account)
-        return openFolder(env, accountInboxScope(account), false);
+        return openFolder(env, accountInboxScope(account), true);
 }
 export function backOutOfMailFolder(env) {
     const scope = env.state.mailScope;

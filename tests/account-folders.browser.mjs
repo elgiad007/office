@@ -86,10 +86,10 @@ export async function testAccountFolders(page,url) {
     await open('gmail-a','Inbox');assert.equal(await page.locator('[data-manage-folder="delete"], [data-manage-folder="rename"]').count(),0,'system folder has no rename/delete controls');
     await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     assert.equal(await page.locator('#mail-folder-navigation').isVisible(),false);
-    await page.locator('#mail-folders-toggle').click();await page.locator('#mail-folder-navigation').waitFor({state:'visible'});
+    await page.locator('[data-app="mail"]').click();await page.locator('#mail-folder-navigation').waitFor({state:'visible'});
     await page.screenshot({path:'test-results/account-folders-mobile.png',fullPage:true});
     await open('imap-b','Travel');await page.locator('#mail-folder-navigation').waitFor({state:'hidden'});
-    assert.equal(await page.locator('#mail-folders-toggle').getAttribute('aria-expanded'),'false');
+    assert.equal(await page.locator('[data-app="mail"]').getAttribute('aria-expanded'),'false');
     await page.setViewportSize({width:1440,height:1000});await open('imap-a','Orders');await page.screenshot({path:'test-results/account-folders.png',fullPage:true});
     holdNext=true;await page.locator('#folder-refresh').click();
     await page.waitForFunction(()=>document.querySelector('#folder-refresh').disabled);
