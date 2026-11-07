@@ -26,7 +26,7 @@ try{
   browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
-  let records=[],writes=[],reject=false,sequence=0;
+  let records=[],writes=[],reject=false,sequence=0,saveGate;
   await page.route('**/api.php?*',async route=>{
     const action=new URL(route.request().url()).searchParams.get('r');let json;
     if(action==='status')json={authenticated:true,csrf:'fixture',preferences:{}};
@@ -36,6 +36,7 @@ try{
     else if(action==='connections')json={links:[],items:[],more:false};
     else if(action==='save'){
       const input=route.request().postDataJSON();writes.push(input);
+      if(saveGate)await saveGate;
       if(reject)return route.fulfill({status:500,json:{error:'Fixture save failure'}});
       const record={...input,id:input.id||`saved-${++sequence}`,revision:(input.revision||0)+1,created:input.created||new Date().toISOString(),updated:new Date().toISOString()};
       records=records.filter(r=>r.id!==record.id);records.push(record);json={record};
@@ -44,11 +45,18 @@ try{
     await route.fulfill({json});
   });
   const saved=()=>page.locator('#save-status').filter({hasText:/^Saved$/}).waitFor();
+  const saveButton=page.locator('#detail [data-action="save"]');
+  const checkSaveButton=async(label,disabled)=>{
+    await saveButton.filter({hasText:label}).waitFor();
+    assert.equal(await saveButton.textContent(),label);
+    assert.equal(await saveButton.isDisabled(),disabled);
+  };
   const create=async()=>{await page.locator('[data-action="new"]:visible').first().click();await page.locator('#save-status').filter({hasText:'Unsaved draft'}).waitFor();};
   const discard=async()=>{await page.locator('#detail [data-action="delete"]').click();await page.locator('#confirm').click();await page.locator('#record-form').waitFor({state:'detached'});};
   for(const app of ['documents','wiki','sheets','tasks','contacts','calendar','mail']){
     await page.goto(url+'#'+app);await page.reload();await page.locator('[data-action="new"]:visible').first().waitFor();
     await create();const before=writes.length;
+    await checkSaveButton('Save',false);
     await page.locator('.title-input').fill('Manual '+app);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(1000);
@@ -75,15 +83,20 @@ try{
     if(app==='documents')await page.locator('#rich-editor').fill('Document content');
     const editor=await page.locator('#record-form').elementHandle();
     await page.keyboard.press('Control+s');await saved();
+    await checkSaveButton('Saved',true);
     assert.equal(await editor.evaluate(node=>node.isConnected),true,'first save preserves the editor');
     assert.equal(writes.length,before+1);assert.equal(writes.at(-1).id,undefined,'initial save omits temporary ID');
     const stored=records.find(r=>r.kind===app);assert.equal(stored.title,'Saved '+app);
     if(app==='documents')assert.match(stored.body,/Document content/);
-    await page.locator('.title-input').fill('Autosaved '+app);await saved();
+    await page.locator('.title-input').fill('Autosaved '+app);
+    await checkSaveButton('Save',false);
+    await saved();
+    await checkSaveButton('Saved',true);
     assert.equal(writes.length,before+2,app+' autosaves after manual first save');
     assert.equal(writes.at(-1).id,stored.id);
   }
   await page.goto(url+'#documents');await page.reload();await page.locator('[data-action="new"]:visible').first().waitFor();
+  await checkSaveButton('Saved',true);
   await create();await page.locator('.title-input').fill('Keep this draft');
   await page.locator('#rich-editor').fill('Keep this content');const before=writes.length;
   await page.locator('[data-app="tasks"]').click();await page.locator('[data-draft-choice="cancel"]').click();
@@ -92,8 +105,13 @@ try{
   const download=page.waitForEvent('download');await page.locator('#detail [data-action="export"]').click();await download;
   await page.locator('#sync-button').click();await page.waitForTimeout(150);
   assert.equal(writes.length,before);assert.equal(await page.locator('#rich-editor').textContent(),'Keep this content');
-  reject=true;await page.locator('#detail [data-action="save"]').click();
+  let releaseSave;
+  saveGate=new Promise(resolve=>{releaseSave=resolve;});
+  reject=true;await saveButton.click();
+  await checkSaveButton('Saving…',true);
+  releaseSave();saveGate=undefined;
   await page.locator('#save-status').filter({hasText:'Save failed'}).waitFor();
+  await checkSaveButton('Save',false);
   assert.equal(await page.locator('#rich-editor').textContent(),'Keep this content');
   assert.equal(await page.locator('#detail [data-action="delete"]').textContent(),'Discard Draft');
   await page.locator('[data-app="tasks"]').click();await page.locator('[data-draft-choice="save"]').click();

@@ -168,6 +168,13 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 :root[data-theme="dark"][data-accent="blue"] { --accent: #9dbfe7; --wash: #2b3747; }
 :root[data-theme="dark"][data-accent="plum"] { --accent: #d3aed2; --wash: #423244; }
 .primary:hover { background: color-mix(in srgb, var(--accent) 90%, var(--text)); }
+#detail [data-action="save"]:disabled {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: default;
+  opacity: 1;
+}
 .rich-editor img, .article img { max-width: 100%; height: auto; }
 .rich-editor a { text-decoration: underline; }
 .form-error { color: var(--danger); font-size: 12px; }

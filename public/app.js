@@ -1257,6 +1257,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
         template.innerHTML = markup;
         for (const selector of ['.detail-toolbar', '.print-only'])
             panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
+        updateSaveButton();
         void connections.section();
         return;
     }
@@ -1269,6 +1270,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     }
     else
         panel.innerHTML = markup;
+    updateSaveButton();
     void connections.section();
     panel.querySelectorAll('[data-mail-disclosure]').forEach(d => d.open = !!restore?.open.includes(d.dataset.mailDisclosure));
     const failure = state.app === 'mail' ? failedMailActions.get(r.id) : undefined;
@@ -1431,7 +1433,14 @@ function collect() {
     if (state.app === 'documents')
         state.current.body = safeDocument(document.querySelector('#rich-editor').innerHTML);
 }
-function markDirty() { collect(); state.dirty = true; const s = document.querySelector('#save-status'); if (s)
+function updateSaveButton() {
+    const button = document.querySelector('#detail [data-action="save"]');
+    if (!button)
+        return;
+    button.disabled = !!state.savePromise || !state.dirty;
+    button.textContent = state.savePromise ? 'Saving…' : state.dirty ? 'Save' : 'Saved';
+}
+function markDirty() { collect(); state.dirty = true; updateSaveButton(); const s = document.querySelector('#save-status'); if (s)
     s.textContent = isUnsavedDraft() ? 'Unsaved draft' : 'Unsaved changes'; clearTimeout(saveTimer); if (!isUnsavedDraft())
     saveTimer = setTimeout(() => void attempt(() => commit()), 800); }
 async function completeTask() {
@@ -1540,8 +1549,10 @@ async function commit(explicit = false) {
         }
         finally {
             state.savePromise = null;
+            updateSaveButton();
         }
     })();
+    updateSaveButton();
     await state.savePromise;
     if (state.dirty)
         await commit();

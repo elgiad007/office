@@ -844,6 +844,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   if(toolbarOnly){
     const template=document.createElement('template');template.innerHTML=markup;
     for(const selector of ['.detail-toolbar','.print-only'])panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector)!);
+    updateSaveButton();
     void connections.section();
     return;
   }
@@ -853,6 +854,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
     panel.querySelector('.mail-reader-header')!.replaceWith(template.content.querySelector('.mail-reader-header')!);
     panel.querySelector('.mail-action-failure')?.remove();
   }else panel.innerHTML=markup;
+  updateSaveButton();
   void connections.section();
   panel.querySelectorAll<HTMLDetailsElement>('[data-mail-disclosure]').forEach(d=>d.open=!!restore?.open.includes(d.dataset.mailDisclosure!));
   const failure=state.app==='mail'?failedMailActions.get(r.id):undefined;
@@ -938,7 +940,13 @@ function collect() {
   if (state.app==='tasks') m.done=values.done==='on';
   if (state.app==='documents') state.current!.body=safeDocument(document.querySelector<HTMLElement>('#rich-editor')!.innerHTML);
 }
-function markDirty() { collect();state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=isUnsavedDraft()?'Unsaved draft':'Unsaved changes'; clearTimeout(saveTimer); if(!isUnsavedDraft())saveTimer=setTimeout(()=>void attempt(()=>commit()),800); }
+function updateSaveButton() {
+  const button=document.querySelector<HTMLButtonElement>('#detail [data-action="save"]');
+  if(!button)return;
+  button.disabled=!!state.savePromise||!state.dirty;
+  button.textContent=state.savePromise?'Saving…':state.dirty?'Save':'Saved';
+}
+function markDirty() { collect();state.dirty=true; updateSaveButton(); const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=isUnsavedDraft()?'Unsaved draft':'Unsaved changes'; clearTimeout(saveTimer); if(!isUnsavedDraft())saveTimer=setTimeout(()=>void attempt(()=>commit()),800); }
 async function completeTask() {
   if(state.app!=='tasks'||!state.current||state.current.meta.remote)return;
   const checkbox=document.querySelector<HTMLInputElement>('#record-form input[name="done"]');
@@ -983,7 +991,8 @@ async function commit(explicit=false): Promise<void> {
     else {state.current!.revision=result.record.revision;state.current!.updated=result.record.updated;const pos=state.rows.findIndex(r=>r.id===id);if(pos>=0)state.rows[pos]=state.current;}
   }
     const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved'; renderList();
-  } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; }})();
+  } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; updateSaveButton(); }})();
+  updateSaveButton();
   await state.savePromise; if(state.dirty) await commit();
   if(state.app==='tasks'&&state.current&&(firstSave||state.current.id===id)&&!state.dirty){
     if(!filteredRows().some(r=>r.id===state.current?.id)){
