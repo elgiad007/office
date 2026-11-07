@@ -546,8 +546,12 @@ function download_mail_content(array $r): array {
         $raw=base64_decode(strtr($msg['raw']??'','-_','+/'),true);
         if($raw===false || $raw==='')fail('Invalid Gmail message content.');
     }else fail('Choose a mail account.');
+    return save_downloaded_mail_content($r,$a,$raw);
+}
+function save_downloaded_mail_content(array $r,array $a,string $raw): array {
     if(strlen($raw)>IMAP_BODY_LIMIT)fail('This message exceeds the 1.4 MB body download limit.');
     get_record($r['id']); // Account removal must not resurrect a deleted cache row.
+    $meta=$r['meta'];
     unset($meta['headerOnly'],$meta['headersBase64'],$meta['hasHtml']);
     $full=mail_download($a,mail_row_source($r),$raw,$meta);$full['id']=$r['id'];
     return save_record($full,true);

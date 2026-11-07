@@ -135,6 +135,9 @@ const headerActionPaths = {
 function headerAction(action, label, glyph = action) {
     return `<button class="header-action ${action === 'new' ? 'primary' : 'quiet'}" data-action="${action}" aria-label="${e(label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${headerActionPaths[glyph]}"/></svg><span class="header-action-label" aria-hidden="true">${e(label)}</span></button>`;
 }
+function mailExportMenu() {
+    return `<details id="mail-export-menu"><summary class="header-action quiet" aria-label="Mail export options" title="Mail export options"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${headerActionPaths['export-all']}"/></svg></summary><div class="mail-export-options"><button type="button" data-action="export-cached-mail">Export cached mail</button><button type="button" data-action="export-full-mail">Export with missing bodies</button></div></details>`;
+}
 const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => {
     const saved = state.prefs.keys?.[action];
     // Upgrade the former defaults when reading older saved bindings. Settings
@@ -446,7 +449,7 @@ async function api(route, data, signal) {
             payload = { ...payload, revision: result.record.revision };
     }
     const account = route === 'mail-undo' ? payload?.account : ['mail-action', 'mail-files'].includes(route) ? expected?.meta.account || latestMail(payload?.id)?.meta.account
-        : route === 'sync' ? payload?.id : ['mail-content', 'mail-folder-sync', 'mail-folders', 'mail-folder-manage'].includes(route) ? payload?.account : null;
+        : route === 'sync' ? payload?.id : ['mail-content', 'mail-export-batch', 'mail-folder-sync', 'mail-folders', 'mail-folder-manage'].includes(route) ? payload?.account : null;
     const names = { 'mail-undo': 'Undoing mail deletion', 'mail-action': ({ trash: 'Moving mail to Trash', archive: 'Archiving mail', restore: 'Restoring mail to Inbox', read: 'Marking mail read', unread: 'Marking mail unread', move: 'Moving mail', discard: 'Discarding cached copy', 'keep-local': 'Saving local copy' })[payload?.action || ''] || 'Updating mail', sync: 'Synchronizing mail', 'mail-folders': 'Discovering folders', 'mail-folder-sync': 'Refreshing folder', 'mail-folder-manage': 'Updating folders', 'account-test': 'Testing connection', save: 'Saving item', delete: 'Deleting item', backup: 'Preparing backup', restore: 'Restoring backup', import: 'Importing items', 'import-items': 'Importing items' };
     const label = state.accounts.find(row => row.id === account)?.label;
     const tracking = activity.queued(names[route] ? (label ? label + ': ' : '') + names[route] + '…' : null);
@@ -583,7 +586,7 @@ function shell() {
     const syncStatus = document.querySelector('#sync-status');
     syncStatus.textContent = 'Automatic sync';
     syncStatus.hidden = false;
-    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${headerAction('export-all', 'Export all mail')}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
     panelSizing = setupPanelSizing(root.querySelector('.shell'), () => setMailFolderPanel(false));
     setupTopAgenda();
     root.onclick = handleClick;
@@ -1974,18 +1977,17 @@ async function viewMessageHeaders() {
         }
     }, { once: true });
 }
-async function fullMailRecord(record, signal) {
+async function fullMailRecord(record) {
     if (record.meta.headerOnly) {
         await pendingMailReads.get(record.id);
-        signal?.throwIfAborted();
-        return (await api('mail-content', { id: record.id, account: record.meta.account }, signal)).record;
+        return (await api('mail-content', { id: record.id, account: record.meta.account })).record;
     }
     if (!record.summary)
         return record;
     const cached = latestMail(record.id);
     if (cached && !cached.summary && cached.revision === record.revision && sameMailTarget(record, cached))
         return cached;
-    return (await api(`record&id=${encodeURIComponent(record.id)}`, undefined, signal)).record;
+    return (await api(`record&id=${encodeURIComponent(record.id)}`)).record;
 }
 function downloadRecordArchive(name, records) {
     download(name + '.json', JSON.stringify({ format: 'portable-office-items', version: 1, records }, null, 2), 'application/json');
@@ -2000,72 +2002,75 @@ function waitForMailExport(work, signal) {
         void work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
     });
 }
-async function exportAllMail(button) {
-    if (button.disabled)
+async function exportAllMail(complete) {
+    const menu = document.querySelector('#mail-export-menu');
+    if (menu.inert)
         return;
     const status = document.querySelector('#mail-export-status');
     const cancel = document.querySelector('#cancel-mail-export');
     const controller = new AbortController(), signal = controller.signal;
-    const initialRows = state.rows;
-    button.disabled = true;
+    menu.open = false;
+    menu.inert = true;
     cancel.hidden = false;
     cancel.onclick = () => controller.abort();
+    cancel.focus();
     status.textContent = 'Preparing mail export…';
     try {
         await waitForMailExport(commit(), signal);
-        const rows = (state.app === 'mail' ? state.rows : initialRows).slice();
-        if (!rows.length) {
+        let warning;
+        if (complete) {
+            const { batches } = await api('mail-export-plan', undefined, AbortSignal.any([signal, AbortSignal.timeout(60_000)]));
+            const total = batches.reduce((count, batch) => count + batch.ids.length, 0);
+            let checked = 0;
+            for (const batch of batches) {
+                if (!menu.isConnected)
+                    return;
+                status.textContent = `Fetching missing bodies · ${checked} of ${total} checked`;
+                const deadline = AbortSignal.timeout(60_000);
+                const batchSignal = AbortSignal.any([signal, deadline]);
+                try {
+                    const result = await waitForMailExport(api('mail-export-batch', batch, batchSignal), batchSignal);
+                    warning ??= result.warning ?? undefined;
+                }
+                catch (cause) {
+                    signal.throwIfAborted();
+                    warning ??= deadline.aborted ? 'A message batch timed out.' : asError(cause).message;
+                }
+                checked += batch.ids.length;
+            }
+        }
+        if (!menu.isConnected)
+            return;
+        status.textContent = 'Preparing mail download…';
+        const response = await fetch('api.php?r=mail-export' + (complete ? '&complete=1' : ''), { cache: 'no-store', signal });
+        if (!response.ok) {
+            const error = await response.json().catch(() => null);
+            throw Error(error?.error || 'The mail archive could not be downloaded.');
+        }
+        const countHeader = response.headers.get('X-Office-Mail-Count');
+        if (countHeader === null)
+            throw Error('The server did not return a mail archive.');
+        const count = Number(countHeader), missing = Number(response.headers.get('X-Office-Mail-Header-Only'));
+        if (!count) {
+            await response.body?.cancel();
+            if (complete && missing)
+                throw Error(warning || 'No message bodies are available.');
             status.textContent = 'There is nothing to export yet.';
             return;
         }
-        const records = [];
-        let firstFailure;
-        let checked = 0;
-        const showProgress = () => { status.textContent = `Preparing mail export · ${checked} of ${rows.length} checked`; };
-        showProgress();
-        // Keep large mailboxes from filling the account request queues all at once.
-        const batchSize = 4;
-        for (let offset = 0; offset < rows.length; offset += batchSize) {
-            if (!button.isConnected)
-                return;
-            const results = await Promise.allSettled(rows.slice(offset, offset + batchSize).map(async (record) => {
-                const deadline = AbortSignal.timeout(60_000);
-                const fetchSignal = AbortSignal.any([signal, deadline]);
-                try {
-                    return await waitForMailExport(fullMailRecord(record, fetchSignal), fetchSignal);
-                }
-                catch (cause) {
-                    if (deadline.aborted)
-                        throw new Error('A message fetch timed out.');
-                    throw cause;
-                }
-                finally {
-                    checked++;
-                    if (!signal.aborted)
-                        showProgress();
-                }
-            }));
-            signal.throwIfAborted();
-            for (const result of results) {
-                if (result.status === 'fulfilled')
-                    records.push(result.value);
-                else
-                    firstFailure ??= asError(result.reason);
-            }
-        }
-        if (!button.isConnected)
+        const archive = await response.blob();
+        signal.throwIfAborted();
+        if (!menu.isConnected)
             return;
-        if (!records.length)
-            throw new Error(firstFailure?.message || 'No message bodies are available.');
-        downloadRecordArchive('mail', records);
-        const skipped = rows.length - records.length;
-        const result = skipped ? `Download started · mail.json · ${skipped} skipped` : 'Download started · mail.json';
+        const name = complete ? 'mail.json' : 'mail-cached.json';
+        download(name, archive, 'application/json');
+        const result = `Download started · ${name}` + (missing ? ` · ${missing} ${complete ? 'skipped' : 'header-only'}` : '');
         status.textContent = result;
-        if (firstFailure)
-            notice(`${result}. First failure: ${firstFailure.message}`);
+        if (warning)
+            notice(`${result}. First issue: ${warning}`);
     }
     catch (cause) {
-        if (!button.isConnected)
+        if (!menu.isConnected)
             return;
         if (signal.aborted) {
             status.textContent = 'Mail export canceled';
@@ -2078,9 +2083,9 @@ async function exportAllMail(button) {
         const restoreFocus = document.activeElement === cancel;
         cancel.hidden = true;
         cancel.onclick = null;
-        button.disabled = false;
+        menu.inert = false;
         if (restoreFocus)
-            button.focus();
+            menu.querySelector('summary')?.focus();
     }
 }
 async function exportRecords(all = false, selectedRecords = null) {
@@ -2310,6 +2315,9 @@ async function handleClick(event) {
     const agenda = document.querySelector('#top-agenda');
     if (agenda?.open && !event.composedPath().includes(agenda))
         agenda.open = false;
+    const exportMenu = document.querySelector('#mail-export-menu[open]');
+    if (exportMenu && !event.composedPath().includes(exportMenu))
+        exportMenu.open = false;
     const disclosure = event.target.closest('[data-mail-disclosure]')?.dataset.mailDisclosure;
     document.querySelectorAll('#detail [data-mail-disclosure][open]').forEach(d => { if (d.dataset.mailDisclosure !== disclosure)
         d.open = false; });
@@ -2390,7 +2398,9 @@ async function handleClick(event) {
         if (action === 'export')
             await exportRecords();
         if (action === 'export-all')
-            await (state.app === 'mail' ? exportAllMail(button) : exportRecords(true));
+            await exportRecords(true);
+        if (action === 'export-cached-mail' || action === 'export-full-mail')
+            await exportAllMail(action === 'export-full-mail');
         if (action === 'print') {
             await commit();
             window.print();
@@ -3313,6 +3323,13 @@ document.addEventListener('keydown', event => {
     if (event.target.closest('[data-mail-disclosure]'))
         return;
     const target = event.target;
+    const exportMenu = target.closest('#mail-export-menu[open]');
+    if (event.key === 'Escape' && exportMenu) {
+        exportMenu.open = false;
+        exportMenu.querySelector('summary')?.focus();
+        event.preventDefault();
+        return;
+    }
     if (appEntryVisible() && !['g', ':'].includes(event.key) && !(keySequence === 'g' && /^[1-7]$/.test(event.key)))
         return;
     if (event.key === 'Escape' && document.querySelector('.folders-open')) {

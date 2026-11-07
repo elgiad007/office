@@ -6,6 +6,7 @@ require __DIR__.'/imap.php'; // Includes the scripted peer and verified MOVE reg
 require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/mail-folders.php';
 require dirname(__DIR__).'/app/mail-empty-junk.php';
+require dirname(__DIR__).'/app/mail-export.php';
 require dirname(__DIR__).'/app/google.php';
 function make_account(string $id,string $type='imap'): array {
     db()->prepare('INSERT INTO accounts (id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute([$id,'Fixture',$type,'{}','']);
@@ -23,6 +24,37 @@ function download_step(string $uid,string $raw): array {
 }
 function legacy_sync_stream(array $a,mixed $s,bool $repair=false,?string $onlyPath=null,int $limit=10): int {return imap_sync_stream($a,$s,$repair,$onlyPath,$repair?100:$limit);}
 try {
+    $exportRaw="Subject: Export fixture\r\n\r\nCached body";
+    $exportRows=[];
+    foreach(['41'=>'100','42'=>'100','43'=>'100','44'=>'99'] as $uid=>$validity){
+        $exportRows[]=['id'=>'export-'.$uid,'meta'=>['source'=>mail_source('INBOX',$validity,(string)$uid),'providerId'=>(string)$uid,'serverFolder'=>'INBOX']];
+    }
+    // A stale record can share a UID with a valid message after UIDVALIDITY changes.
+    $exportRows[]=['id'=>'stale-41','meta'=>['source'=>mail_source('INBOX','99','41'),'providerId'=>'41','serverFolder'=>'INBOX']];
+    $exportSize=strlen($exportRaw);
+    $exportSteps=[
+        examine_step('INBOX'),
+        ['UID FETCH 41:43 (UID RFC822.SIZE)',"* 1 FETCH (UID 41 RFC822.SIZE $exportSize)\r\n* 2 FETCH (UID 42 RFC822.SIZE $exportSize)\r\n{tag} OK done\r\n"],
+        ['UID FETCH 41:42 (UID BODY.PEEK[])',"* 1 FETCH (BODY[] {{$exportSize}}\r\n$exportRaw UID 41)\r\n* 2 FETCH (UID 42 BODY[] {{$exportSize}}\r\n$exportRaw)\r\n{tag} OK done\r\n"],
+    ];
+    fixture($exportSteps,function($socket)use($exportRows,$exportRaw){
+        check(imap_export_bodies($socket,$exportRows,'INBOX')===['export-41'=>$exportRaw,'export-42'=>$exportRaw],
+            'mail export batches bodies in one folder and preserves valid messages when a UID is missing or stale');
+    });
+    $exportAccount=make_account('mail-export-fixture');
+    foreach(['41'=>'INBOX','42'=>'INBOX','43'=>'Archive','44'=>'Gone'] as $uid=>$folder){
+        $source=mail_source($folder,'100',(string)$uid);
+        cache_remote($exportAccount,$source,'mail','Export header','',[
+            'providerId'=>(string)$uid,'serverFolder'=>$folder,'headerOnly'=>true,
+            'folder'=>$folder==='Gone'?'Recovery copies':$folder
+        ]);
+    }
+    $exportBatches=mail_export_plan();
+    check(count($exportBatches)===2 && array_column($exportBatches,'account')===array_fill(0,2,$exportAccount['id'])
+        && count($exportBatches[0]['ids'])===1 && count($exportBatches[1]['ids'])===2
+        && !in_array(remote_id($exportAccount['id'],mail_source('Gone','100','44')),array_merge(...array_column($exportBatches,'ids')),true),
+        'mail export plans one batch per folder and omits unavailable recovery copies');
+
     set_setting('preferences',['mailOffline'=>true]);
     $a=make_account('sync-fixture');
     $raw="Message-ID: <move@example.com>\r\nSubject: Moved mail\r\n\r\nPreserve exact original";

@@ -9,6 +9,7 @@ require dirname(__DIR__).'/app/mail-folders.php';
 require dirname(__DIR__).'/app/mail-transfer.php';
 require dirname(__DIR__).'/app/mail-undo.php';
 require dirname(__DIR__).'/app/mail-empty-junk.php';
+require dirname(__DIR__).'/app/mail-export.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -98,6 +99,21 @@ try {
         activity_begin($operation,$label);
     }
     if ($route==='logout' && $method==='POST') { $_SESSION=[]; session_destroy(); json_response(['ok'=>true]); }
+    if ($route==='mail-export' && $method==='GET') {
+        session_write_close();
+        stream_mail_export(($_GET['complete']??'')==='1');
+    }
+    if ($route==='mail-export-plan' && $method==='GET') {
+        session_write_close();
+        json_response(['batches'=>mail_export_plan()]);
+    }
+    if ($route==='mail-export-batch' && $method==='POST') {
+        $accountId=$input['account']??null;$ids=$input['ids']??null;
+        if(!is_string($accountId)||$accountId===''||!is_array($ids)||!array_is_list($ids)||!$ids||count($ids)>MAIL_EXPORT_BATCH)fail('Invalid mail export batch.');
+        foreach($ids as $id)if(!is_string($id)||$id==='')fail('Invalid mail export message.');
+        session_write_close();
+        json_response(['warning'=>hydrate_mail_export_batch($accountId,array_unique($ids))]);
+    }
     if ($route==='records' && $method==='GET') {
         $kind=$_GET['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
         session_write_close();

@@ -11,6 +11,7 @@ export async function testSyncProgress(page,url){
     else if(action==='connections')json={connections:[]};
     else if(action==='accounts')json={accounts:[{id:'sync-fixture',label:'Progress fixture',type:'imap'}]};
     else if(action==='records')json={records:[]};
+    else if(action==='mail-export')return route.fulfill({json:{records:[]},headers:{'X-Office-Mail-Count':'0','X-Office-Mail-Header-Only':'0'}});
     else if(action==='activity')json={entries:[]};
     else if(action==='sync'){
       calls++;batchCounts.push(route.request().postDataJSON().batches);if(calls===1)await first;if(calls===2)await second;json={count:100,more:true};
@@ -30,8 +31,8 @@ export async function testSyncProgress(page,url){
     const toolbar=page.locator('#mail-toolbar');
     const compose=toolbar.getByRole('button',{name:'Compose',exact:true});
     const importButton=toolbar.getByRole('button',{name:'Import',exact:true});
-    const exportButton=toolbar.getByRole('button',{name:'Export all mail',exact:true});
-    assert.deepEqual(await toolbar.getByRole('button').evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label'))),['Compose','Import','Export all mail']);
+    const exportMenu=toolbar.locator('summary[aria-label="Mail export options"]');
+    assert.equal(await exportMenu.isVisible(),true);
     assert.equal(await page.locator('#list-count').textContent(),'0 cached messages');
     assert.match(await page.locator('#list-count').getAttribute('title'),/older mail/);
     releaseFirst();await page.locator('#sync-status').filter({hasText:'batch 2 · downloading older mail'}).waitFor();
@@ -49,7 +50,8 @@ export async function testSyncProgress(page,url){
     assert.equal(await importButton.getByText('Import',{exact:true}).isVisible(),true);
     const [chooser]=await Promise.all([page.waitForEvent('filechooser'),importButton.click()]);
     await chooser.setFiles([]);
-    await exportButton.click();
+    await exportMenu.click();
+    await toolbar.getByRole('button',{name:'Export cached mail',exact:true}).click();
     await page.getByText('There is nothing to export yet.',{exact:true}).waitFor();
     await page.locator('[data-app="wiki"]').click();
     assert.equal(await page.locator('#mail-toolbar').isVisible(),false,'Mail actions are hidden in other apps');
@@ -79,18 +81,37 @@ export async function testSyncProgress(page,url){
 async function testMailExport(page,url){
   const raw='Subject: Available message\r\n\r\nOriginal body';
   const available={id:'available',kind:'mail',title:'Available message',body:'Original body',revision:1,meta:{folder:'Inbox',read:true,raw}};
-  const unavailable={id:'unavailable',kind:'mail',title:'Unavailable message',body:'',revision:1,meta:{folder:'Recovery copies',headerOnly:true,remote:true,account:'export-fixture',read:true}};
-  const failure='This message is no longer in its synchronized folder.';
-  let records=[available,unavailable],releaseFetch,stall=false;
-  const blockedFetch=new Promise(resolve=>releaseFetch=resolve);
+  const missing={id:'missing',kind:'mail',title:'Missing message',body:'',revision:1,meta:{folder:'Archive',headerOnly:true,remote:true,account:'export-fixture',read:true}};
+  const recovered={...missing,body:'Recovered body',meta:{...missing.meta,headerOnly:false}};
+  const recovery={...missing,id:'recovery',meta:{...missing.meta,folder:'Recovery copies'}};
+  const folderError='This message is no longer in its synchronized folder.';
+  let records=[available,missing,recovery],batchMode='hydrate';
+  let batchCalls=0,planCalls=0,archiveCalls=0;
   const routes=t=>t.pathname.endsWith('/api.php');
   await page.route(routes,async route=>{
-    const action=new URL(route.request().url()).searchParams.get('r');
-    if(action==='mail-content'){
-      assert.equal(route.request().postDataJSON().id,unavailable.id);
-      if(stall)return;
-      await blockedFetch;
-      return route.fulfill({status:400,json:{error:failure}});
+    const url=new URL(route.request().url());
+    const action=url.searchParams.get('r');
+    if(action==='mail-export-plan'){
+      planCalls++;
+      return route.fulfill({json:{batches:[{account:'export-fixture',ids:[missing.id]}]}});
+    }
+    if(action==='mail-export-batch'){
+      batchCalls++;
+      assert.deepEqual(route.request().postDataJSON(),{account:'export-fixture',ids:[missing.id]});
+      if(batchMode==='stall')return;
+      if(batchMode==='hydrate'){
+        records=records.map(row=>row.id===missing.id?recovered:row);
+        return route.fulfill({json:{warning:null}});
+      }
+      return route.fulfill({json:{warning:folderError}});
+    }
+    if(action==='mail-export'){
+      archiveCalls++;
+      const included=url.searchParams.get('complete')==='1'?records.filter(row=>!row.meta.headerOnly):records;
+      return route.fulfill({
+        json:{format:'portable-office-items',version:1,records:included},
+        headers:{'X-Office-Mail-Count':String(included.length),'X-Office-Mail-Header-Only':String(records.filter(row=>row.meta.headerOnly).length)}
+      });
     }
     const responses={
       status:{authenticated:true,csrf:'fixture',activity:false,preferences:{}},
@@ -99,63 +120,54 @@ async function testMailExport(page,url){
     if(!responses[action])throw Error('Unexpected export fixture route '+action);
     await route.fulfill({json:responses[action]});
   });
+  const menu=page.locator('#mail-export-menu');
+  const status=page.locator('#mail-export-status');
+  const cancel=page.getByRole('button',{name:'Cancel export',exact:true});
+  const choose=async name=>{
+    await menu.locator('summary').click();
+    await menu.getByRole('button',{name,exact:true}).click();
+  };
+  const cached=()=>choose('Export cached mail');
+  const complete=()=>choose('Export with missing bodies');
+  const readArchive=async downloading=>JSON.parse(await readFile(await (await downloading).path(),'utf8')).records;
+  const isBatch=request=>new URL(request.url()).searchParams.get('r')==='mail-export-batch';
   try{
     await page.goto(url+'?mail-export#mail');
-    await page.locator('#list-count').getByText('1 cached message',{exact:true}).waitFor();
-    const exportAll=page.getByRole('button',{name:'Export all mail',exact:true});
-    const status=page.locator('#mail-export-status');
-    const downloading=page.waitForEvent('download');
-    await exportAll.click();
-    await status.getByText('Preparing mail export · 1 of 2 checked',{exact:true}).waitFor();
-    assert.equal(await exportAll.isDisabled(),true);
-    releaseFetch();
-    const download=await downloading;
-    assert.equal(download.suggestedFilename(),'mail.json');
-    const archive=JSON.parse(await readFile(await download.path(),'utf8'));
-    assert.equal(archive.format,'portable-office-items');
-    assert.deepEqual(archive.records.map(record=>[record.id,record.body]),[[available.id,available.body]]);
+    await page.locator('#items [data-id="available"]').waitFor();
+    const [cachedDownload]=await Promise.all([page.waitForEvent('download'),cached()]);
+    assert.equal(cachedDownload.suggestedFilename(),'mail-cached.json');
+    assert.deepEqual(await readArchive(cachedDownload),records);
+    assert.deepEqual([archiveCalls,planCalls,batchCalls],[1,0,0],'Cached export uses one request and no provider work');
+    await status.getByText('Download started · mail-cached.json · 2 header-only',{exact:true}).waitFor();
+
+    const [completeDownload]=await Promise.all([page.waitForEvent('download'),complete()]);
+    assert.equal(completeDownload.suggestedFilename(),'mail.json');
+    assert.deepEqual(await readArchive(completeDownload),[available,recovered]);
+    assert.deepEqual([archiveCalls,planCalls,batchCalls],[2,1,1]);
     await status.getByText('Download started · mail.json · 1 skipped',{exact:true}).waitFor();
-    assert.equal(await exportAll.isEnabled(),true);
 
     await page.locator('#items [data-id="available"]').click();
     const more=page.locator('#detail [data-mail-disclosure="more"]');
     await more.locator('summary').click();
-    const exportingOne=page.waitForEvent('download');
-    await more.getByRole('button',{name:'Export',exact:true}).click();
-    const message=await exportingOne;
+    const [message]=await Promise.all([page.waitForEvent('download'),more.getByRole('button',{name:'Export',exact:true}).click()]);
     assert.equal(message.suggestedFilename(),'Available message.eml');
     assert.equal(await readFile(await message.path(),'utf8'),raw);
 
-    records=[unavailable];
-    await page.reload();
-    await page.locator('#list-count').getByText('0 cached messages',{exact:true}).waitFor();
-    const downloads=[];
-    const recordDownload=download=>downloads.push(download);
-    page.on('download',recordDownload);
-    try{
-      await exportAll.click();
-      await status.getByText('Mail export failed',{exact:true}).waitFor();
-      assert.equal(await page.locator('#notice').textContent(),'Mail export failed: '+failure);
-      assert.equal(await exportAll.isEnabled(),true);
-      assert.deepEqual(downloads,[]);
-    }finally{page.off('download',recordDownload);}
+    records=[missing];
+    batchMode='fail';
+    await complete();
+    await status.getByText('Mail export failed',{exact:true}).waitFor();
+    assert.equal(await page.locator('#notice').textContent(),'Mail export failed: '+folderError);
 
-    records=[available,unavailable];
-    stall=true;
-    await page.reload();
-    await page.locator('#list-count').getByText('1 cached message',{exact:true}).waitFor();
-    const cancel=page.getByRole('button',{name:'Cancel export',exact:true});
-    const isMailContent=request=>new URL(request.url()).searchParams.get('r')==='mail-content';
-    await Promise.all([page.waitForRequest(isMailContent),exportAll.click()]);
-    await status.getByText('Preparing mail export · 1 of 2 checked',{exact:true}).waitFor();
-    page.on('download',recordDownload);
-    try{
-      await Promise.all([page.waitForEvent('requestfailed',isMailContent),cancel.click()]);
-      await status.getByText('Mail export canceled',{exact:true}).waitFor();
-      assert.equal(await exportAll.isEnabled(),true);
-      assert.equal(await cancel.isVisible(),false);
-      assert.deepEqual(downloads,[]);
-    }finally{page.off('download',recordDownload);}
+    records=[available,missing];
+    batchMode='stall';
+    await Promise.all([page.waitForRequest(isBatch),complete()]);
+    await status.getByText('Fetching missing bodies · 0 of 1 checked',{exact:true}).waitFor();
+    const archivesBeforeCancel=archiveCalls;
+    await Promise.all([page.waitForEvent('requestfailed',isBatch),cancel.click()]);
+    await status.getByText('Mail export canceled',{exact:true}).waitFor();
+    assert.equal(await cancel.isVisible(),false);
+    assert.equal(archiveCalls,archivesBeforeCancel);
 
     const restoreTimeout=await page.evaluateHandle(()=>{
       const original=AbortSignal.timeout;
@@ -163,18 +175,16 @@ async function testMailExport(page,url){
       return ()=>{AbortSignal.timeout=original;};
     });
     try{
-      const timedDownload=page.waitForEvent('download');
-      await Promise.all([page.waitForEvent('requestfailed',isMailContent),exportAll.click()]);
-      const partial=JSON.parse(await readFile(await (await timedDownload).path(),'utf8'));
-      assert.deepEqual(partial.records.map(record=>record.id),[available.id]);
+      const downloading=page.waitForEvent('download');
+      await Promise.all([page.waitForEvent('requestfailed',isBatch),complete()]);
+      assert.deepEqual(await readArchive(downloading),[available]);
       await status.getByText('Download started · mail.json · 1 skipped',{exact:true}).waitFor();
-      assert.match(await page.locator('#notice').textContent(),/A message fetch timed out/);
+      assert.match(await page.locator('#notice').textContent(),/A message batch timed out/);
       assert.equal(await cancel.isVisible(),false);
-      assert.equal(await exportAll.isEnabled(),true);
     }finally{
       await restoreTimeout.evaluate(restore=>restore());
       await restoreTimeout.dispose();
     }
-    console.log('PASS mail export: counted progress, partial archive, EML, failure, cancellation and timeout.');
-  }finally{releaseFetch();await page.unroute(routes);}
+    console.log('PASS cached and full mail export, partial results, EML, cancellation and timeout.');
+  }finally{await page.unroute(routes);}
 }

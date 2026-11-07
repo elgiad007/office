@@ -320,6 +320,35 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .mail-export-status { min-width: 0; font-size: 12px; color: var(--muted); }
 .mail-export-status:empty { position: absolute; }
 #cancel-mail-export[hidden] { display: none; }
+#mail-export-menu { position: relative; }
+#mail-export-menu summary {
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+#mail-export-menu summary::-webkit-details-marker { display: none; }
+#mail-export-menu summary:hover, #mail-export-menu[open] summary { background: var(--wash); }
+#mail-export-menu[inert] summary { opacity: .5; }
+.mail-export-options {
+  display: grid;
+  position: absolute;
+  z-index: 21;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-end: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.mail-export-options button {
+  justify-content: start;
+  border: 0;
+  background: transparent;
+}
 @media (hover: hover) {
   .header-action:hover .header-action-label { display: block; }
 }

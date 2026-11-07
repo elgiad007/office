@@ -131,6 +131,8 @@ export interface ApiResponses {
   'mail-folder-manage': { folders: MailFolder[] };
   'mail-folder-sync': { count: number; more?: boolean };
   'mail-content': { record: OfficeRecord };
+  'mail-export-plan': { batches: {account: string; ids: string[]}[] };
+  'mail-export-batch': { warning: string | null };
   'mail-files': {record: OfficeRecord; attachments: Attachment[]};
   sync: { count: number; more?: boolean };
   'account-test': CheckResult; 'account-save': { id: string };

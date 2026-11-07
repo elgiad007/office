@@ -23,8 +23,24 @@ async function start(){
 }
 async function setup(c){const before=c.cookie;const result=await c.call('setup',{token:(await readFile(c.dir+'/setup-token.txt','utf8')).trim(),password:'test-password-only-123'});c.csrf=result.csrf;assert.notEqual(c.cookie,before);}
 try{
- const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('mail-export',undefined,401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
  const undoMail=(await a.call('save',{kind:'mail',title:'HTTP undo mail',body:'Complete local mail body',meta:{folder:'Archive',rawBase64:Buffer.from('Original EML').toString('base64')}})).record;
+ const headerOnly=(await a.call('save',{kind:'mail',title:'Header-only fixture',body:'',meta:{headerOnly:true,headersBase64:'SGVhZGVycw=='}})).record;
+ const unrelated=(await a.call('save',{kind:'tasks',title:'Not mail',body:'',meta:{}})).record;
+ await a.call('mail-export-batch',{account:'missing',ids:[headerOnly.id]},403,'bad-token');
+ assert.deepEqual(await a.call('mail-export-plan'),{batches:[]});
+ const cachedMail=await fetch(a.url+'mail-export',{headers:{Cookie:a.cookie}});
+ assert.match(cachedMail.headers.get('content-disposition'),/mail-cached\.json/);
+ assert.equal(cachedMail.headers.get('x-office-mail-count'),'2');
+ assert.equal(cachedMail.headers.get('x-office-mail-header-only'),'1');
+ const mailArchive=await cachedMail.json();
+ assert.equal(mailArchive.format,'portable-office-items');
+ assert.deepEqual(new Set(mailArchive.records.map(record=>record.id)),new Set([undoMail.id,headerOnly.id]));
+ assert.equal(mailArchive.records.find(record=>record.id===undoMail.id).meta.rawBase64,undoMail.meta.rawBase64);
+ assert.deepEqual((await a.call('mail-export&complete=1')).records.map(record=>record.id),[undoMail.id]);
+ await a.call('delete',{id:headerOnly.id,revision:headerOnly.revision});
+ await a.call('delete',{id:unrelated.id,revision:unrelated.revision});
+ console.log('PASS HTTP cached mail export, complete filtering and authenticated access');
  const localMail=(await a.call('save',{kind:'mail',title:'Local junk fixture',body:'Kept body',meta:{folder:'Archive'}})).record;
  const junk=(await a.call('mail-action',{id:localMail.id,revision:localMail.revision,action:'junk'})).record;
  assert.equal(junk.meta.folder,'Junk');assert.equal(junk.body,'Kept body');
