@@ -10,6 +10,7 @@ require dirname(__DIR__).'/app/mail-transfer.php';
 require dirname(__DIR__).'/app/mail-undo.php';
 require dirname(__DIR__).'/app/mail-empty-junk.php';
 require dirname(__DIR__).'/app/mail-export.php';
+require dirname(__DIR__).'/app/backup.php';
 
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
@@ -38,7 +39,8 @@ try {
         catch (Throwable $e) { $_SESSION['google_notice']=['message'=>'Google connection failed. Try connecting again.','error'=>true]; }
         header('Location: ./#settings',true,303); exit;
     }
-    if ($method==='POST') { csrf(); $input=request_json(); }
+    $sqliteRestore=$route==='restore' && ($_SERVER['CONTENT_TYPE']??'')===OFFICE_BACKUP_TYPE;
+    if ($method==='POST') { csrf(); $input=$sqliteRestore?[]:request_json(); }
     elseif ($method!=='GET') fail('Method not allowed.',405);
     if (in_array($route,['setup','login'],true) && $method==='POST') {
         throttle();
@@ -96,7 +98,7 @@ try {
         if($route==='mail-action'){$mail=get_record((string)($input['id']??''));$accountId=$mail['meta']['account']??null;}
         if(is_string($accountId)&&$accountId!=='')$label=account($accountId)['label'];
         $operation=$route==='mail-action'?(['trash'=>'Move to Trash','archive'=>'Archive mail','restore'=>'Restore to Inbox','read'=>'Mark mail read','unread'=>'Mark mail unread','move'=>'Move mail','discard'=>'Discard cached copy','keep-local'=>'Save local copy','label'=>'Add label','unlabel'=>'Remove label'][$input['action']??'']??'Update mail'):$activityNames[$route];
-        activity_begin($operation,$label);
+        activity_begin($operation,$label,$route!=='backup'||($_GET['format']??'')==='json');
     }
     if ($route==='logout' && $method==='POST') { $_SESSION=[]; session_destroy(); json_response(['ok'=>true]); }
     if ($route==='mail-export' && $method==='GET') {
@@ -179,48 +181,15 @@ try {
         if (!is_array($p) || strlen(json_encode($p))>10000) fail('Invalid preferences.'); set_setting('preferences',$p); json_response(['ok'=>true]);
     }
     if ($route==='backup' && $method==='GET') {
+        session_write_close();
+        if(($_GET['format']??'')!=='json')stream_office_backup();
         $db=db(); $db->beginTransaction();
         $records=array_map('record_row',$db->query('SELECT * FROM records')->fetchAll()); $revisions=$db->query('SELECT * FROM revisions')->fetchAll(); $prefs=setting('preferences',[]);$files=$db->query('SELECT * FROM mail_files')->fetchAll(); $links=$db->query('SELECT a,b,created,archived FROM connections')->fetchAll(); $db->commit();
         json_response(['format'=>'portable-office','version'=>1,'created'=>gmdate('c'),'records'=>$records,'revisions'=>$revisions,'preferences'=>$prefs,'mailFiles'=>$files,'connections'=>$links]);
     }
     if ($route==='restore' && $method==='POST') {
-        $backup=$input['backup']??[];
-        if (($backup['format']??'')!=='portable-office' || ($backup['version']??0)!==1 || !is_array($backup['records']??null) || count($backup['records'])>10000) fail('Unsupported backup.');
-        $validated=[]; $seen=[];
-        foreach ($backup['records'] as $r) {
-            if (!is_array($r)) fail('Invalid backup record.'); $v=validate_record($r); $id=(string)($r['id']??'');
-            if (!preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$id) || isset($seen[$id])) fail('Invalid or duplicate backup ID.');
-            $seen[$id]=true; $v['id']=$id; $v['revision']=max(1,(int)($r['revision']??1)); $v['updated']=gmdate('c');
-            // Restored provider data is a local archive, not a live account connection.
-            if (!empty($v['meta']['remote'])) { $v['meta']['importedFrom']=$v['meta']['accountLabel']??'Remote account'; unset($v['meta']['remote'],$v['meta']['account'],$v['meta']['source']); }
-            $validated[]=$v;
-        }
-        $histories=$backup['revisions']??[]; if (!is_array($histories) || count($histories)>20000) fail('Invalid revision history.');
-        foreach ($histories as $h) { if (!is_array($h) || !isset($seen[$h['record_id']??'']) || (int)($h['revision']??0)<1 || !is_array(json_decode($h['snapshot']??'',true))) fail('Invalid revision history.'); validate_record(json_decode($h['snapshot'],true)); }
-        $prefs=$backup['preferences']??[]; if (!is_array($prefs) || strlen(json_encode($prefs))>10000) fail('Invalid preferences.');
-        $links=$backup['connections']??[];if(!is_array($links)||count($links)>100000)fail('Invalid connections.');
-        foreach($links as $link)if(!is_array($link)||!is_string($link['a']??null)||!is_string($link['b']??null)||$link['a']===$link['b']||!isset($seen[$link['a']],$seen[$link['b']]))fail('Invalid connection endpoints.');
-        foreach($links as $link)if(!in_array($link['archived']??0,[0,1,false,true],true))fail('Invalid connection archive status.');
-        foreach($links as $link)if(isset($link['created'])&&!is_string($link['created']))fail('Invalid connection date.');
-        $files=$backup['mailFiles']??[];if(!is_array($files)||count($files)>50000)fail('Invalid attachment backup.');
-        $fileKeys=[];
-        foreach($files as $file){
-            if(!is_array($file)||!isset($seen[$file['record_id']??''])||!is_string($file['part']??null)||!preg_match('/^[a-zA-Z0-9_.-]{1,100}$/D',$file['part'])||!is_string($file['name']??null)||!is_string($file['type']??null)||!is_string($file['data']??null))fail('Invalid attachment backup.');
-            $bytes=base64_decode($file['data'],true);if($bytes===false||strlen($bytes)>MAIL_FILE_LIMIT||strlen($bytes)!==($file['size']??null))fail('Invalid attachment backup data.');
-            $key=$file['record_id'].'/'.$file['part'];if(isset($fileKeys[$key]))fail('Duplicate attachment backup.');$fileKeys[$key]=true;
-        }
-        $db=db(); $db->exec('BEGIN IMMEDIATE');
-        try {
-            // Merge only into an empty local workspace to avoid accidental overwrites.
-            if ((int)$db->query('SELECT COUNT(*) FROM records')->fetchColumn()!==0) fail('Restore requires an empty workspace. Use a fresh installation to keep existing work safe.',409);
-            $q=$db->prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?)');
-            foreach ($validated as $v) $q->execute([$v['id'],$v['kind'],$v['title'],$v['body'],json_encode($v['meta'],JSON_THROW_ON_ERROR),$v['revision'],$v['updated']]);
-            $q=$db->prepare('INSERT INTO revisions VALUES(?,?,?)'); foreach ($histories as $h) $q->execute([$h['record_id'],(int)$h['revision'],$h['snapshot']]);
-            foreach($files as $file)attachment_store($file['record_id'],$file,base64_decode($file['data'],true));
-            connection_restore($links);
-            set_setting('preferences',$prefs); $db->exec('COMMIT');
-        } catch(Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
-        json_response(['count'=>count($validated)]);
+        session_write_close();
+        json_response($sqliteRestore?restore_sqlite_backup():restore_json_backup($input['backup']??null));
     }
     if ($route==='import' && $method==='POST') {
         $format=$input['format']??''; $raw=(string)($input['text']??''); $items=[];

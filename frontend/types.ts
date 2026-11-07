@@ -139,8 +139,7 @@ export interface ApiResponses {
   'account-delete': { ok: boolean };
   'google-connect': { url: string }; 'google-settings': GoogleSettings;
   preferences: { ok: boolean };
-  import: { count: number }; 'import-items': { count: number }; restore: { count: number };
-  backup: unknown;
+  import: { count: number }; 'import-items': { count: number }; restore: { count: number; preferences?: Preferences };
 }
 export type ConnectionVisibility='active'|'archived'|'all';
 export interface ConnectionItem {id:string;kind:string;title:string;excerpt:string;meta:Record<string,string>;degree?:number;activeDegree?:number;archivedDegree?:number}

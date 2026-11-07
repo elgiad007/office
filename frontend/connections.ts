@@ -1,5 +1,5 @@
 import {openConnectionExplorer} from './connection-explorer.js';
-import {connectionQuery,accountCommandQuery,CommandError} from './commands.js';
+import {connectionQuery,accountCommandQuery,commandRegistry,commandNameSuggestions,CommandError} from './commands.js';
 import {itemTypes, type ItemKind} from './item-types.js';
 import {escapeHtml as e} from './formats.js';
 import type {Account,ConnectionItem,ConnectionList,RequestApi,ConfirmDeletion,ConnectionDeletionChoices} from './types.js';
@@ -49,7 +49,7 @@ export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string
   function autocomplete(input:HTMLInputElement,accounts:(command:'mail'|'sync')=>Account[]) {
     const list=document.createElement('div');list.id='connection-suggestions';list.className='connection-suggestions';list.setAttribute('role','listbox');list.setAttribute('aria-label','Matching items');list.hidden=true;input.after(list);
     input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
-    let version=0,timer:ReturnType<typeof setTimeout>,index=0,command='',chosen=false;
+    let version=0,timer:ReturnType<typeof setTimeout>,index=0,command='',chosen=false,matchingCommands=false;
     let items:{id:string; title:string; detail:string; excerpt?:string; kind?:string}[]=[];
     let selectedAccount:{id:string; value:string}|undefined;
     let accountCommand: ReturnType<typeof accountCommandQuery>;
@@ -60,7 +60,7 @@ export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string
         const name=/[\s"]/.test(item.title)?JSON.stringify(item.title):item.title;
         input.value=':'+accountCommand.token+' '+name;
         selectedAccount={id:item.id,value:input.value};
-      }else input.value=':'+command+' '+item.id;
+      }else input.value=matchingCommands?':'+item.id:':'+command+' '+item.id;
       hide();input.focus();
     };
     function render(){
@@ -75,7 +75,7 @@ export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string
     }
     list.onpointerdown=event=>{event.preventDefault();const option=(event.target as HTMLElement).closest<HTMLElement>('[data-index]');if(option){index=Number(option.dataset.index);accept();}};
     input.addEventListener('input',()=>{
-      hide();chosen=false;index=0;selectedAccount=undefined;
+      hide();chosen=false;matchingCommands=false;index=0;selectedAccount=undefined;
       accountCommand=accountCommandQuery(input.value);
       if(accountCommand){
         list.setAttribute('aria-label','Matching accounts');
@@ -85,7 +85,13 @@ export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string
           .map(account=>({id:account.id,title:account.label,detail:account.type}));
         render();return;
       }
-      const query=connectionQuery(input.value);if(!query||query.name==='link'&&!query.kind&&!query.query)return;
+      const query=connectionQuery(input.value);
+      if(!query){
+        items=commandNameSuggestions(input.value).map(id=>({id,title:':'+id,detail:commandRegistry[id].action}));
+        if(items.length){matchingCommands=true;list.setAttribute('aria-label','Matching commands');render();}
+        return;
+      }
+      if(query.name==='link'&&!query.kind&&!query.query)return;
       command=query.name;list.setAttribute('aria-label','Matching items');const request=version;
       timer=setTimeout(()=>{void search(input.value,true).then(result=>{if(request!==version||!input.isConnected)return;items=result.map(item=>({id:item.id,title:label(item.kind)+' · '+item.title,detail:detail(item),excerpt:item.excerpt,kind:query.name==='link'?item.kind:undefined}));index=0;render();}).catch(error=>{if(request===version){items=[];list.innerHTML=`<p role="status">${e(error.message)}</p>`;list.hidden=false;input.setAttribute('aria-expanded','true');}});},150);
     });
@@ -95,7 +101,7 @@ export function createConnections(env:{api:RequestApi;icon:(kind:string)=>string
         if(event.isComposing||list.hidden)return false;
         if(event.key==='Escape'){event.preventDefault();hide();return true;}
         if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();if(items.length){index=(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;chosen=true;render();}return true;}
-        if(event.key==='Enter'&&!event.repeat&&accountCommand&&chosen)accept();
+        if(event.key==='Enter'&&!event.repeat&&(accountCommand||matchingCommands)&&chosen)accept();
         if(event.key==='Tab'){event.preventDefault();accept();return true;}
         return false;
       },

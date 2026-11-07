@@ -53,17 +53,31 @@ export async function testAttachments(page,url){
   await page.getByRole('button',{name:'Forward',exact:true}).click();await page.getByLabel('Title',{exact:true}).waitFor();assert.equal(await page.getByLabel('Title',{exact:true}).inputValue(),'Fwd: Attachment workflow test');assert.equal(await page.locator('.mail-attachment').count(),2);
   await page.getByRole('button',{name:'Mail',exact:true}).click();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'Attachment workflow test'}).click();
   await page.getByRole('button',{name:'Reply',exact:true}).click();await page.locator('[name="body"]').waitFor();assert.equal(await page.locator('.mail-attachment').count(),0,'replies omit the original files');
-  const backup=await(await page.request.get(url+'api.php?r=backup')).json();assert.equal(backup.mailFiles.filter(f=>f.record_id===draft.id).length,2);assert.ok(backup.mailFiles.some(f=>f.data===file.toString('base64')));
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.locator('[data-draft-choice="discard"]').click();
+  await page.getByRole('button',{name:'Backups settings',exact:true}).click();
+  await page.getByRole('button',{name:'Prepare backup',exact:true}).click();
+  const snapshotEvent=page.waitForEvent('download');
+  await page.getByRole('button',{name:/Download SQLite backup/}).click();
+  const snapshot=await snapshotEvent;
+  assert.match(snapshot.suggestedFilename(),/^office-backup-\d{4}-\d{2}-\d{2}\.sqlite$/);
+  const snapshotBytes=await readFile(await snapshot.path());
+  assert.equal(snapshotBytes.subarray(0,16).toString(),'SQLite format 3\0');
+  const backup=await(await page.request.get(url+'api.php?r=backup&format=json')).json();assert.equal(backup.mailFiles.filter(f=>f.record_id===draft.id).length,2);assert.ok(backup.mailFiles.some(f=>f.data===file.toString('base64')));
   // Replay the actual backup into this isolated test workspace after clearing its records.
   for(const r of backup.records)await post('delete',{id:r.id,revision:r.revision});
-  await post('restore',{backup});
+  const chooserEvent=page.waitForEvent('filechooser');
+  await page.locator('#restore').click();
+  await (await chooserEvent).setFiles({name:snapshot.suggestedFilename(),mimeType:'application/vnd.sqlite3',buffer:snapshotBytes});
+  await page.locator('#confirm').click();
+  await page.locator('#notice').filter({hasText:/Restored \d+ items/}).waitFor();
   const restored=await post('mail-files',{id:draft.id,action:'list'});assert.equal(restored.attachments.length,2);
   const restoredFile=await page.request.get(url+'mail-file.php?id='+draft.id+'&part='+encodeURIComponent(restored.attachments.find(a=>a.name==='résumé.bin').part));assert.deepEqual(await restoredFile.body(),file);
   const unsafe=await post('mail-files',{id:backup.records.find(r=>r.meta.folder==='Drafts' && r.title.startsWith('Fwd:')).id,revision:backup.records.find(r=>r.meta.folder==='Drafts' && r.title.startsWith('Fwd:')).revision,action:'upload',name:'unsafe.html',type:'text/html',data:Buffer.from('<script>alert(1)</script>').toString('base64')});
   const unsafePart=unsafe.attachments.find(a=>a.name==='unsafe.html');const unsafeResponse=await page.request.get(url+'mail-file.php?id='+unsafe.record.id+'&part='+unsafePart.part+'&preview=1');assert.equal(unsafeResponse.status(),400,'active documents are not previewed');
   const unauth=await page.context().browser().newContext();try{const response=await unauth.request.get(url+'mail-file.php?id='+draft.id+'&part='+restored.attachments[0].part);assert.equal(response.status(),401);}finally{await unauth.close();}
   const pdf=samplePdf();await post('import',{format:'eml',base64:Buffer.from('Subject: PDF preview verification\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=sample.pdf\r\nContent-Transfer-Encoding: base64\r\n\r\n'+pdf.toString('base64')).toString('base64')});
-  await page.reload();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'PDF preview verification'}).click();
+  await page.getByRole('button',{name:'Mail',exact:true}).click();await page.locator('#mail-folder').selectOption('Archive');await page.locator('.item').filter({hasText:'PDF preview verification'}).click();
   await openMailAttachments(page);
   await page.getByRole('button',{name:'Preview',exact:true}).click();await page.locator('#dialog iframe').waitFor();
   const pdfPreview=await page.request.get(url+await page.locator('#dialog iframe').getAttribute('src'));assert.equal(pdfPreview.status(),200);assert.equal(pdfPreview.headers()['content-type'],'application/pdf');assert.deepEqual(await pdfPreview.body(),pdf);

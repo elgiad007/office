@@ -65,7 +65,7 @@ try{
  await page.locator('[data-group-actions] [data-archive-action="archive"]').click();await loaded('Archived 3 connections.');await setView('archived');await page.screenshot({path:'test-results/connection-archive-groups.png'});
  await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('#items [data-id="'+source.id+'"]').click();await page.locator('#detail [data-action="delete"]').click();await page.locator('[data-preserve]').waitFor();assert.equal(await page.locator('[data-preserve]').isChecked(),true);await page.locator('#cancel').click();
- const backup=await api('backup');assert.equal(backup.connections.filter(link=>link.archived===1).length,3);
+ const backup=await api('backup&format=json');assert.equal(backup.connections.filter(link=>link.archived===1).length,3);
  await assert.rejects(api('restore',{backup:{...backup,connections:backup.connections.map(link=>({...link,archived:'yes'}))}}),/archive status/);
  for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});await api('restore',{backup});
  assert.equal((await api('connections&mode=overview')).groupTotal,1);assert.equal((await api('connections&mode=overview&visibility=archived')).total,3);

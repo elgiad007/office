@@ -112,7 +112,7 @@ try{
  const failedStream=await fetch(a.url+'preferences',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf,'Content-Type':'application/json','X-Office-Progress':'1'},body:JSON.stringify({preferences:'invalid'})});
  const failureEvents=(await failedStream.text()).trim().split('\n').map(line=>JSON.parse(line));assert.equal(failureEvents.at(-1).status,400);
  assert.ok(failureEvents.some(event=>event.type==='activity'&&event.entry.phase==='error'&&/Stopped: Save preferences.*Invalid preferences/.test(event.entry.message)),'Stopped activity preserves the specific failure reason');
- assert.ok(!JSON.stringify(await a.call('backup')).includes('Activity visibility fixture'));
+ assert.ok(!JSON.stringify(await a.call('backup&format=json')).includes('Activity visibility fixture'));
  await a.call('activity',{action:'clear'});assert.equal((await a.call('activity')).entries.length,0);
  await a.call('google-settings',{},403,'bad-token');
  await a.call('google-connect',{email:'person@example.com'},400);
@@ -198,10 +198,56 @@ try{
  await a.call('sync',{id:account.id,repair:'yes'},400);
  const listed=await a.call('accounts');assert.equal(listed.accounts.length,1);assert.ok(!JSON.stringify(listed).includes('secret'));
  const dbBytes=await readFile(a.dir+'/office.sqlite');assert.ok(!dbBytes.includes(Buffer.from('a-secret-never-exported')));
- await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup');assert.equal(backup.records.length,4);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));assert.ok(!JSON.stringify(backup).includes(integration.client_secret));assert.ok(!(await readFile(a.dir+'/office.sqlite')).includes(Buffer.from(integration.client_secret)));
+ await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup&format=json');assert.equal(backup.records.length,4);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));assert.ok(!JSON.stringify(backup).includes(integration.client_secret));assert.ok(!(await readFile(a.dir+'/office.sqlite')).includes(Buffer.from(integration.client_secret)));
  await a.call('restore',{backup},409);
  const b=await start();await setup(b);await b.call('restore',{backup:{...backup,records:[...backup.records,{kind:'bad',id:'bad',title:'bad',body:'',meta:{}}]}},400);assert.equal((await b.call('records&kind=wiki')).records.length,0);
  const restored=await b.call('restore',{backup});assert.equal(restored.count,4);assert.equal((await b.call('history&id='+record.id)).revisions.length,2);assert.equal((await b.call('status')).preferences.theme,'dark');assert.equal((await b.call('accounts')).accounts.length,0);assert.equal((await b.call('records&kind=sheets')).records[0].meta.workbook.sheets[0].cells.A1,'=2+3');
+ // Exercise the default SQLite download and raw upload against independent workspaces.
+ const phpSqlite=extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite']:[];
+ const snapshotSeed="require 'app/bootstrap.php'; save_record(['id'=>'cached-backup-mail','kind'=>'mail','title'=>'Cached backup mail','body'=>'Offline body','meta'=>['folder'=>'Inbox','remote'=>true,'account'=>$argv[1],'accountLabel'=>'Backup fixture','source'=>'fixture']],true,false); attachment_store('cached-backup-mail',['part'=>'2','name'=>'bytes.bin','type'=>'application/octet-stream'],hex2bin('000102ff'));";
+ execFileSync(php,[...phpSqlite,'-r',snapshotSeed,'--',account.id],{env:{...process.env,OFFICE_DATA_DIR:a.dir},windowsHide:true});
+ await a.call('connection',{id:record.id,target:'cached-backup-mail'});
+ await a.call('connection',{id:record.id,target:'cached-backup-mail',action:'archive'});
+ const snapshot=await fetch(a.url+'backup',{headers:{Cookie:a.cookie,'X-Office-Progress':'1'}});
+ assert.equal(snapshot.status,200);assert.equal(snapshot.headers.get('content-type'),'application/vnd.sqlite3');
+ assert.match(snapshot.headers.get('content-disposition'),/^attachment; filename="office-backup-\d{4}-\d{2}-\d{2}\.sqlite"$/);
+ const bytes=Buffer.from(await snapshot.arrayBuffer());
+ assert.equal(bytes.subarray(0,16).toString(),'SQLite format 3\0');
+ assert.equal(Number(snapshot.headers.get('content-length')),bytes.length);
+ const path=join(a.dir,'snapshot.sqlite');await writeFile(path,bytes);
+ const query=`
+   $db=new PDO('sqlite:'.$argv[1]);
+   echo json_encode([
+     $db->query('PRAGMA integrity_check')->fetchColumn(),
+     $db->query("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN),
+     $db->query("SELECT key FROM settings")->fetchAll(PDO::FETCH_COLUMN)
+   ],JSON_THROW_ON_ERROR);
+ `;
+ const contents=JSON.parse(execFileSync(php,[...phpSqlite,'-r',query,'--',path],{encoding:'utf8',windowsHide:true}));
+ assert.deepEqual(contents,['ok',['connections','mail_files','records','revisions','settings'],['preferences']]);
+ for(const excluded of ['a-secret-never-exported',integration.client_secret,'Activity visibility fixture'])assert.ok(!bytes.includes(Buffer.from(excluded)));
+ const restoreSqlite=async(client,body,expected,token=client.csrf)=>{
+   const response=await fetch(client.url+'restore',{method:'POST',headers:{Cookie:client.cookie,'X-CSRF-Token':token,'Content-Type':'application/vnd.sqlite3'},body});
+   const result=await response.json();assert.equal(response.status,expected,JSON.stringify(result));return result;
+ };
+ const c=await start();await c.call('backup',undefined,401);await setup(c);
+ await restoreSqlite(c,bytes,403,'bad-token');
+ await restoreSqlite(c,Buffer.from('not a database'),400);
+ execFileSync(php,[...phpSqlite,'-r',"$db=new PDO('sqlite:'.$argv[1]);$db->exec(\"UPDATE connections SET archived=7\");",'--',path],{windowsHide:true});
+ await restoreSqlite(c,await readFile(path),400);
+ assert.equal((await c.call('records&kind=wiki')).records.length,0,'invalid SQLite rows roll back the full restore');
+ const sqliteRestored=await restoreSqlite(c,bytes,200);
+ assert.deepEqual(sqliteRestored,{count:5,preferences:{theme:'dark',density:'compact'}});
+ await restoreSqlite(c,bytes,409);
+ const cachedBackup=(await c.call('record&id=cached-backup-mail')).record;
+ assert.equal(cachedBackup.body,'Offline body');assert.equal(cachedBackup.meta.importedFrom,'Backup fixture');
+ assert.equal(cachedBackup.meta.remote,undefined);assert.equal(cachedBackup.meta.account,undefined);
+ assert.equal((await c.call('history&id='+record.id)).revisions.length,2);
+ const sqliteRestoredData=await c.call('backup&format=json');
+ assert.equal(sqliteRestoredData.connections[0].archived,1);
+ assert.deepEqual(Buffer.from(sqliteRestoredData.mailFiles[0].data,'base64'),Buffer.from([0,1,2,255]));
+ assert.equal((await c.call('accounts')).accounts.length,0);
+ for(const client of [a,c])assert.ok(!(await readdir(client.dir)).some(file=>file.startsWith('office-backup-')),'temporary snapshots are removed');
  await a.call('account-delete',{id:account.id});assert.equal((await a.call('accounts')).accounts.length,0);
  await a.call('logout',{});await a.call('records&kind=tasks',undefined,401);await a.call('record&id='+mail.id,undefined,401);
  console.log('PASS HTTP integration: owner setup/session rotation, authentication, CSRF, stale edits, unique wiki names, atomic imports, binary EML preservation, ICS source, sheet persistence, encrypted accounts, backup/restore/history/preferences and logout.');

@@ -29,8 +29,8 @@ function activity_event(string $message,string $level='info',string $phase='prog
         }
     } catch (Throwable) { if(isset($db)&&$db->inTransaction())$db->rollBack(); /* Logging must not interrupt mail. */ }
 }
-function activity_begin(string $operation,string $account=''): void {
-    if(($_SERVER['HTTP_X_OFFICE_PROGRESS']??'')==='1' && !headers_sent()) {
+function activity_begin(string $operation,string $account='',bool $stream=true): void {
+    if($stream && ($_SERVER['HTTP_X_OFFICE_PROGRESS']??'')==='1' && !headers_sent()) {
         $GLOBALS['office_activity_stream']=true;@ini_set('zlib.output_compression','0');
         header('Content-Type: application/x-ndjson');header('X-Accel-Buffering: no');
     }

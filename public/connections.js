@@ -1,6 +1,6 @@
 // Generated from frontend/connections.ts by pnpm build. Do not edit.
 import { openConnectionExplorer } from './connection-explorer.js';
-import { connectionQuery, accountCommandQuery, CommandError } from './commands.js';
+import { connectionQuery, accountCommandQuery, commandRegistry, commandNameSuggestions, CommandError } from './commands.js';
 import { itemTypes } from './item-types.js';
 import { escapeHtml as e } from './formats.js';
 const label = (kind) => itemTypes[kind]?.label || kind;
@@ -98,7 +98,7 @@ export function createConnections(env) {
         input.setAttribute('aria-autocomplete', 'list');
         input.setAttribute('aria-controls', list.id);
         input.setAttribute('aria-expanded', 'false');
-        let version = 0, timer, index = 0, command = '', chosen = false;
+        let version = 0, timer, index = 0, command = '', chosen = false, matchingCommands = false;
         let items = [];
         let selectedAccount;
         let accountCommand;
@@ -113,7 +113,7 @@ export function createConnections(env) {
                 selectedAccount = { id: item.id, value: input.value };
             }
             else
-                input.value = ':' + command + ' ' + item.id;
+                input.value = matchingCommands ? ':' + item.id : ':' + command + ' ' + item.id;
             hide();
             input.focus();
         };
@@ -141,6 +141,7 @@ export function createConnections(env) {
         input.addEventListener('input', () => {
             hide();
             chosen = false;
+            matchingCommands = false;
             index = 0;
             selectedAccount = undefined;
             accountCommand = accountCommandQuery(input.value);
@@ -154,7 +155,16 @@ export function createConnections(env) {
                 return;
             }
             const query = connectionQuery(input.value);
-            if (!query || query.name === 'link' && !query.kind && !query.query)
+            if (!query) {
+                items = commandNameSuggestions(input.value).map(id => ({ id, title: ':' + id, detail: commandRegistry[id].action }));
+                if (items.length) {
+                    matchingCommands = true;
+                    list.setAttribute('aria-label', 'Matching commands');
+                    render();
+                }
+                return;
+            }
+            if (query.name === 'link' && !query.kind && !query.query)
                 return;
             command = query.name;
             list.setAttribute('aria-label', 'Matching items');
@@ -186,7 +196,7 @@ export function createConnections(env) {
                     }
                     return true;
                 }
-                if (event.key === 'Enter' && !event.repeat && accountCommand && chosen)
+                if (event.key === 'Enter' && !event.repeat && (accountCommand || matchingCommands) && chosen)
                     accept();
                 if (event.key === 'Tab') {
                     event.preventDefault();

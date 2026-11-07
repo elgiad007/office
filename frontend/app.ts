@@ -38,6 +38,10 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
 };
 const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L'};
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
+const sqliteBackupType='application/vnd.sqlite3';
+let backupRequest: AbortController | undefined;
+let preparedBackup: {file: Blob; name: string} | undefined;
+let backupMessage='';
 const lastSelectedItems=new Map<AppName,string>();
 let appEntryVersion=0;
 let mailCache: {rows: OfficeRecord[]; expires: number; view: MailDraftOrigin; limit: number; scrollTop: number} | undefined;
@@ -175,6 +179,7 @@ const commandHandlers={
   sheets:()=>changeApp('sheets'),
   wiki:()=>changeApp('wiki'),
   settings:()=>changeApp('settings'),
+  backup:()=>changeApp('settings',false,undefined,'backups'),
   sync:(account?:string)=>syncAccounts(true,account),
   head:async()=>{if(state.app!=='mail'||!state.current)throw new CommandError('Select a mail message before using :head.');await viewMessageHeaders();},
   q:signOut,
@@ -275,7 +280,8 @@ function refreshMailRecord(record: OfficeRecord) {
 async function requestApi(route: ApiRoute, data?: ApiData, signal?: AbortSignal): Promise<WireResult> {
   let payload = data as RequestPayload | undefined;
   if(route==='mail-action')payload={...payload,summary:true};
-  const response=await fetch('api.php?r='+route,{method:payload===undefined?'GET':'POST',headers:payload===undefined?{}:{'Content-Type':'application/json','X-CSRF-Token':state.csrf,'X-Office-Progress':'1'},body:payload===undefined?undefined:JSON.stringify(payload),cache:'no-store',signal});
+  const file=route==='restore'&&data instanceof File?data:undefined;
+  const response=await fetch('api.php?r='+route,{method:payload===undefined?'GET':'POST',headers:payload===undefined?{}:{'Content-Type':file?sqliteBackupType:'application/json','X-CSRF-Token':state.csrf,'X-Office-Progress':'1'},body:file??(payload===undefined?undefined:JSON.stringify(payload)),cache:'no-store',signal});
   let result!: WireResult,status=response.status;
   let cacheRefresh: Promise<void> | undefined;
   if(response.headers.get('Content-Type')?.includes('application/x-ndjson')){
@@ -327,7 +333,7 @@ async function api<R extends ApiRoute>(route: R, data?: ApiData, signal?: AbortS
   }
   const account=route==='mail-undo'?payload?.account:['mail-action','mail-files'].includes(route)?expected?.meta.account||latestMail(payload?.id)?.meta.account
     :route==='sync'?payload?.id:['mail-content','mail-export-batch','mail-folder-sync','mail-folders','mail-folder-manage'].includes(route)?payload?.account:null;
-  const names: Partial<Record<ApiRoute, string>>={'mail-undo':'Undoing mail deletion','mail-action':({trash:'Moving mail to Trash',archive:'Archiving mail',restore:'Restoring mail to Inbox',read:'Marking mail read',unread:'Marking mail unread',move:'Moving mail',discard:'Discarding cached copy','keep-local':'Saving local copy'})[payload?.action||'']||'Updating mail',sync:'Synchronizing mail','mail-folders':'Discovering folders','mail-folder-sync':'Refreshing folder','mail-folder-manage':'Updating folders','account-test':'Testing connection',save:'Saving item',delete:'Deleting item',backup:'Preparing backup',restore:'Restoring backup',import:'Importing items','import-items':'Importing items'};
+  const names: Partial<Record<ApiRoute, string>>={'mail-undo':'Undoing mail deletion','mail-action':({trash:'Moving mail to Trash',archive:'Archiving mail',restore:'Restoring mail to Inbox',read:'Marking mail read',unread:'Marking mail unread',move:'Moving mail',discard:'Discarding cached copy','keep-local':'Saving local copy'})[payload?.action||'']||'Updating mail',sync:'Synchronizing mail','mail-folders':'Discovering folders','mail-folder-sync':'Refreshing folder','mail-folder-manage':'Updating folders','account-test':'Testing connection',save:'Saving item',delete:'Deleting item',restore:'Restoring backup',import:'Importing items','import-items':'Importing items'};
   const label=state.accounts.find(row=>row.id===account)?.label;
   const tracking=activity.queued(names[route]?(label?label+': ':'')+names[route]+'…':null);
   const run=async()=>{
@@ -386,6 +392,10 @@ function authView(status: Status) {
 }
 async function boot() {
   appEntryVersion++;
+  backupRequest?.abort();
+  backupRequest=undefined;
+  preparedBackup=undefined;
+  backupMessage='';
   clearMailCache();
   state.rows=[];
   state.current=null;
@@ -1114,8 +1124,9 @@ async function openConnectedRecord(id:string){
   });
   if(opened&&record.kind==='mail'&&(state.current as OfficeRecord|null)?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
 }
-async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope) {
+async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope,settingsDestination?: typeof settingsPages[number][0]) {
   await waitForAttachments();await leaveEditor();rememberSelection();
+  if(settingsDestination)selectSettingsPage(settingsDestination);
   if(state.app==='mail'&&name!=='mail'&&!appEntryVisible()){
     retainMailRows();
     state.rows=[];
@@ -1367,11 +1378,62 @@ async function exportRecords(all=false,selectedRecords: OfficeRecord[] | null=nu
   else if(state.app==='mail'&&!all&&(records[0].meta.rawBase64||records[0].meta.raw))download(name+'.eml',originalMail(records[0]),'message/rfc822');
   else downloadRecordArchive(name,records);
 }
-async function importFile() {
-  await leaveEditor();const input=document.createElement('input');input.type='file';input.accept='.json,.md,.txt,.html,.htm,.csv,.ics,.vcf,.eml';
-  input.onchange=()=>void attempt(async()=>{const file=input.files?.[0];if(!file)return;if(file.size>8*1024*1024)throw Error('Import files up to 8 MB.');const text=await file.text(), ext=file.name.split('.').at(-1)!.toLowerCase();let records: ItemInput[]=[];
+function renderBackupStatus() {
+  const prepare=document.querySelector<HTMLButtonElement>('#backup');
+  if(!prepare)return;
+  prepare.disabled=!!backupRequest;
+  document.querySelector<HTMLProgressElement>('#backup-progress')!.hidden=!backupRequest;
+  document.querySelector<HTMLButtonElement>('#backup-download')!.hidden=!preparedBackup;
+  document.querySelector<HTMLElement>('#backup-status')!.textContent=backupMessage;
+}
+async function prepareBackup() {
+  if(backupRequest)return;
+  const request=new AbortController();
+  backupRequest=request;
+  preparedBackup=undefined;
+  backupMessage='Preparing SQLite backup…';
+  renderBackupStatus();
+  const tracking=activity.queued(backupMessage);
+  activity.running(tracking);
+  try {
+    const response=await fetch('api.php?r=backup',{cache:'no-store',signal:request.signal});
+    if(response.status===401){await boot();return;}
+    if(!response.ok){
+      const error=await response.json().catch(()=>null);
+      throw Error(error?.error||'Could not prepare the backup.');
+    }
+    if(response.headers.get('Content-Type')!==sqliteBackupType)throw Error('The server did not return a SQLite backup.');
+    backupMessage='Receiving SQLite backup…';
+    renderBackupStatus();
+    const file=await response.blob();
+    if(!file.size)throw Error('The SQLite backup was empty.');
+    if(backupRequest!==request)return;
+    const name=response.headers.get('Content-Disposition')?.match(/filename="(office-backup-\d{4}-\d{2}-\d{2}\.sqlite)"/)?.[1]||'office-backup.sqlite';
+    preparedBackup={file,name};
+    backupMessage='SQLite backup ready to download.';
+  } catch(cause) {
+    if(backupRequest===request)backupMessage=asError(cause).message;
+  } finally {
+    activity.done(tracking);
+    if(backupRequest===request){backupRequest=undefined;renderBackupStatus();}
+  }
+}
+function confirmBackupRestore(data: File | {backup: object},preferences: Preferences={}) {
+  confirmation('Restore backup','Restore into this empty workspace? Synced copies become local archives. Reconnect provider accounts after restoring.',async()=>{
+    const result=await api('restore',data);
+    state.prefs=result.preferences??preferences;
+    applyTheme();await load();notice(`Restored ${result.count} items.`);
+  });
+}
+async function importFile(backupOnly=false) {
+  await leaveEditor();const input=document.createElement('input');input.type='file';input.accept=backupOnly?'.sqlite,.json':'.json,.md,.txt,.html,.htm,.csv,.ics,.vcf,.eml';
+  input.onchange=()=>void attempt(async()=>{const file=input.files?.[0];if(!file)return;
+    const ext=file.name.split('.').at(-1)!.toLowerCase();
+    if(backupOnly&&ext==='sqlite'){confirmBackupRestore(file);return;}
+    if(backupOnly&&ext!=='json')throw Error('Choose an Office SQLite or JSON backup.');
+    if(file.size>8*1024*1024)throw Error('Import files up to 8 MB.');const text=await file.text();let records: ItemInput[]=[];
     if(ext==='ics'||ext==='eml'){const payload: {format: string; text: string; base64?: string}={format:ext,text:ext==='ics'?text:''};if(ext==='eml'){if(file.size>1400000)throw Error('Original EML import supports up to 1.4 MB.');const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));payload.base64=btoa(binary);}const r=await api('import',payload);notice(`Imported ${r.count} items locally.`);await load();return;}
-    if(ext==='json'){const data=JSON.parse(text) as {format?: string; version?: number; records?: ItemInput[]; preferences?: Preferences};if(data.format==='portable-office'){confirmation('Restore backup','Restore into this empty workspace? Remote copies become local archives. Accounts and credentials are not restored.',async()=>{const r=await api('restore',{backup:data});state.prefs=data.preferences||{};applyTheme();await load();notice(`Restored ${r.count} items.`);});return;}if(data.format!=='portable-office-items'||data.version!==1||!Array.isArray(data.records))throw Error('Unsupported JSON file.');records=data.records;}
+    if(ext==='json'){const data=JSON.parse(text) as {format?: string; version?: number; records?: ItemInput[]; preferences?: Preferences};if(data.format==='portable-office'){confirmBackupRestore({backup:data},data.preferences);return;}if(backupOnly||data.format!=='portable-office-items'||data.version!==1||!Array.isArray(data.records))throw Error('Unsupported JSON file.');records=data.records;}
     else if(ext==='vcf')records=vcardParse(text);
     else if(ext==='csv') {const rows=csvParse(text);if(rows.length>100||rows.some(r=>r.length>26))throw Error('CSV import supports 100 rows and 26 columns.');const cells: Cells={};rows.forEach((row,r)=>row.forEach((value,c)=>{if(value)cells[colName(c)+(r+1)]=value;}));records=[{kind:'sheets',title:file.name.replace(/\.csv$/i,''),body:'',meta:{workbook:{sheets:[{name:'Sheet 1',cells}]}}}];}
     else if(['md','txt','html','htm'].includes(ext)) {const kind=state.app==='wiki'?'wiki':'documents';const body=kind==='wiki'?text:['html','htm'].includes(ext)?safeDocument(text):text.split('\n').map(line=>'<p>'+e(line)+'</p>').join('');records=[{kind,title:file.name.replace(/\.[^.]+$/,''),body,meta:{}}];}
@@ -1745,6 +1807,10 @@ try {
   const savedPage=sessionStorage.getItem(settingsPageKey);
   if(savedPage&&settingsPages.some(([id])=>id===savedPage))settingsPage=savedPage;
 } catch {/* Storage may be unavailable. */}
+function selectSettingsPage(page: string) {
+  settingsPage=page;
+  try {sessionStorage.setItem(settingsPageKey,page);} catch {/* Keep the in-page choice. */}
+}
 function settingsAccountStatus(account:AppState['accounts'][number]) {
   const checked=account.last_sync?'Last checked '+timestampLabel(account.last_sync,new Date(account.last_sync).toLocaleString()):'Not checked yet';
   return checked+(account.error?' · '+e(account.error):'');
@@ -1812,7 +1878,7 @@ function renderSettings(entryVersion?: number) {
       <section class="card"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action,key])=>field(action,'key_'+action,keys()[action],'text','required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section>
     </section>
     <section class="settings-grid" id="settings-backups" data-settings-page="backups"${settingsPage==='backups'?'':' hidden'}>
-      <section class="card"><h2>Backups</h2><p>Your database and content live inside this application folder. Backups include local records, cached messages, revisions and preferences. Account credentials and your password are excluded.</p><button id="backup">↓ Download full backup</button><p>Restore into an empty installation. Synced copies become local archives; reconnect providers separately. Never copy a live SQLite file as a backup.</p><button id="restore">↑ Restore backup</button></section>
+      <section class="card"><h2>Backups</h2><p>SQLite backups include local records, cached messages, saved attachments, revisions, connections and preferences. Account credentials and your password are excluded.</p><button id="backup">Prepare backup</button> <button id="backup-download" hidden>↓ Download SQLite backup</button><div><progress id="backup-progress" aria-label="Backup progress" hidden></progress><div id="backup-status" role="status"></div></div><p>Restore a SQLite or JSON backup into an empty installation. Synced copies become local archives. Reconnect provider accounts after restoring.</p><button id="restore">↑ Restore backup</button></section>
     </section>
   </div>`;
   const categories=main.querySelectorAll<HTMLButtonElement>('[data-settings-category]');
@@ -1833,8 +1899,7 @@ function renderSettings(entryVersion?: number) {
     categories.forEach(category=>category.tabIndex=category===event.target?0:-1);
   });
   categories.forEach(button=>button.onclick=()=>{
-    settingsPage=button.dataset.settingsCategory!;
-    try {sessionStorage.setItem(settingsPageKey,settingsPage);} catch {/* Keep the in-page choice. */}
+    selectSettingsPage(button.dataset.settingsCategory!);
     categories.forEach(category=>category.setAttribute('aria-current',category===button?'page':'false'));
     pages.forEach(page=>page.hidden=page.dataset.settingsPage!==settingsPage);
     loadRules();
@@ -1855,8 +1920,12 @@ function renderSettings(entryVersion?: number) {
   };
   document.querySelector<HTMLFormElement>('#mail-preferences')!.onsubmit=event=>{event.preventDefault();void attempt(async()=>{const preferences={...state.prefs,...Object.fromEntries(new FormData(event.target as HTMLFormElement)),mailOffline:((event.target as HTMLFormElement).elements.namedItem('mailOffline') as HTMLInputElement).checked,confirmBeforeSend:((event.target as HTMLFormElement).elements.namedItem('confirmBeforeSend') as HTMLInputElement).checked};await api('preferences',{preferences});state.prefs=preferences;notice('Mail preferences saved.');});};
   document.querySelector<HTMLFormElement>('#key-form')!.onsubmit=ev=>{ev.preventDefault();void attempt(async()=>{const map=Object.fromEntries([...new FormData(ev.target as HTMLFormElement)].map(([k,v])=>[k.slice(4),v as string]));if(new Set(Object.values(map)).size!==Object.values(map).length)throw Error('Choose a different key for each action.');if(Object.values(map).some(v=>'gGnN0123456789'.includes(v)||/\s/.test(v)))throw Error('g/G, n/N, numbers and whitespace are reserved.');state.prefs.keys=map;await api('preferences',{preferences:state.prefs});notice('Bindings saved.');});};
-  document.querySelector<HTMLButtonElement>('#backup')!.onclick=()=>void attempt(async()=>download('office-backup-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify(await api('backup'),null,2),'application/json'));
-  document.querySelector<HTMLButtonElement>('#restore')!.onclick=()=>void attempt(importFile);
+  document.querySelector<HTMLButtonElement>('#backup')!.onclick=()=>void prepareBackup();
+  document.querySelector<HTMLButtonElement>('#backup-download')!.onclick=()=>{
+    if(preparedBackup)download(preparedBackup.name,preparedBackup.file,sqliteBackupType);
+  };
+  renderBackupStatus();
+  document.querySelector<HTMLButtonElement>('#restore')!.onclick=()=>void attempt(()=>importFile(true));
   document.querySelector<HTMLButtonElement>('#add-account')!.onclick=accountDialog;
   document.querySelector<HTMLInputElement>('#keep-recovery')!.onchange=event=>void attempt(async()=>{state.prefs={...state.prefs,keepRecoveryCopies:(event.target as HTMLInputElement).checked};await api('preferences',{preferences:state.prefs});notice('Recovery preference saved.');});
   document.querySelectorAll<HTMLButtonElement>('[data-repair-account]').forEach(b=>b.onclick=()=>void repairMail(b.dataset.repairAccount!,b));

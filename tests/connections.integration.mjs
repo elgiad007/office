@@ -112,13 +112,13 @@ try{
  assert.ok((await page.locator('.connections-view svg').boundingBox()).height>200);assert.equal(await page.locator('[data-connection-more]').isVisible(),false);
  await page.locator('[data-node]').first().focus();await page.keyboard.press('Enter');await page.getByRole('button',{name:'Reset view'}).click();await page.locator('.connection-list-row').first().waitFor();
  await page.screenshot({path:'test-results/connections-graph.png'});await page.keyboard.press('Escape');
- const backup=await api('backup');assert.equal(backup.connections.length,2);
+ const backup=await api('backup&format=json');assert.equal(backup.connections.length,2);
  const before=(await api('records&kind=tasks')).records.length;
  await assert.rejects(api('save',{kind:'tasks',title:'Must rollback',body:'',meta:{},linkedTo:'missing'}));assert.equal((await api('records&kind=tasks')).records.length,before);
  await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('#items [data-id="'+source.id+'"]').click();await command(':unlink ');await page.locator('#connection-suggestions [role="option"]').first().waitFor();assert.equal(await page.locator('#connection-suggestions [role="option"]').count(),2);await page.keyboard.press('Tab');await page.keyboard.press('Enter');await page.locator('#notice').filter({hasText:'Connection removed.'}).waitFor();assert.equal((await api('connections&id='+source.id)).links.length,1);
  // Restore full backups through the real API, retaining the older no-connections format.
  for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});
- await api('restore',{backup});assert.equal((await api('backup')).connections.length,2);
+ await api('restore',{backup});assert.equal((await api('backup&format=json')).connections.length,2);
  await page.reload();await page.locator('#items [data-id="'+source.id+'"]').click();await page.locator('.item-connections [data-connection-open]').first().waitFor({state:'attached'});
  await page.setViewportSize({width:390,height:844});await command(':link forecast');
  const suggestions=page.locator('#connection-suggestions [role="option"]');

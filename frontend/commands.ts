@@ -10,6 +10,7 @@ export const commandRegistry={
   sheets:{arguments:0,aliases:['sh'],action:'Switch to Sheets',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   wiki:{arguments:0,aliases:['w'],action:'Switch to Wiki',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   settings:{arguments:0,aliases:['set'],action:'Switch to Settings',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
+  backup:{arguments:0,action:'Open Backups settings',context:'Normal mode',options:'No arguments. Open Settings → Backups to prepare a SQLite backup.'},
   sync:{arguments:1,action:'Sync connected accounts',context:'Normal mode, including Settings',options:':sync [account name or ID]. Omit the account to sync all. Type a space after :sync for suggestions. Use ↑/↓ to choose, Tab to fill, and Enter to sync.'},
   head:{arguments:0,action:'View original message headers',context:'Selected mail message',options:'No arguments; locally cached headers.'},
   q:{arguments:0,action:'Sign out',context:'Normal mode',options:'No arguments; prompts for unsaved drafts, saves existing items and returns to the password screen.'},
@@ -27,6 +28,11 @@ const aliases=new Map<string,CommandName>();
 for(const name of Object.keys(registry) as CommandName[]){
   const entry=registry[name];
   if('aliases' in entry)for(const alias of entry.aliases)aliases.set(alias,name);
+}
+export function commandNameSuggestions(value: string) {
+  const prefix=value.trimStart().match(/^:([^\s:]+)$/)?.[1];
+  if(!prefix||Object.hasOwn(registry,prefix)||aliases.has(prefix))return [];
+  return (Object.keys(registry) as CommandName[]).filter(name=>name.startsWith(prefix));
 }
 export class CommandError extends Error {}
 export interface ResolvedCommand {name: keyof typeof registry; argument?: string; linked?: boolean; kind?: string; title?: string}
