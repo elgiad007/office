@@ -138,7 +138,10 @@ async function testMailExport(page,url){
     assert.equal(cachedDownload.suggestedFilename(),'mail-cached.json');
     assert.deepEqual(await readArchive(cachedDownload),records);
     assert.deepEqual([archiveCalls,planCalls,batchCalls],[1,0,0],'Cached export uses one request and no provider work');
-    await status.getByText('Download started · mail-cached.json · 2 header-only',{exact:true}).waitFor();
+    const confirmation=status.getByText('Download started · mail-cached.json · 2 header-only',{exact:true});
+    await confirmation.waitFor();
+    await confirmation.waitFor({state:'hidden',timeout:7000});
+    assert.equal(await status.textContent(),'');
 
     const [completeDownload]=await Promise.all([page.waitForEvent('download'),complete()]);
     assert.equal(completeDownload.suggestedFilename(),'mail.json');

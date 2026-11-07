@@ -1277,9 +1277,11 @@ function waitForMailExport<T>(work: Promise<T>, signal: AbortSignal): Promise<T>
     void work.then(resolve,reject).finally(()=>signal.removeEventListener('abort',abort));
   });
 }
+let mailExportStatusTimer: ReturnType<typeof setTimeout> | undefined;
 async function exportAllMail(complete: boolean) {
   const menu=document.querySelector<HTMLDetailsElement>('#mail-export-menu')!;
   if(menu.inert)return;
+  clearTimeout(mailExportStatusTimer);
   const status=document.querySelector<HTMLElement>('#mail-export-status')!;
   const cancel=document.querySelector<HTMLButtonElement>('#cancel-mail-export')!;
   const controller=new AbortController(), signal=controller.signal;
@@ -1334,6 +1336,7 @@ async function exportAllMail(complete: boolean) {
     download(name,archive,'application/json');
     const result=`Download started · ${name}`+(missing?` · ${missing} ${complete?'skipped':'header-only'}`:'');
     status.textContent=result;
+    mailExportStatusTimer=setTimeout(()=>{status.textContent='';},5000);
     if(warning)notice(`${result}. First issue: ${warning}`);
   } catch(cause) {
     if(!menu.isConnected)return;

@@ -2002,10 +2002,12 @@ function waitForMailExport(work, signal) {
         void work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
     });
 }
+let mailExportStatusTimer;
 async function exportAllMail(complete) {
     const menu = document.querySelector('#mail-export-menu');
     if (menu.inert)
         return;
+    clearTimeout(mailExportStatusTimer);
     const status = document.querySelector('#mail-export-status');
     const cancel = document.querySelector('#cancel-mail-export');
     const controller = new AbortController(), signal = controller.signal;
@@ -2066,6 +2068,7 @@ async function exportAllMail(complete) {
         download(name, archive, 'application/json');
         const result = `Download started · ${name}` + (missing ? ` · ${missing} ${complete ? 'skipped' : 'header-only'}` : '');
         status.textContent = result;
+        mailExportStatusTimer = setTimeout(() => { status.textContent = ''; }, 5000);
         if (warning)
             notice(`${result}. First issue: ${warning}`);
     }
