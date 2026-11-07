@@ -123,8 +123,8 @@ function icon(name: string) {
 const headerActionPaths = {
   compose: 'M13 5H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9 M10 14l1-4 8-8 3 3-8 8-4 1z',
   new: 'M12 5v14 M5 12h14',
-  import: 'M12 3v12 M8 11l4 4 4-4 M4 15v5h16v-5',
-  'export-all': 'M12 15V3 M8 7l4-4 4 4 M4 15v5h16v-5',
+  import: 'M12 15V3 M8 7l4-4 4 4 M4 15v5h16v-5',
+  'export-all': 'M12 3v12 M8 11l4 4 4-4 M4 15v5h16v-5',
 };
 
 function headerAction(action: 'new' | 'import' | 'export-all', label: string, glyph: keyof typeof headerActionPaths = action) {
