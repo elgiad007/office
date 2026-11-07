@@ -76,9 +76,10 @@ export function cellValue(cells: Cells, ref: string, visiting = new Set<string>(
 }
 export function markdown(text: string) {
   let code = false;
-  return text.split('\n').map(line => {
+  return text.split(/\r?\n/).map(line => {
     if (line.startsWith('```')) { code = !code; return code ? '<pre><code>' : '</code></pre>'; }
     if (code) return escapeHtml(line) + '\n';
+    if (!line.trim()) return '';
     let safe = escapeHtml(line).replace(/\[\[([^\]]+)\]\]/g, (_,name) => `<button class="wiki-link" data-wiki="${name}">${name}</button>`)
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/gi, '<a href="$2" rel="noreferrer noopener">$1</a>')
       .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/`([^`]+)`/g,'<code>$1</code>');
@@ -86,7 +87,7 @@ export function markdown(text: string) {
     if (heading) return `<h${heading[1].length}>${heading[2]}</h${heading[1].length}>`;
     if (/^[-*] /.test(safe)) return `<p class="bullet">• ${safe.slice(2)}</p>`;
     if (safe.startsWith('&gt; ')) return `<blockquote>${safe.slice(5)}</blockquote>`;
-    return safe ? `<p>${safe}</p>` : '<br>';
+    return `<p>${safe}</p>`;
   }).join('') + (code ? '</code></pre>' : '');
 }
 export function safeDocument(html: string) {

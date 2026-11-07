@@ -158,13 +158,15 @@ export function cellValue(cells, ref, visiting = new Set(), context = { values: 
 }
 export function markdown(text) {
     let code = false;
-    return text.split('\n').map(line => {
+    return text.split(/\r?\n/).map(line => {
         if (line.startsWith('```')) {
             code = !code;
             return code ? '<pre><code>' : '</code></pre>';
         }
         if (code)
             return escapeHtml(line) + '\n';
+        if (!line.trim())
+            return '';
         let safe = escapeHtml(line).replace(/\[\[([^\]]+)\]\]/g, (_, name) => `<button class="wiki-link" data-wiki="${name}">${name}</button>`)
             .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/gi, '<a href="$2" rel="noreferrer noopener">$1</a>')
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -175,7 +177,7 @@ export function markdown(text) {
             return `<p class="bullet">• ${safe.slice(2)}</p>`;
         if (safe.startsWith('&gt; '))
             return `<blockquote>${safe.slice(5)}</blockquote>`;
-        return safe ? `<p>${safe}</p>` : '<br>';
+        return `<p>${safe}</p>`;
     }).join('') + (code ? '</code></pre>' : '');
 }
 export function safeDocument(html) {
