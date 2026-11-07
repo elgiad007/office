@@ -443,6 +443,7 @@ function authView(status: Status) {
   document.querySelector<HTMLFormElement>('#auth-form')!.onsubmit=async event=>{event.preventDefault(); const button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!; busyButton(button,true); try { const r=await api(setup?'setup':'login',Object.fromEntries(new FormData(event.target as HTMLFormElement))); state.csrf=r.csrf; await boot(); } catch(cause) { const error=asError(cause); document.querySelector<HTMLElement>('#auth-error')!.textContent=error.message; } finally { busyButton(button,false); } };
 }
 async function boot() {
+  setItemFullScreen(false);
   appEntryVersion++;
   backupRequest?.abort();
   backupRequest=undefined;
@@ -816,15 +817,36 @@ function renderAppHeader() {
   toolbar.hidden=state.app==='mail'||state.app==='settings';
   toolbar.innerHTML=toolbar.hidden?'':`${state.app==='calendar'?`<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">`:''}<div class="header-action-group">${headerAction('new','New '+a.singular)}${headerAction('import','Import')}${headerAction('export-all','Export')}</div>`;
 }
+let fullScreenItemId: string | undefined;
+const fullScreenButton = '<button type="button" class="quiet item-fullscreen-enter" data-action="item-fullscreen">Full screen</button>';
+const exitFullScreenButton = '<button type="button" class="item-fullscreen-exit" data-action="item-fullscreen">Exit full screen</button>';
+
+function setItemFullScreen(expanded: boolean) {
+  fullScreenItemId=expanded?state.current?.id:undefined;
+  document.querySelector('#detail')?.parentElement?.classList.toggle('item-fullscreen',!!fullScreenItemId);
+}
+
+function toggleItemFullScreen() {
+  if(!state.current)return;
+  const expanded=!fullScreenItemId;
+  const focused=document.activeElement;
+  setItemFullScreen(expanded);
+  if(focused?.matches('[data-action="item-fullscreen"],body')){
+    const selector=expanded?'.item-fullscreen-exit':'.item-fullscreen-enter';
+    document.querySelector<HTMLElement>(selector)?.focus({preventScroll:true});
+  }
+  if(!editable(document.activeElement))setMode('normal');
+}
+
 function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   renderAppHeader();
   const a=apps[state.app];
   if(state.app==='calendar'){
-    document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace"><section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
+    document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${exitFullScreenButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
     document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;renderList();};
     calendar.render();if(state.current)calendar.ensureVisible(state.current.id);renderDetail();return;
   }
-  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid"><section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid">${exitFullScreenButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
   panelSizing.bindList(document.querySelector<HTMLElement>('[data-resize-panel="list"]')!);
   document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;mailListLimit=100;renderList();};
   if(state.app==='tasks')bindTaskViewControls();
@@ -973,6 +995,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const scrollingPanel=document.querySelector<HTMLElement>('#detail');
   if(scrollingPanel)keyboardScrollers.get(scrollingPanel)?.cancel();
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
+  setItemFullScreen(!!r&&r.id===fullScreenItemId);
   if(viewingPendingSend()){
     panel.classList.remove('mail-reader');
     if(!panel.querySelector('.mail-send-progress'))panel.innerHTML='<div class="empty mail-send-progress" role="status" tabindex="-1"><span class="connection-opening-spinner" aria-hidden="true"></span><h2>Sending message…</h2><p>You can keep working while Office sends this message.</p></div>';
@@ -998,8 +1021,9 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const retainBody=viewingMail&&!newlyOpened&&bodyKey===displayedMailBody&&!!panel.querySelector('.mail-reader-header');
   displayedMailBody=bodyKey;
   const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':isUnsavedDraft()?'Unsaved draft':state.dirty?'Unsaved changes':'Saved'}</span>${!isUnsavedDraft()&&['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiEditing?'View page':'Edit source'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?`<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete selected item'}">${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete'}</button>`:''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+  const template=document.createElement('template');template.innerHTML=markup;
+  template.content.querySelector(viewingMail?'.mail-header-badges':'.detail-toolbar .right')?.insertAdjacentHTML('beforeend',fullScreenButton);
   if(toolbarOnly){
-    const template=document.createElement('template');template.innerHTML=markup;
     for(const selector of ['.detail-toolbar','.print-only'])panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector)!);
     updateSaveButton();
     void connections.section();
@@ -1007,10 +1031,9 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   }
   if(retainBody){
     // Keep the body connected: moving an iframe reloads its browsing context.
-    const template=document.createElement('template');template.innerHTML=markup;
     panel.querySelector('.mail-reader-header')!.replaceWith(template.content.querySelector('.mail-reader-header')!);
     panel.querySelector('.mail-action-failure')?.remove();
-  }else panel.innerHTML=markup;
+  }else panel.replaceChildren(template.content);
   updateSaveButton();
   void connections.section();
   panel.querySelectorAll<HTMLDetailsElement>('[data-mail-disclosure]').forEach(d=>d.open=!!restore?.open.includes(d.dataset.mailDisclosure!));
@@ -1151,7 +1174,13 @@ async function commit(explicit=false): Promise<void> {
   const firstSave=isUnsavedDraft(),payload=structuredClone(state.current); state.dirty=false; const id=payload.id;
   const input=firstSave?{kind:payload.kind,title:payload.title,body:payload.body,meta:payload.meta,...(pendingLinkedSource?.draft===id?{linkedTo:pendingLinkedSource.source}:{})}:payload;
   state.savePromise=(async()=>{try { const result=await api('save',input); if(state.current?.id===id) {
-    if(firstSave){const origin=mailDraftOrigins.get(id);if(origin){mailDraftOrigins.set(result.record.id,origin);mailDraftOrigins.delete(id);}Object.assign(state.current!,{id:result.record.id,revision:result.record.revision,created:result.record.created,updated:result.record.updated});unsavedDraft=null;pendingLinkedSource=undefined;state.rows.push(state.current!);}
+    if(firstSave){
+      const origin=mailDraftOrigins.get(id);
+      if(origin){mailDraftOrigins.set(result.record.id,origin);mailDraftOrigins.delete(id);}
+      Object.assign(state.current!,{id:result.record.id,revision:result.record.revision,created:result.record.created,updated:result.record.updated});
+      if(fullScreenItemId===id)fullScreenItemId=result.record.id;
+      unsavedDraft=null;pendingLinkedSource=undefined;state.rows.push(state.current!);
+    }
     else {state.current!.revision=result.record.revision;state.current!.updated=result.record.updated;const pos=state.rows.findIndex(r=>r.id===id);if(pos>=0)state.rows[pos]=state.current;}
   }
     const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved';
@@ -1226,6 +1255,7 @@ async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope,s
   },!!cached);
 }
 async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>,warm=false) {
+  setItemFullScreen(false);
   const version=++appEntryVersion;
   const main=document.querySelector<HTMLElement>('#main')!;
   const controls=document.querySelectorAll<HTMLElement>('#app-toolbar,#mail-toolbar,#mail-folder-navigation');
@@ -1606,6 +1636,7 @@ async function handleClick(event: MouseEvent) {
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet!);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action!;
+    if(action==='item-fullscreen'){toggleItemFullScreen();return;}
     if(action==='connections'){await connections.view(true);return;}
     if(action==='close-mail-folders')setMailFolderPanel(false,true);
     if(action==='new')await createRecord();
@@ -2045,6 +2076,7 @@ function restoreConnectionsFocus(opener:HTMLElement|null) {
   setMode('normal');
 }
 function focusList() {
+  if(fullScreenItemId){focusContent();return;}
   if(state.app==='settings'&&activeSettingsPanel()){focusSettingsCategory();return;}
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
@@ -2204,7 +2236,7 @@ function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
   return true;
 }
 let lastPane: 'content'|'list'='list';
-function activePane(): 'content'|'list' {const node=document.activeElement;if(node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
+function activePane(): 'content'|'list' {const node=document.activeElement;if(fullScreenItemId||node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
 document.addEventListener('focusin',event=>{
   const node=event.target as HTMLElement;
   if(node.closest('#detail'))lastPane='content';
@@ -2220,8 +2252,8 @@ document.addEventListener('keydown',event=>{
   if(commandInput){if(event.key==='Escape'){event.preventDefault();closeCommand(true);}return;}
   if(!document.querySelector('.shell'))return;
   state.lastActivity=Date.now();if(document.querySelector<HTMLDialogElement>('dialog[open]')!)return;
-  if((event.target as HTMLElement).closest('[data-mail-disclosure]'))return;
   const target=event.target as HTMLElement;
+  if(target.closest('[data-mail-disclosure]')&&!(fullScreenItemId&&['Escape',':'].includes(event.key)))return;
   const exportMenu=target.closest<HTMLDetailsElement>('#mail-export-menu[open]');
   if(event.key==='Escape'&&exportMenu){
     exportMenu.open=false;
@@ -2249,13 +2281,14 @@ document.addEventListener('keydown',event=>{
   if(state.app==='lists'&&event.key==='Escape'&&target.matches('.checklist-add input,.checklist-title input')&&!event.isComposing){
     event.preventDefault();setMode('normal');focusContent();void attempt(commit);return;
   }
+  if(event.key==='Escape'&&fullScreenItemId&&!editable(target)&&!event.isComposing){if(!event.repeat)toggleItemFullScreen();event.preventDefault();return;}
   if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
   if(editable(target)&&!inSidebar){setMode('insert');return;}
   if(handleSettingsKey(event,target))return;
   const vimDirection=vimScrollDirection(event);
   if(vimDirection){if(scrollFocusedPane(event.target as HTMLElement,vimDirection)!==false){event.preventDefault();keySequence='';}return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
-  if(event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';focusList();return;}
+  if(!fullScreenItemId&&event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';focusList();return;}
   const checklistRow=target.closest<HTMLElement>('[data-checklist-row]');
   const checklistArrow=checklistRow&&(event.key==='ArrowUp'||event.key==='ArrowDown');
   if(!checklistArrow&&target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
@@ -2288,7 +2321,7 @@ document.addEventListener('keydown',event=>{
     const control=action==='completeTask'?'input':action==='edit'?'[data-checklist-edit]':action==='delete'?'[data-checklist-delete]':undefined;
     if(control){event.preventDefault();if(!event.repeat)checklistRow.querySelector<HTMLElement>(control)?.click();return;}
   }
-  if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
+  if(action==='search'){event.preventDefault();setItemFullScreen(false);document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
   if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}
   if(action==='completeTask'&&state.app==='tasks'&&!event.shiftKey){event.preventDefault();void attempt(completeTask);return;}
@@ -2318,6 +2351,10 @@ document.addEventListener('keydown',event=>{
   },true);}
 });
 document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view,.sidebar')&&target.id!=='command-input'&&editable(target))setMode('insert');});
+document.addEventListener('mousedown',event=>{
+  // Keep the caret or selection in the item when a pointer toggles its layout.
+  if(event.button===0&&document.activeElement?.closest('#detail')&&(event.target as Element).closest('[data-action="item-fullscreen"]'))event.preventDefault();
+});
 document.addEventListener('pointerdown',event=>{
   state.lastActivity=Date.now();
   if(document.querySelector('.folders-open')&&!(event.target as Element).closest('#mail-folder-navigation,[data-app="mail"]'))setMailFolderPanel(false);

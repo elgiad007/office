@@ -622,6 +622,7 @@ function authView(status) {
     } };
 }
 async function boot() {
+    setItemFullScreen(false);
     appEntryVersion++;
     backupRequest?.abort();
     backupRequest = undefined;
@@ -1170,11 +1171,31 @@ function renderAppHeader() {
     toolbar.hidden = state.app === 'mail' || state.app === 'settings';
     toolbar.innerHTML = toolbar.hidden ? '' : `${state.app === 'calendar' ? `<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">` : ''}<div class="header-action-group">${headerAction('new', 'New ' + a.singular)}${headerAction('import', 'Import')}${headerAction('export-all', 'Export')}</div>`;
 }
+let fullScreenItemId;
+const fullScreenButton = '<button type="button" class="quiet item-fullscreen-enter" data-action="item-fullscreen">Full screen</button>';
+const exitFullScreenButton = '<button type="button" class="item-fullscreen-exit" data-action="item-fullscreen">Exit full screen</button>';
+function setItemFullScreen(expanded) {
+    fullScreenItemId = expanded ? state.current?.id : undefined;
+    document.querySelector('#detail')?.parentElement?.classList.toggle('item-fullscreen', !!fullScreenItemId);
+}
+function toggleItemFullScreen() {
+    if (!state.current)
+        return;
+    const expanded = !fullScreenItemId;
+    const focused = document.activeElement;
+    setItemFullScreen(expanded);
+    if (focused?.matches('[data-action="item-fullscreen"],body')) {
+        const selector = expanded ? '.item-fullscreen-exit' : '.item-fullscreen-enter';
+        document.querySelector(selector)?.focus({ preventScroll: true });
+    }
+    if (!editable(document.activeElement))
+        setMode('normal');
+}
 function renderWorkspace(readerSnapshot) {
     renderAppHeader();
     const a = apps[state.app];
     if (state.app === 'calendar') {
-        document.querySelector('#main').innerHTML = `<div class="calendar-workspace"><section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
+        document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${exitFullScreenButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
         document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
         calendar.render();
         if (state.current)
@@ -1182,7 +1203,7 @@ function renderWorkspace(readerSnapshot) {
         renderDetail();
         return;
     }
-    document.querySelector('#main').innerHTML = `<div class="work-grid"><section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+    document.querySelector('#main').innerHTML = `<div class="work-grid">${exitFullScreenButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
     panelSizing.bindList(document.querySelector('[data-resize-panel="list"]'));
     document.querySelector('#search').oninput = event => { state.search = event.target.value; mailListLimit = 100; renderList(); };
     if (state.app === 'tasks')
@@ -1418,6 +1439,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     if (scrollingPanel)
         keyboardScrollers.get(scrollingPanel)?.cancel();
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
+    setItemFullScreen(!!r && r.id === fullScreenItemId);
     if (viewingPendingSend()) {
         panel.classList.remove('mail-reader');
         if (!panel.querySelector('.mail-send-progress'))
@@ -1452,9 +1474,10 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     const retainBody = viewingMail && !newlyOpened && bodyKey === displayedMailBody && !!panel.querySelector('.mail-reader-header');
     displayedMailBody = bodyKey;
     const markup = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : isUnsavedDraft() ? 'Unsaved draft' : state.dirty ? 'Unsaved changes' : 'Saved'}</span>${!isUnsavedDraft() && ['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiEditing ? 'View page' : 'Edit source'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? `<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft() || r.kind === 'mail' && r.meta.folder === 'Drafts' ? 'Discard Draft' : 'Delete selected item'}">${isUnsavedDraft() || r.kind === 'mail' && r.meta.folder === 'Drafts' ? 'Discard Draft' : 'Delete'}</button>` : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+    const template = document.createElement('template');
+    template.innerHTML = markup;
+    template.content.querySelector(viewingMail ? '.mail-header-badges' : '.detail-toolbar .right')?.insertAdjacentHTML('beforeend', fullScreenButton);
     if (toolbarOnly) {
-        const template = document.createElement('template');
-        template.innerHTML = markup;
         for (const selector of ['.detail-toolbar', '.print-only'])
             panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
         updateSaveButton();
@@ -1463,13 +1486,11 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     }
     if (retainBody) {
         // Keep the body connected: moving an iframe reloads its browsing context.
-        const template = document.createElement('template');
-        template.innerHTML = markup;
         panel.querySelector('.mail-reader-header').replaceWith(template.content.querySelector('.mail-reader-header'));
         panel.querySelector('.mail-action-failure')?.remove();
     }
     else
-        panel.innerHTML = markup;
+        panel.replaceChildren(template.content);
     updateSaveButton();
     void connections.section();
     panel.querySelectorAll('[data-mail-disclosure]').forEach(d => d.open = !!restore?.open.includes(d.dataset.mailDisclosure));
@@ -1733,6 +1754,8 @@ async function commit(explicit = false) {
                         mailDraftOrigins.delete(id);
                     }
                     Object.assign(state.current, { id: result.record.id, revision: result.record.revision, created: result.record.created, updated: result.record.updated });
+                    if (fullScreenItemId === id)
+                        fullScreenItemId = result.record.id;
                     unsavedDraft = null;
                     pendingLinkedSource = undefined;
                     state.rows.push(state.current);
@@ -1875,6 +1898,7 @@ async function changeApp(name, keepSidebar = false, mailScope, settingsDestinati
     }, !!cached);
 }
 async function showAppEntry(name, open, warm = false) {
+    setItemFullScreen(false);
     const version = ++appEntryVersion;
     const main = document.querySelector('#main');
     const controls = document.querySelectorAll('#app-toolbar,#mail-toolbar,#mail-folder-navigation');
@@ -2564,6 +2588,10 @@ async function handleClick(event) {
             return;
         }
         const action = button.dataset.action;
+        if (action === 'item-fullscreen') {
+            toggleItemFullScreen();
+            return;
+        }
         if (action === 'connections') {
             await connections.view(true);
             return;
@@ -3256,6 +3284,10 @@ function restoreConnectionsFocus(opener) {
     setMode('normal');
 }
 function focusList() {
+    if (fullScreenItemId) {
+        focusContent();
+        return;
+    }
     if (state.app === 'settings' && activeSettingsPanel()) {
         focusSettingsCategory();
         return;
@@ -3485,7 +3517,7 @@ function scrollFocusedPane(target, direction) {
     return true;
 }
 let lastPane = 'list';
-function activePane() { const node = document.activeElement; if (node?.closest('#detail'))
+function activePane() { const node = document.activeElement; if (fullScreenItemId || node?.closest('#detail'))
     return 'content'; if (node?.closest('#items'))
     return 'list'; return lastPane; }
 document.addEventListener('focusin', event => {
@@ -3530,9 +3562,9 @@ document.addEventListener('keydown', event => {
     state.lastActivity = Date.now();
     if (document.querySelector('dialog[open]'))
         return;
-    if (event.target.closest('[data-mail-disclosure]'))
-        return;
     const target = event.target;
+    if (target.closest('[data-mail-disclosure]') && !(fullScreenItemId && ['Escape', ':'].includes(event.key)))
+        return;
     const exportMenu = target.closest('#mail-export-menu[open]');
     if (event.key === 'Escape' && exportMenu) {
         exportMenu.open = false;
@@ -3581,6 +3613,12 @@ document.addEventListener('keydown', event => {
         void attempt(commit);
         return;
     }
+    if (event.key === 'Escape' && fullScreenItemId && !editable(target) && !event.isComposing) {
+        if (!event.repeat)
+            toggleItemFullScreen();
+        event.preventDefault();
+        return;
+    }
     if (event.key === 'Escape') {
         setMode('normal');
         if (editable(event.target)) {
@@ -3617,7 +3655,7 @@ document.addEventListener('keydown', event => {
     }
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey)
         return;
-    if (event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
+    if (!fullScreenItemId && event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
         event.preventDefault();
         keySequence = '';
         focusList();
@@ -3746,6 +3784,7 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'search') {
         event.preventDefault();
+        setItemFullScreen(false);
         document.querySelector('#search')?.focus();
         return;
     }
@@ -3859,6 +3898,11 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('focusin', event => { const target = event.target; if (!target.closest('.connections-view,.sidebar') && target.id !== 'command-input' && editable(target))
     setMode('insert'); });
+document.addEventListener('mousedown', event => {
+    // Keep the caret or selection in the item when a pointer toggles its layout.
+    if (event.button === 0 && document.activeElement?.closest('#detail') && event.target.closest('[data-action="item-fullscreen"]'))
+        event.preventDefault();
+});
 document.addEventListener('pointerdown', event => {
     state.lastActivity = Date.now();
     if (document.querySelector('.folders-open') && !event.target.closest('#mail-folder-navigation,[data-app="mail"]'))

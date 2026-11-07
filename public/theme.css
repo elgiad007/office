@@ -691,7 +691,23 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 @media screen and (max-width: 800px) {
   .work-grid { grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }
 }
+.item-fullscreen-exit { display: none; }
+@media screen {
+  .shell:has(.item-fullscreen) { grid-template-columns: minmax(0, 1fr); }
+  .shell:has(.item-fullscreen) :is(.sidebar, .topbar),
+  .item-fullscreen > :is(.list-pane, #calendar-surface),
+  .item-fullscreen .item-fullscreen-enter { display: none; }
+  .work-grid.item-fullscreen, .calendar-workspace.item-fullscreen {
+    display: grid;
+    grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
+    min-height: 0;
+    background: var(--surface);
+  }
+  .item-fullscreen > .item-fullscreen-exit { display: inline-flex; justify-self: end; margin: 8px 14px; }
+  .item-fullscreen > .calendar-detail.detail { position: static; width: auto; box-shadow: none; border: 0; }
+}
 @media print {
+  .item-fullscreen-enter { display: none !important; }
   .compact .detail { padding: 0; }
   .detail-form { display: block; }
   .document-content, .document-content .rich-editor { display: block !important; }
