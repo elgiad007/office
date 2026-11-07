@@ -98,8 +98,8 @@ function connection_search(string $query,string $kind,string $exclude,int $limit
         'title-desc'=>'title COLLATE NOCASE DESC',
         default=>'updated DESC',
     };
-    $sql="SELECT * FROM records WHERE id<>? AND (?='' OR kind=?) AND (id=? OR title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR json_extract(meta,'$.from') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.to') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.location') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.email') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.company') LIKE ? ESCAPE '\\') ORDER BY $order,id LIMIT ?";
-    $q=db()->prepare($sql);$args=[$exclude,$kind,$kind,$query,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern];
+    $sql="SELECT * FROM records WHERE id<>? AND (?='' OR kind=?) AND (id=? OR title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR json_extract(meta,'$.from') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.to') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.location') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.email') LIKE ? ESCAPE '\\' OR json_extract(meta,'$.company') LIKE ? ESCAPE '\\' OR (kind='lists' AND EXISTS (SELECT 1 FROM json_each(records.meta,'$.checklist') WHERE json_extract(value,'$.text') LIKE ? ESCAPE '\\'))) ORDER BY $order,id LIMIT ?";
+    $q=db()->prepare($sql);$args=[$exclude,$kind,$kind,$query,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern,$pattern];
     if($sort===null)array_push($args,$query,$query,$pattern);
     foreach($args as $i=>$arg)$q->bindValue($i+1,$arg);$q->bindValue(count($args)+1,$limit,PDO::PARAM_INT);$q->execute();
     return array_map('connection_summary',$q->fetchAll());

@@ -42,6 +42,11 @@ const shapes = {
         detail: 'M-120 -31 H120 M-93 -58 V-31 M-22 -58 V-31 M49 -58 V-31 M-120 -5 H-93 M-120 21 H-93 M-120 48 H120',
         x: -76, y: -10, width: 182,
     },
+    lists: {
+        outline: 'M-104 -60 H104 Q112 -60 112 -52 V52 Q112 60 104 60 H-104 Q-112 60 -112 52 V-52 Q-112 -60 -104 -60 Z',
+        detail: 'M-92 -39 H-74 V-21 H-92 Z M-90 -31 L-84 -25 L-72 -41 M-92 -9 H-74 V9 H-92 Z M-92 21 H-74 V39 H-92 Z',
+        x: -58, y: -16, width: 151,
+    },
 };
 export function connectionShape(kind) {
     const shape = Object.hasOwn(shapes, kind) ? shapes[kind] : undefined;

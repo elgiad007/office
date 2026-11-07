@@ -198,10 +198,17 @@ try{
  await a.call('sync',{id:account.id,repair:'yes'},400);
  const listed=await a.call('accounts');assert.equal(listed.accounts.length,1);assert.ok(!JSON.stringify(listed).includes('secret'));
  const dbBytes=await readFile(a.dir+'/office.sqlite');assert.ok(!dbBytes.includes(Buffer.from('a-secret-never-exported')));
- await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup&format=json');assert.equal(backup.records.length,4);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));assert.ok(!JSON.stringify(backup).includes(integration.client_secret));assert.ok(!(await readFile(a.dir+'/office.sqlite')).includes(Buffer.from(integration.client_secret)));
+ const checklist=[{id:'first',text:'Review notes',done:true},{id:'second',text:'Pack charger',done:false}];
+ const listInput={kind:'lists',title:'Trip checklist',body:'',meta:{checklist}};
+ await a.call('save',{...listInput,meta:{checklist:[checklist[0],checklist[0]]}},400);
+ await a.call('save',{...listInput,meta:{checklist:[{...checklist[0],done:'true'}]}},400);
+ const list=(await a.call('save',listInput)).record;
+ assert.deepEqual((await a.call('records&kind=lists')).records[0].meta.checklist,checklist);
+ await a.call('preferences',{preferences:{theme:'dark',density:'compact'}});const backup=await a.call('backup&format=json');assert.equal(backup.records.length,5);assert.ok(!JSON.stringify(backup).includes('a-secret-never-exported'));assert.ok(!JSON.stringify(backup).includes(integration.client_secret));assert.ok(!(await readFile(a.dir+'/office.sqlite')).includes(Buffer.from(integration.client_secret)));
  await a.call('restore',{backup},409);
  const b=await start();await setup(b);await b.call('restore',{backup:{...backup,records:[...backup.records,{kind:'bad',id:'bad',title:'bad',body:'',meta:{}}]}},400);assert.equal((await b.call('records&kind=wiki')).records.length,0);
- const restored=await b.call('restore',{backup});assert.equal(restored.count,4);assert.equal((await b.call('history&id='+record.id)).revisions.length,2);assert.equal((await b.call('status')).preferences.theme,'dark');assert.equal((await b.call('accounts')).accounts.length,0);assert.equal((await b.call('records&kind=sheets')).records[0].meta.workbook.sheets[0].cells.A1,'=2+3');
+ const restored=await b.call('restore',{backup});assert.equal(restored.count,5);assert.equal((await b.call('history&id='+record.id)).revisions.length,2);assert.equal((await b.call('status')).preferences.theme,'dark');assert.equal((await b.call('accounts')).accounts.length,0);assert.equal((await b.call('records&kind=sheets')).records[0].meta.workbook.sheets[0].cells.A1,'=2+3');
+ assert.deepEqual((await b.call('record&id='+list.id)).record.meta.checklist,checklist);
  // Exercise the default SQLite download and raw upload against independent workspaces.
  const phpSqlite=extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite']:[];
  const snapshotSeed="require 'app/bootstrap.php'; save_record(['id'=>'cached-backup-mail','kind'=>'mail','title'=>'Cached backup mail','body'=>'Offline body','meta'=>['folder'=>'Inbox','remote'=>true,'account'=>$argv[1],'accountLabel'=>'Backup fixture','source'=>'fixture']],true,false); attachment_store('cached-backup-mail',['part'=>'2','name'=>'bytes.bin','type'=>'application/octet-stream'],hex2bin('000102ff'));";
@@ -237,7 +244,8 @@ try{
  await restoreSqlite(c,await readFile(path),400);
  assert.equal((await c.call('records&kind=wiki')).records.length,0,'invalid SQLite rows roll back the full restore');
  const sqliteRestored=await restoreSqlite(c,bytes,200);
- assert.deepEqual(sqliteRestored,{count:5,preferences:{theme:'dark',density:'compact'}});
+ assert.deepEqual(sqliteRestored,{count:6,preferences:{theme:'dark',density:'compact'}});
+ assert.deepEqual((await c.call('record&id='+list.id)).record.meta.checklist,checklist);
  await restoreSqlite(c,bytes,409);
  const cachedBackup=(await c.call('record&id=cached-backup-mail')).record;
  assert.equal(cachedBackup.body,'Offline body');assert.equal(cachedBackup.meta.importedFrom,'Backup fixture');

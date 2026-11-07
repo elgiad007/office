@@ -7,6 +7,7 @@ export const itemTypes = {
   documents: {command:'doc', label:'Document', fields:[]},
   wiki: {command:'page', label:'Wiki page', fields:[]},
   sheets: {command:'sheet', label:'Sheet', fields:[]},
+  lists: {command:'list', label:'List', fields:[]},
 } as const;
 export type ItemKind = keyof typeof itemTypes;
 export const creationTypes: Record<string,string> = Object.fromEntries(Object.entries(itemTypes).map(([kind,type])=>[type.command,kind]));

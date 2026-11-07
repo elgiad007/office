@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-const KINDS = ['tasks', 'contacts', 'calendar', 'documents', 'wiki', 'sheets', 'mail'];
+const KINDS = ['tasks', 'contacts', 'calendar', 'documents', 'wiki', 'sheets', 'mail', 'lists'];
 require_once __DIR__.'/attachments.php';
 require_once __DIR__.'/connections.php';
 require_once __DIR__.'/mail-index.php';
@@ -162,6 +162,16 @@ function validate_record(array $input): array {
     $meta=$input['meta']??[]; if (!is_array($meta) || strlen(json_encode($meta))>($kind==='mail'?40:2)*1024*1024) fail('Invalid item metadata.');
     unset($meta['attachments']); // Derived from the file table, never accepted from clients.
     if ($kind==='mail' && ($meta['folder']??'')!=='Inbox') unset($meta['rulePending'],$meta['ruleAttempted']);
+    if ($kind==='lists') {
+        $checklist=$meta['checklist']??[];
+        if (!is_array($checklist) || !array_is_list($checklist)) fail('Invalid checklist.');
+        $ids=[];
+        foreach ($checklist as $item) {
+            if (!is_array($item) || !is_string($item['id']??null) || !preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$item['id']) || isset($ids[$item['id']]) || !is_string($item['text']??null) || trim($item['text'])==='' || !is_bool($item['done']??null)) fail('Invalid checklist item.');
+            $ids[$item['id']]=true;
+        }
+        $meta['checklist']=$checklist;
+    }
     if ($kind==='sheets') {
         $sheets=$meta['workbook']['sheets']??null;
         if (!is_array($sheets) || !array_is_list($sheets) || count($sheets)<1 || count($sheets)>10) fail('A workbook needs 1–10 sheets.');

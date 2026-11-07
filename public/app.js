@@ -16,6 +16,7 @@ import { installItemMenus } from './item-menus.js';
 import { compareMail } from './mail-sort.js';
 import { mailView, mailViewPreferences, revealMailGroup } from './mail-view.js';
 import { taskView, taskViewPreferences, taskPriority, taskDue } from './task-view.js';
+import { bindChecklist, checklistContent, checklistEntry, checklistProgress, moveChecklistFocus } from './checklist.js';
 import { renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
 import { agendaEventLabel, createCalendar, dateOnly, upcomingEvents } from './calendar.js';
@@ -29,8 +30,9 @@ const apps = {
     documents: { name: 'Documents', singular: 'document', empty: 'No documents yet.', hint: 'Create a document or import an HTML or text file.', icon: 'M14 2H5v20h14V7z M14 2v6h5 M8 12h8 M8 16h8' },
     wiki: { name: 'Wiki', singular: 'page', empty: 'No pages yet.', hint: 'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].', icon: 'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3' },
     sheets: { name: 'Sheets', singular: 'workbook', empty: 'No workbooks yet.', hint: 'Create a workbook or import a CSV file.', icon: 'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18' },
+    lists: { name: 'Lists', singular: 'list', empty: 'No lists yet.', hint: 'Create a named list and add items to check off.', icon: 'M2 3h7v7H2z M3 6l2 2 4-5 M2 14h7v7H2z M13 6h9 M13 17h9' },
 };
-const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', pageDown: 'd', pageUp: 'u', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'D', undoDelete: 'U', completeTask: 'x', connections: 'L' };
+const defaultKeys = { down: 'j', up: 'k', left: 'h', right: 'l', pageDown: 'd', pageUp: 'u', edit: 'i', new: 'c', search: '/', help: '?', select: 'v', save: 's', archive: 'a', reply: 'r', move: 'm', delete: 'D', undoDelete: 'U', completeTask: 'x', connections: 'L', addChecklistItem: 'o' };
 const state = { app: 'mail', rows: [], current: null, csrf: '', accounts: [], prefs: {}, search: '', mode: 'normal', dirty: false, selected: new Set(), sheet: 0, cell: 'A1', wikiEditing: false, lastActivity: Date.now(), syncing: false, savePromise: null, mailFolder: 'Inbox', mailScope: null, folderOpen: new Set() };
 const sqliteBackupType = 'application/vnd.sqlite3';
 let backupRequest;
@@ -213,7 +215,8 @@ const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action => {
     const legacy = action === 'delete' && saved === 'd' || action === 'undoDelete' && saved === 'u';
     return [action, legacy ? defaultKeys[action] : saved || defaultKeys[action]];
 }));
-const editable = (node) => node?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node?.tagName);
+const editable = (node) => node instanceof HTMLElement &&
+    (node.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName) && !node.matches('[data-checklist-row] input'));
 const dateLabel = (value) => { const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? value + 'T00:00:00' : value); return timestampLabel(value, Number.isNaN(+date) ? value : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })); };
 setInterval(() => { if (!document.hidden)
     refreshTimeLabels(); }, 60000);
@@ -263,6 +266,7 @@ const commandHandlers = {
     docs: () => changeApp('documents'),
     sheets: () => changeApp('sheets'),
     wiki: () => changeApp('wiki'),
+    lists: () => changeApp('lists'),
     settings: () => changeApp('settings'),
     backup: () => changeApp('settings', false, undefined, 'backups'),
     sync: (account) => syncAccounts(true, account),
@@ -768,6 +772,8 @@ function mailLocation(record) {
     return m.folder === 'Custom folder' ? (account?.folders?.find(f => f.id === m.serverFolder)?.name || m.serverFolder || m.folder) : m.folder;
 }
 function searchableText(record) {
+    if (record.kind === 'lists')
+        return [record.title, ...(record.meta.checklist ?? []).map(item => item.text)].join(' ').toLocaleLowerCase();
     const { rawBase64, raw, headersBase64, ...meta } = record.meta;
     return (record.title + ' ' + record.body + ' ' + JSON.stringify(meta)).toLocaleLowerCase();
 }
@@ -1327,7 +1333,7 @@ function renderList() {
         mailListLimit = Math.max(mailListLimit, expanded.findIndex(r => r.id === state.current?.id) + 1);
     const visible = state.app === 'mail' ? expanded.slice(0, mailListLimit) : expanded;
     const item = (r) => {
-        const hint = state.app === 'mail' ? (r.meta.from || r.meta.to || r.meta.folder || 'Local archive') : state.app === 'calendar' ? (r.meta.start ? dateLabel(r.meta.start) + ' · ' : '') + e(r.meta.location || '') : state.app === 'tasks' ? (r.meta.done ? 'Completed' : r.meta.due ? 'Due ' + dateLabel(r.meta.due) : 'No due date') : state.app === 'contacts' ? e(r.meta.email || r.meta.company || '') : state.app === 'wiki' ? e(r.title.includes(':') ? r.title.split(':').slice(0, -1).join(':') : 'Root namespace') : 'Edited ' + dateLabel(r.updated);
+        const hint = state.app === 'mail' ? (r.meta.from || r.meta.to || r.meta.folder || 'Local archive') : state.app === 'calendar' ? (r.meta.start ? dateLabel(r.meta.start) + ' · ' : '') + e(r.meta.location || '') : state.app === 'tasks' ? (r.meta.done ? 'Completed' : r.meta.due ? 'Due ' + dateLabel(r.meta.due) : 'No due date') : state.app === 'contacts' ? e(r.meta.email || r.meta.company || '') : state.app === 'wiki' ? e(r.title.includes(':') ? r.title.split(':').slice(0, -1).join(':') : 'Root namespace') : state.app === 'lists' ? checklistProgress(r.meta.checklist ?? []) : 'Edited ' + dateLabel(r.updated);
         const selected = state.current?.id === r.id;
         const readState = state.app === 'mail' ? (r.meta.read ? 'read' : 'unread') : '';
         const readStatus = readState ? `<span class="mail-read-status"><span class="file-input">${readState === 'unread' ? 'Unread' : 'Read'}</span></span>` : '';
@@ -1505,8 +1511,17 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     }
     if (form) {
         form.oninput = () => markDirty();
-        form.onsubmit = async (ev) => { ev.preventDefault(); await attempt(() => commit(true)); };
+        form.onsubmit = ev => {
+            ev.preventDefault();
+            void attempt(async () => {
+                await commit(true);
+                if (r.kind === 'lists' && state.current === r)
+                    panel.querySelector('.checklist-add input')?.focus();
+            });
+        };
     }
+    if (state.app === 'lists')
+        bindChecklist(panel, r, { changed: markDirty, normal: () => setMode('normal'), rename: () => enterEdit(true), modal, dialog, confirmation });
     if (state.app === 'calendar') {
         const close = document.createElement('button');
         close.textContent = 'Close event';
@@ -1544,6 +1559,8 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
         formula.oninput = () => { const workbook = state.current.meta.workbook; workbook.sheets[state.sheet].cells[state.cell] = formula.value; markDirty(); updateCells(); };
 }
 function detailContent(r) {
+    if (r.kind === 'lists')
+        return checklistContent(r);
     const m = r.meta, disabled = m.remote ? 'disabled' : '';
     if (state.app === 'mail' && m.folder !== 'Drafts') {
         const recovery = !!m.remote && ['Recovery copies', 'Not in Inbox'].includes(m.folder || '');
@@ -1731,7 +1748,10 @@ async function commit(explicit = false) {
             const s = document.querySelector('#save-status');
             if (s)
                 s.textContent = state.dirty ? 'Unsaved changes' : 'Saved';
+            const listFocused = state.app === 'lists' && !!document.activeElement?.closest('#items');
             renderList();
+            if (listFocused)
+                focusList();
         }
         catch (cause) {
             const error = asError(cause);
@@ -1801,7 +1821,10 @@ async function openConnectedRecord(id) {
             return;
         if (record.kind === 'calendar')
             calendar.ensureVisible(record.id, true);
-        focusList();
+        if (record.kind === 'lists')
+            focusContent();
+        else
+            focusList();
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
     });
     if (opened && record.kind === 'mail' && state.current?.id !== record.id)
@@ -1990,6 +2013,8 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
     }
     if (kind === 'sheets')
         record.meta.workbook = { sheets: [{ name: 'Sheet 1', cells: {} }] };
+    if (kind === 'lists')
+        record.meta.checklist = [];
     if (kind === 'mail' && !keepMailList) {
         state.mailScope = null;
         if (state.mailFolder !== 'all')
@@ -2034,9 +2059,10 @@ function enterEdit(preferTitle = false) {
         state.wikiEditing = true;
         renderDetail();
     }
-    const target = state.app === 'sheets' ? document.querySelector('#formula') : preferTitle ? document.querySelector('.title-input') : state.app === 'documents' ? document.querySelector('#rich-editor') : document.querySelector('#detail [name=body]');
+    const title = preferTitle || state.app === 'lists';
+    const target = state.app === 'sheets' ? document.querySelector('#formula') : title ? document.querySelector('.title-input') : state.app === 'documents' ? document.querySelector('#rich-editor') : document.querySelector('#detail [name=body]');
     target?.focus();
-    if (target instanceof HTMLInputElement && (preferTitle || target.id === 'formula'))
+    if (target instanceof HTMLInputElement && (title || target.id === 'formula'))
         target.select();
     setMode('insert');
 }
@@ -2479,7 +2505,7 @@ async function syncAccounts(manual = true, accountQuery) {
     // Never replace an active editor with network data.
     if (state.app === 'settings')
         refreshSettingsAccountStatus();
-    else if (!state.dirty && !editable(document.activeElement))
+    else if (state.app !== 'lists' && !state.dirty && !editable(document.activeElement))
         await load(undefined, { preserveSelection: state.app === 'mail' });
 }
 function help() { openHelp(dialog, keys(), e, () => setMode('normal')); }
@@ -3208,6 +3234,8 @@ function accountDialog() {
 const itemMenus = installItemMenus({ confirmDeletion: connections.confirmDeletion, state, e, commit: leaveEditor, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, setMailRead, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
 function contentEntry() {
     const panel = document.querySelector('#detail');
+    if (state.app === 'lists' && panel)
+        return checklistEntry(panel) || panel;
     return panel?.querySelector('.mail-html, .mail-body, .sheet-wrap') || panel;
 }
 function focusContent() {
@@ -3215,12 +3243,13 @@ function focusContent() {
         return;
     const entry = contentEntry();
     if (entry) {
-        entry.tabIndex = -1;
+        if (!entry.matches('[data-checklist-row] input'))
+            entry.tabIndex = -1;
         entry.focus({ preventScroll: true });
     }
 }
 function restoreConnectionsFocus(opener) {
-    if (opener?.isConnected && !opener.isContentEditable && !opener.matches('input,textarea,select'))
+    if (opener?.isConnected && !editable(opener))
         opener.focus({ preventScroll: true });
     if (document.activeElement !== opener || editable(document.activeElement))
         focusList();
@@ -3511,7 +3540,8 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         return;
     }
-    if (appEntryVisible() && !['g', ':'].includes(event.key) && !(keySequence === 'g' && /^[1-7]$/.test(event.key)))
+    const appJump = keySequence === 'g' && /^[1-8]$/.test(event.key);
+    if (appEntryVisible() && !['g', ':'].includes(event.key) && !appJump)
         return;
     if (event.key === 'Escape' && document.querySelector('.folders-open')) {
         setMailFolderPanel(false, true);
@@ -3519,7 +3549,7 @@ document.addEventListener('keydown', event => {
         return;
     }
     const inSidebar = !!target.closest('.sidebar');
-    if (inSidebar && event.key !== ':' && event.key !== 'g' && !(keySequence === 'g' && /^[1-7]$/.test(event.key))) {
+    if (inSidebar && event.key !== ':' && event.key !== 'g' && !appJump) {
         keySequence = '';
         handleSidebarKey(event, target);
         return;
@@ -3533,6 +3563,22 @@ document.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         void attempt(() => commit(true));
+        return;
+    }
+    if (state.app === 'lists' && target.id === 'search' && (event.key === 'Enter' || event.key === 'Escape') && !event.isComposing) {
+        event.preventDefault();
+        setMode('normal');
+        focusList();
+        const row = navigableRows()[0];
+        if (event.key === 'Enter' && row && row.id !== state.current?.id)
+            void attempt(() => selectRecord(row.id, true));
+        return;
+    }
+    if (state.app === 'lists' && event.key === 'Escape' && target.matches('.checklist-add input,.checklist-title input') && !event.isComposing) {
+        event.preventDefault();
+        setMode('normal');
+        focusContent();
+        void attempt(commit);
         return;
     }
     if (event.key === 'Escape') {
@@ -3571,18 +3617,20 @@ document.addEventListener('keydown', event => {
     }
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey)
         return;
-    if (event.target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input') && ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key))
+    if (event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
+        event.preventDefault();
+        keySequence = '';
+        focusList();
+        return;
+    }
+    const checklistRow = target.closest('[data-checklist-row]');
+    const checklistArrow = checklistRow && (event.key === 'ArrowUp' || event.key === 'ArrowDown');
+    if (!checklistArrow && target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input') && ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key))
         return;
     if (event.key === 'Tab' && !event.shiftKey && (target.matches('#selected-item') || state.current && target.id === 'items')) {
         event.preventDefault();
         keySequence = '';
         focusContent();
-        return;
-    }
-    if (event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
-        event.preventDefault();
-        keySequence = '';
-        focusList();
         return;
     }
     if (event.key === ':' && !event.isComposing && state.mode === 'normal') {
@@ -3601,7 +3649,7 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         return;
     }
-    if (keySequence === 'g' && /^[1-7]$/.test(key)) {
+    if (keySequence === 'g' && appJump) {
         event.preventDefault();
         keySequence = '';
         void attempt(() => changeApp(Object.keys(apps)[Number(key) - 1]));
@@ -3618,6 +3666,10 @@ document.addEventListener('keydown', event => {
             scrollMailBody(target, 'start');
             return;
         }
+        if (checklistRow) {
+            moveChecklistFocus(checklistRow, 'first');
+            return;
+        }
         const row = navigableRows()[0];
         if (row)
             void attempt(() => selectRecord(row.id, true));
@@ -3630,7 +3682,7 @@ document.addEventListener('keydown', event => {
     }
     keySequence = '';
     const listArrow = activePane() === 'list' ? (key === 'ArrowUp' || key === 'ArrowLeft' ? 'up' : key === 'ArrowDown' || key === 'ArrowRight' ? 'down' : undefined) : undefined;
-    const action = listArrow || Object.keys(k).find(action => k[action] === key);
+    const action = (checklistArrow ? (key === 'ArrowUp' ? 'up' : 'down') : listArrow) || Object.keys(k).find(action => k[action] === key);
     if (action === 'pageDown' || action === 'pageUp') {
         if (scrollFocusedPane(target, action === 'pageDown' ? 'half-page-down' : 'half-page-up') !== false)
             event.preventDefault();
@@ -3673,6 +3725,25 @@ document.addEventListener('keydown', event => {
     }
     if (state.app === 'settings')
         return;
+    if (state.app === 'lists' && action === 'addChecklistItem' && activePane() === 'content') {
+        event.preventDefault();
+        document.querySelector('.checklist-add input')?.focus();
+        return;
+    }
+    if (checklistRow) {
+        if (action === 'up' || action === 'down' || key === 'G') {
+            event.preventDefault();
+            moveChecklistFocus(checklistRow, key === 'G' ? 'last' : action === 'up' ? 'up' : 'down');
+            return;
+        }
+        const control = action === 'completeTask' ? 'input' : action === 'edit' ? '[data-checklist-edit]' : action === 'delete' ? '[data-checklist-delete]' : undefined;
+        if (control) {
+            event.preventDefault();
+            if (!event.repeat)
+                checklistRow.querySelector(control)?.click();
+            return;
+        }
+    }
     if (action === 'search') {
         event.preventDefault();
         document.querySelector('#search')?.focus();

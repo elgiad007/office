@@ -11,7 +11,7 @@ type NavigationOrigin={id:string;title:string;kind:string;role:'item'|'group'|'o
 type HistoryEntry={place:Place;from?:NavigationOrigin;snapshot?:{data:ConnectionList;selected:string;focusedId:string;view:Camera;fitWidth:number;listPage:number;scroll:number;width:number;height:number}};
 type Env={api:RequestApi;keys?:()=>Record<string,string>;changed?:()=>void;closed?:(opener:HTMLElement|null)=>void;dialog:HTMLDialogElement;modal:(title:string,body:string)=>void;open:(id:string)=>Promise<void>;notice:(message:string,error?:boolean)=>void};
 const typeLabel=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
-const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦'};
+const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦',lists:'☑'};
 const ORIGIN_ID='navigation-origin';
 const NEIGHBOR_HIGHLIGHT_KEY='office.connections.highlightDirect';
 

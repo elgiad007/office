@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {CommandError,resolveCommand,connectionQuery,accountCommandQuery} from '../public/commands.js';
-const navigation={mail:['m'],calendar:['cal'],tasks:['t'],contacts:['con'],docs:['doc','d'],sheets:['sh'],wiki:['w'],settings:['set']};
+const navigation={mail:['m'],calendar:['cal'],tasks:['t'],contacts:['con'],docs:['doc','d'],sheets:['sh'],wiki:['w'],lists:[],settings:['set']};
 test('connection commands preserve multiword queries and support every registered type',()=>{
- for(const [type,kind] of Object.entries({mail:'mail',event:'calendar',task:'tasks',contact:'contacts',doc:'documents',page:'wiki',sheet:'sheets'})){
+ for(const [type,kind] of Object.entries({mail:'mail',event:'calendar',task:'tasks',contact:'contacts',doc:'documents',page:'wiki',sheet:'sheets',list:'lists'})){
   assert.deepEqual(resolveCommand(':new linked '+type),{name:'new',argument:kind,linked:true});
   assert.deepEqual(resolveCommand(':link '+type+' Quarter end review'),{name:'link',kind,argument:'Quarter end review'});
  }

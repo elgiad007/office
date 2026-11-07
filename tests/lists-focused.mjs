@@ -1,0 +1,108 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+
+const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url));
+const {chromium}=require('playwright');
+const browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
+try{
+  const page=await browser.newPage(),errors=[];
+  page.setDefaultTimeout(10000);
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.goto(process.env.OFFICE_TEST_URL||'http://127.0.0.1:8787/');
+  await page.getByLabel('Setup token',{exact:true}).fill((await readFile(process.env.OFFICE_TEST_DATA+'/setup-token.txt','utf8')).trim());
+  await page.getByLabel('Create password (at least 12 characters)',{exact:true}).fill('lists-tests-only-123');
+  await page.getByRole('button',{name:'Create workspace',exact:true}).click();
+  await page.getByRole('button',{name:'Compose',exact:true}).waitFor();
+
+  const key=value=>page.keyboard.press(value);
+  const active=locator=>locator.evaluate(node=>node===document.activeElement);
+  const saved=()=>page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
+  const command=async value=>{
+    await key(':');
+    const input=page.locator('#command-input');
+    await input.fill(value);
+    return input;
+  };
+  const run=async value=>{await command(value);await key('Enter');};
+  await key('g');await key('8');
+  await page.getByRole('button',{name:'New list',exact:true}).waitFor();
+  await key('c');
+  const name=page.getByRole('textbox',{name:'List name',exact:true});
+  const add=page.getByRole('textbox',{name:'New checklist item',exact:true});
+  const checkbox=text=>page.getByRole('checkbox',{name:text,exact:true});
+  await name.fill('Shopping');
+  await key('Escape');await key('o');
+  assert.equal(await active(add),true);
+  await add.fill('Apples');await key('Enter');
+  assert.equal(await active(add),true);
+  await add.evaluate(input=>{
+    const data=new DataTransfer();data.setData('text/plain','Bread\r\n\r\nCoffee');
+    input.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));
+  });
+  assert.equal(await page.locator('[data-checklist-row]').count(),3);
+  assert.equal(await page.locator('#save-status').textContent(),'Unsaved draft');
+
+  await key('Escape');
+  assert.equal(await active(checkbox('Apples')),true);
+  await key('x');await key('j');await key('Space');await key('ArrowDown');
+  assert.equal(await active(checkbox('Coffee')),true);
+  await key('g');await key('g');
+  assert.equal(await active(checkbox('Apples')),true);
+  await key('G');await key('i');
+  const editor=page.getByRole('textbox',{name:'Item text',exact:true});
+  await editor.fill('Coffee beans');await key('Enter');
+  assert.equal(await active(checkbox('Coffee beans')),true);
+  await key('D');await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.equal(await checkbox('Coffee beans').count(),1);
+  await key('k');await key('D');await page.getByRole('button',{name:'Remove item',exact:true}).click();
+  assert.equal(await checkbox('Bread').count(),0);
+  await key('s');await saved();
+  assert.equal(await active(checkbox('Coffee beans')),true);
+  await key('x');await key('x');await key('x');
+  await saved();
+  assert.equal(await active(checkbox('Coffee beans')),true);
+  await page.reload();
+  await page.getByRole('checkbox',{name:'Coffee beans',exact:true}).waitFor();
+  assert.equal(await checkbox('Coffee beans').isChecked(),true);
+  assert.equal(await checkbox('Apples').isChecked(),true);
+  await checkbox('Apples').uncheck();await saved();
+
+  await run(':new list Pantry');
+  await name.press('Enter');await saved();
+  await add.fill('Coffee beans');await key('Enter');await key('Escape');await saved();
+  await key('/');await page.locator('#search').fill('coffee beans');await key('Enter');
+  assert.equal(await page.locator('#items [data-id]').count(),2);
+  await page.waitForFunction(()=>document.querySelector('[name="title"]')?.value==='Shopping');
+  await key('n');
+  await page.waitForFunction(()=>document.querySelector('[name="title"]')?.value==='Pantry');
+  await key('N');
+  await page.waitForFunction(()=>document.querySelector('[name="title"]')?.value==='Shopping');
+
+  await run(':new task Packing');
+  await page.getByRole('textbox',{name:'Title',exact:true}).waitFor();
+  await key('Control+s');await saved();
+  await key('Escape');
+  await command(':link list apples');
+  await page.getByRole('option').filter({hasText:'Shopping'}).waitFor();
+  await key('Enter');
+  const count=page.locator('.connection-count').filter({hasText:'Connections · 1'});
+  await count.click();
+  await page.locator('[data-connection-open]').filter({hasText:'Shopping'}).click();
+  await name.waitFor();
+  assert.equal(await name.inputValue(),'Shopping');
+  assert.equal(await active(checkbox('Apples')),true);
+  await key('L');
+  const map=page.locator('.connection-map-pane');
+  await map.locator('[data-node][data-kind="lists"]').waitFor();
+  await key('Escape');
+  await map.waitFor({state:'hidden'});
+  assert.equal(await active(checkbox('Apples')),true);
+  await run(':new linked list Travel');
+  await page.waitForFunction(()=>document.querySelector('[name="title"]')?.value==='Travel');
+  await key('Control+s');await saved();
+  await count.waitFor();
+  await key('Escape');await run(':lists');await page.getByRole('button',{name:'New list',exact:true}).waitFor();
+  assert.deepEqual(errors,[]);
+  console.log('PASS Lists creation, checklist editing, keyboard focus, autosave, search and cross-app connections.');
+}finally{await browser.close();}

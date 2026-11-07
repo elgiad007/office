@@ -21,6 +21,7 @@ import {installItemMenus} from './item-menus.js';
 import {compareMail} from './mail-sort.js';
 import {mailView,mailViewPreferences,revealMailGroup} from './mail-view.js';
 import {taskView,taskViewPreferences,taskPriority,taskDue} from './task-view.js';
+import {bindChecklist,checklistContent,checklistEntry,checklistProgress,moveChecklistFocus} from './checklist.js';
 import {renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings} from './mail-list.js';
 import {createActivity} from './activity.js';
 import {agendaEventLabel,createCalendar,dateOnly,upcomingEvents} from './calendar.js';
@@ -35,8 +36,9 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
   documents:{name:'Documents',singular:'document',empty:'No documents yet.',hint:'Create a document or import an HTML or text file.',icon:'M14 2H5v20h14V7z M14 2v6h5 M8 12h8 M8 16h8'},
   wiki:{name:'Wiki',singular:'page',empty:'No pages yet.',hint:'Write Markdown pages, organize namespaces, and link pages with [[wiki links]].',icon:'M3 4h7a3 3 0 0 1 3 3v15a4 4 0 0 0-4-3H3z M13 7a3 3 0 0 1 3-3h6v15h-5a4 4 0 0 0-4 3'},
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
+  lists:{name:'Lists',singular:'list',empty:'No lists yet.',hint:'Create a named list and add items to check off.',icon:'M2 3h7v7H2z M3 6l2 2 4-5 M2 14h7v7H2z M13 6h9 M13 17h9'},
 };
-const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L'};
+const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L',addChecklistItem:'o'};
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const sqliteBackupType='application/vnd.sqlite3';
 let backupRequest: AbortController | undefined;
@@ -193,7 +195,8 @@ const keys = () => Object.fromEntries(Object.keys(defaultKeys).map(action=>{
   const legacy=action==='delete'&&saved==='d'||action==='undoDelete'&&saved==='u';
   return [action,legacy?defaultKeys[action]:saved||defaultKeys[action]];
 }));
-const editable = (node: EventTarget | null): node is HTMLElement => (node as HTMLElement)?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test((node as HTMLElement)?.tagName);
+const editable = (node: EventTarget | null) => node instanceof HTMLElement &&
+  (node.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName)&&!node.matches('[data-checklist-row] input'));
 const dateLabel = (value: string) => { const date=new Date(/^\d{4}-\d{2}-\d{2}$/.test(value)?value+'T00:00:00':value); return timestampLabel(value,Number.isNaN(+date)?value:date.toLocaleDateString(undefined,{month:'short',day:'numeric'})); };
 setInterval(()=>{if(!document.hidden)refreshTimeLabels();},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshTimeLabels();});
@@ -226,6 +229,7 @@ const commandHandlers={
   docs:()=>changeApp('documents'),
   sheets:()=>changeApp('sheets'),
   wiki:()=>changeApp('wiki'),
+  lists:()=>changeApp('lists'),
   settings:()=>changeApp('settings'),
   backup:()=>changeApp('settings',false,undefined,'backups'),
   sync:(account?:string)=>syncAccounts(true,account),
@@ -547,6 +551,7 @@ function mailLocation(record: OfficeRecord) {
   return m.folder==='Custom folder'?(account?.folders?.find(f=>f.id===m.serverFolder)?.name||m.serverFolder||m.folder):m.folder;
 }
 function searchableText(record: OfficeRecord) {
+  if(record.kind==='lists')return [record.title,...(record.meta.checklist??[]).map(item=>item.text)].join(' ').toLocaleLowerCase();
   const {rawBase64,raw,headersBase64,...meta}=record.meta;
   return (record.title+' '+record.body+' '+JSON.stringify(meta)).toLocaleLowerCase();
 }
@@ -923,7 +928,7 @@ function renderList() {
   if(state.app==='mail')mailListLimit=Math.max(mailListLimit,expanded.findIndex(r=>r.id===state.current?.id)+1);
   const visible=state.app==='mail'?expanded.slice(0,mailListLimit):expanded;
   const item=(r: OfficeRecord)=>{
-    const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+e(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?e(r.meta.email||r.meta.company||''):state.app==='wiki'?e(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):'Edited '+dateLabel(r.updated);
+    const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+e(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?e(r.meta.email||r.meta.company||''):state.app==='wiki'?e(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):state.app==='lists'?checklistProgress(r.meta.checklist??[]):'Edited '+dateLabel(r.updated);
     const selected=state.current?.id===r.id;
     const readState=state.app==='mail'?(r.meta.read?'read':'unread'):'';
     const readStatus=readState?`<span class="mail-read-status"><span class="file-input">${readState==='unread'?'Unread':'Read'}</span></span>`:'';
@@ -1027,7 +1032,13 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   if(newlyOpened && openedMail)markOpenedMailRead(r);
   const bodyButton=panel.querySelector<HTMLButtonElement>('[data-download-body]');
   if(bodyButton){bodyButton.onclick=()=>void hydrateMailBody(r,true);if(Number(r.meta.messageSize||0)<=1400000&&!['Recovery copies','Not in Inbox'].includes(r.meta.folder||''))void hydrateMailBody(r);}
-  if (form) { form.oninput=()=>markDirty(); form.onsubmit=async ev=>{ev.preventDefault(); await attempt(()=>commit(true));}; }
+  if (form) { form.oninput=()=>markDirty(); form.onsubmit=ev=>{
+    ev.preventDefault();void attempt(async()=>{
+      await commit(true);
+      if(r.kind==='lists'&&state.current===r)panel.querySelector<HTMLInputElement>('.checklist-add input')?.focus();
+    });
+  }; }
+  if(state.app==='lists')bindChecklist(panel,r,{changed:markDirty,normal:()=>setMode('normal'),rename:()=>enterEdit(true),modal,dialog,confirmation});
   if(state.app==='calendar'){
     const close=document.createElement('button');close.textContent='Close event';close.className='calendar-close';close.onclick=()=>void attempt(async()=>{await leaveEditor();state.current=null;renderDetail();renderList();document.querySelector<HTMLElement>('#items button')?.focus();});panel.prepend(close);
     const allDay=form?.querySelector<HTMLInputElement>('[name="allDay"]');if(allDay)allDay.onchange=()=>{for(const name of ['start','end']){const input=form!.querySelector<HTMLInputElement>(`[name="${name}"]`)!;const value=input.value;input.type=allDay.checked?'date':'datetime-local';input.value=allDay.checked?value.slice(0,10):value+'T00:00';}markDirty();};
@@ -1042,6 +1053,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const formula=panel.querySelector<HTMLInputElement>('#formula')!; if (formula) formula.oninput=()=>{const workbook=state.current!.meta.workbook!; workbook.sheets[state.sheet].cells[state.cell]=formula.value; markDirty(); updateCells();};
 }
 function detailContent(r: OfficeRecord) {
+  if(r.kind==='lists')return checklistContent(r);
   const m=r.meta, disabled=m.remote?'disabled':'';
   if (state.app==='mail' && m.folder!=='Drafts') {
     const recovery=!!m.remote && ['Recovery copies','Not in Inbox'].includes(m.folder||'');
@@ -1142,7 +1154,9 @@ async function commit(explicit=false): Promise<void> {
     if(firstSave){const origin=mailDraftOrigins.get(id);if(origin){mailDraftOrigins.set(result.record.id,origin);mailDraftOrigins.delete(id);}Object.assign(state.current!,{id:result.record.id,revision:result.record.revision,created:result.record.created,updated:result.record.updated});unsavedDraft=null;pendingLinkedSource=undefined;state.rows.push(state.current!);}
     else {state.current!.revision=result.record.revision;state.current!.updated=result.record.updated;const pos=state.rows.findIndex(r=>r.id===id);if(pos>=0)state.rows[pos]=state.current;}
   }
-    const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved'; renderList();
+    const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved';
+    const listFocused=state.app==='lists'&&!!document.activeElement?.closest('#items');
+    renderList();if(listFocused)focusList();
   } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; updateSaveButton(); }})();
   updateSaveButton();
   await state.savePromise; if(state.dirty) await commit();
@@ -1177,7 +1191,7 @@ async function openConnectedRecord(id:string){
     await load(record.id,{selectFirst:record.kind!=='mail',revealMail:record.kind==='mail',entryVersion});
     if(entryVersion!==appEntryVersion)return;
     if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
-    focusList();
+    if(record.kind==='lists')focusContent();else focusList();
     document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
   });
   if(opened&&record.kind==='mail'&&(state.current as OfficeRecord|null)?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
@@ -1279,6 +1293,7 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
   if(kind==='mail' && !record.meta.sendAccount)record.meta.sendAccount=draftAccount(previous);
   if(kind==='calendar'&&!record.meta.start) { const start=new Date(); start.setMinutes(0,0,0); record.meta.start=start.toISOString(); record.meta.end=new Date(+start+3600000).toISOString(); }
   if(kind==='sheets')record.meta.workbook={sheets:[{name:'Sheet 1',cells:{}}]};
+  if(kind==='lists')record.meta.checklist=[];
   if(kind==='mail'&&!keepMailList){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
   try {
     const now=new Date().toISOString();
@@ -1297,8 +1312,9 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
 function enterEdit(preferTitle=false) {
   if (state.current?.meta.remote) {notice('This synced copy is read-only.');return;}
   if(state.app==='wiki'&&!state.wikiEditing){state.wikiEditing=true;renderDetail();}
-  const target=state.app==='sheets'?document.querySelector<HTMLInputElement>('#formula')!:preferTitle?document.querySelector<HTMLInputElement>('.title-input')!:state.app==='documents'?document.querySelector<HTMLElement>('#rich-editor')!:document.querySelector<HTMLTextAreaElement>('#detail [name=body]')!;
-  target?.focus();if(target instanceof HTMLInputElement&&(preferTitle||target.id==='formula'))target.select();setMode('insert');
+  const title=preferTitle||state.app==='lists';
+  const target=state.app==='sheets'?document.querySelector<HTMLInputElement>('#formula')!:title?document.querySelector<HTMLInputElement>('.title-input')!:state.app==='documents'?document.querySelector<HTMLElement>('#rich-editor')!:document.querySelector<HTMLTextAreaElement>('#detail [name=body]')!;
+  target?.focus();if(target instanceof HTMLInputElement&&(title||target.id==='formula'))target.select();setMode('insert');
 }
 function setMode(mode: string) {state.mode=mode;const m=document.querySelector<HTMLElement>('#mode')!;if(m)m.textContent=mode.toUpperCase();}
 async function attempt<T>(fn: () => T | Promise<T>) { try{return await fn();}catch(cause) { if(cause instanceof DraftCancelled)return;const error=asError(cause);notice(error.message,true);} }
@@ -1563,7 +1579,7 @@ async function syncAccounts(manual=true,accountQuery?:string) {
   const scope=state.mailScope,scopeAccount=state.accounts.find(a=>a.id===scope?.account),scopeFolder=scopeAccount?.folders?.find(f=>f.id===scope?.folder);
   if(!appEntryVisible()&&state.app==='mail'&&scope&&(accountQuery===undefined||scope.account===accounts[0].id)&&!state.dirty&&(scope.limit>100||!['Inbox','Archive','Trash','Junk'].includes(scopeFolder?.role||''))){try{await syncOpenFolder(mailFolderEnv());}catch(cause) { const error=asError(cause);if(manual)notice(error.message,true);}}
   // Never replace an active editor with network data.
-  if(state.app==='settings')refreshSettingsAccountStatus();else if(!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
+  if(state.app==='settings')refreshSettingsAccountStatus();else if(state.app!=='lists'&&!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }
 function help() {openHelp(dialog,keys(),e,()=>setMode('normal'));}
 async function history() {await requireSaved();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
@@ -2015,15 +2031,16 @@ function accountDialog() {
 const itemMenus=installItemMenus({confirmDeletion:connections.confirmDeletion,state,e,commit:leaveEditor,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,setMailRead,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
 function contentEntry() {
   const panel=document.querySelector<HTMLElement>('#detail');
+  if(state.app==='lists'&&panel)return checklistEntry(panel)||panel;
   return panel?.querySelector<HTMLElement>('.mail-html, .mail-body, .sheet-wrap')||panel;
 }
 function focusContent() {
   if(!state.current)return;
   const entry=contentEntry();
-  if(entry){entry.tabIndex=-1;entry.focus({preventScroll:true});}
+  if(entry){if(!entry.matches('[data-checklist-row] input'))entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
 function restoreConnectionsFocus(opener:HTMLElement|null) {
-  if(opener?.isConnected&&!opener.isContentEditable&&!opener.matches('input,textarea,select'))opener.focus({preventScroll:true});
+  if(opener?.isConnected&&!editable(opener))opener.focus({preventScroll:true});
   if(document.activeElement!==opener||editable(document.activeElement))focusList();
   setMode('normal');
 }
@@ -2212,35 +2229,47 @@ document.addEventListener('keydown',event=>{
     event.preventDefault();
     return;
   }
-  if(appEntryVisible()&&!['g',':'].includes(event.key)&&!(keySequence==='g'&&/^[1-7]$/.test(event.key)))return;
+  const appJump=keySequence==='g'&&/^[1-8]$/.test(event.key);
+  if(appEntryVisible()&&!['g',':'].includes(event.key)&&!appJump)return;
   if(event.key==='Escape'&&document.querySelector('.folders-open')){setMailFolderPanel(false,true);event.preventDefault();return;}
   const inSidebar=!!target.closest('.sidebar');
-  if(inSidebar&&event.key!==':'&&event.key!=='g'&&!(keySequence==='g'&&/^[1-7]$/.test(event.key))){
+  if(inSidebar&&event.key!==':'&&event.key!=='g'&&!appJump){
     keySequence='';handleSidebarKey(event,target);return;
   }
   if(event.key==='Enter'&&event.ctrlKey&&!event.altKey&&!event.metaKey&&!event.shiftKey&&!event.isComposing&&state.app==='mail'&&state.current?.meta.folder==='Drafts'&&!state.current!.meta.remote){
     event.preventDefault();if(!event.repeat)void attempt(sendMail);return;
   }
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void attempt(()=>commit(true));return;}
+  if(state.app==='lists'&&target.id==='search'&&(event.key==='Enter'||event.key==='Escape')&&!event.isComposing){
+    event.preventDefault();setMode('normal');focusList();
+    const row=navigableRows()[0];
+    if(event.key==='Enter'&&row&&row.id!==state.current?.id)void attempt(()=>selectRecord(row.id,true));
+    return;
+  }
+  if(state.app==='lists'&&event.key==='Escape'&&target.matches('.checklist-add input,.checklist-title input')&&!event.isComposing){
+    event.preventDefault();setMode('normal');focusContent();void attempt(commit);return;
+  }
   if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
   if(editable(target)&&!inSidebar){setMode('insert');return;}
   if(handleSettingsKey(event,target))return;
   const vimDirection=vimScrollDirection(event);
   if(vimDirection){if(scrollFocusedPane(event.target as HTMLElement,vimDirection)!==false){event.preventDefault();keySequence='';}return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
-  if((event.target as HTMLElement).closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
-  if(event.key==='Tab'&& !event.shiftKey && (target.matches('#selected-item')||state.current&&target.id==='items')){event.preventDefault();keySequence='';focusContent();return;}
   if(event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';focusList();return;}
+  const checklistRow=target.closest<HTMLElement>('[data-checklist-row]');
+  const checklistArrow=checklistRow&&(event.key==='ArrowUp'||event.key==='ArrowDown');
+  if(!checklistArrow&&target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
+  if(event.key==='Tab'&& !event.shiftKey && (target.matches('#selected-item')||state.current&&target.id==='items')){event.preventDefault();keySequence='';focusContent();return;}
   if(event.key===':'&&!event.isComposing&&state.mode==='normal'){event.preventDefault();if(!event.repeat)openCommand();return;}
   const k=keys(), key=event.key;setMode('normal');
   const mailBody=state.app==='mail'&&state.current&&state.current.meta.folder!=='Drafts'&&!!target.closest('.mail-body,.mail-html');
   if(Date.now()-sequenceTime>900)keySequence='';sequenceTime=Date.now();
   if(event.repeat&&key==='g'){event.preventDefault();return;}
-  if(keySequence==='g'&&/^[1-7]$/.test(key)){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
-  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inSidebar){focusSidebar('');return;}if(mailBody){scrollMailBody(target,'start');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
+  if(keySequence==='g'&&appJump){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
+  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inSidebar){focusSidebar('');return;}if(mailBody){scrollMailBody(target,'start');return;}if(checklistRow){moveChecklistFocus(checklistRow,'first');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
   const listArrow=activePane()==='list'?(key==='ArrowUp'||key==='ArrowLeft'?'up':key==='ArrowDown'||key==='ArrowRight'?'down':undefined):undefined;
-  const action=listArrow||Object.keys(k).find(action=>k[action]===key);
+  const action=(checklistArrow?(key==='ArrowUp'?'up':'down'):listArrow)||Object.keys(k).find(action=>k[action]===key);
   if(action==='pageDown'||action==='pageUp'){if(scrollFocusedPane(target,action==='pageDown'?'half-page-down':'half-page-up')!==false)event.preventDefault();return;}
   if(mailBody&&scrollKeys[key]){event.preventDefault();scrollMailBody(target,scrollKeys[key]);return;}
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
@@ -2249,6 +2278,16 @@ document.addEventListener('keydown',event=>{
   if(action==='left'){event.preventDefault();if(state.app!=='settings'&&activePane()==='content')focusList();else focusSidebar();return;}
   if(action==='right'){event.preventDefault();afterListPage(()=>{if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();});return;}
   if(state.app==='settings')return;
+  if(state.app==='lists'&&action==='addChecklistItem'&&activePane()==='content'){
+    event.preventDefault();document.querySelector<HTMLInputElement>('.checklist-add input')?.focus();return;
+  }
+  if(checklistRow){
+    if(action==='up'||action==='down'||key==='G'){
+      event.preventDefault();moveChecklistFocus(checklistRow,key==='G'?'last':action==='up'?'up':'down');return;
+    }
+    const control=action==='completeTask'?'input':action==='edit'?'[data-checklist-edit]':action==='delete'?'[data-checklist-delete]':undefined;
+    if(control){event.preventDefault();if(!event.repeat)checklistRow.querySelector<HTMLElement>(control)?.click();return;}
+  }
   if(action==='search'){event.preventDefault();document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
   if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}

@@ -5,6 +5,7 @@ import type {MailRule, MailRulePreview} from './mail-rules.js';
 export type AppName = ItemKind | 'settings';
 export type Cells = Record<string, string>;
 export interface Workbook { sheets: {name: string; cells: Cells}[] }
+export interface ChecklistItem {id: string; text: string; done: boolean}
 export interface Attachment {part: string; name: string; type: string; size: number; available: boolean; encodedSize?: boolean}
 export interface ItemMeta {
   remote?: boolean;
@@ -46,6 +47,7 @@ export interface ItemMeta {
   recurrence?: string;
   rawIcs?: string;
   workbook?: Workbook;
+  checklist?: ChecklistItem[];
 }
 export interface ItemInput { kind: ItemKind; title: string; body: string; meta: ItemMeta }
 export interface OfficeRecord extends ItemInput {

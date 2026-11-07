@@ -19,7 +19,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('ArrowDown / ArrowUp; PageDown / PageUp; Home / End','Scroll message; page down / up; top / bottom','Read-only mail body','Uses the same smooth scrolling in HTML and text. Respects reduced-motion preferences.');
   add('gg / G','First / last item','Normal mode','Keeps focus in the current pane; goes to top / bottom in a focused read-only mail body. Press g twice within 900 ms.');
   add('Tab / Shift+Tab','Enter selected content / return to list','Selected list row / content entry','Enters without editing. Standard controls and spreadsheet cells retain native Tab behavior.');
-  add('g 1 … g 7','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets. Sequence timeout: 900 ms.');
+  add('g 1 … g 8','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets; 8 Lists. Sequence timeout: 900 ms.');
   add(k.search,'Search current application');add('n / N','Next / previous item in search results','Normal mode','Keeps focus in the current pane, including mail bodies.');
   add(k.connections||'L','Open selected item connections','Normal mode','Remappable in Settings. Also available as :links or :l; add all for the workspace overview.');
   add(k.new,'Create an item / compose');add(k.edit,'Enter edit mode');add(k.select,'Toggle current item selection');add(k.save,'Save changes');
@@ -28,6 +28,10 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add(k.delete,'Delete selected mail or current item','Normal mode','Local deletion requires confirmation. Connected mail moves to Trash; mail already in Trash and synced read-only items are protected.');
   add(k.undoDelete,'Undo last mail deletion','Mail, normal mode','Includes batches; available for 15 minutes in this page.');
   add(k.completeTask||'x','Mark current task complete','Tasks, normal mode','Already completed tasks stay complete. New drafts remain unsaved until Save.');
+  add(k.addChecklistItem||'o','Focus the add item field','Lists, checklist pane','Enter adds an item and keeps the field focused. Paste multiple lines to add one item per line. Escape returns to the checklist.');
+  add(`${k.down} / ${k.up} / ↑ / ↓ / gg / G`,'Move between checklist rows','Lists, focused checklist row');
+  add(`${k.completeTask||'x'} / Space`,'Check or uncheck a checklist item','Lists, focused checkbox');
+  add(`${k.edit} / ${k.delete}`,'Edit or remove a checklist item','Lists, focused checklist row','With the named list focused, edit renames the list and delete removes the list after confirmation.');
   add(k.archive,'Archive messages','Mail, normal mode');add(k.move,'Quick Move to folder','Mail, normal mode','Selected messages, or current message.');add(k.reply,'Reply to message','Mail, normal mode');
   add('Ctrl+Enter','Send current message','Mail, normal or insert mode','Press Enter to confirm or Escape to cancel. Change confirmation in Settings → Mail.');
   add(':','Open command line','Normal mode, including Settings','Enter executes once. Escape dismisses suggestions while keeping command mode and text; with suggestions closed, Escape exits and restores focus.');

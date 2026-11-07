@@ -9,6 +9,7 @@ export const commandRegistry={
   docs:{arguments:0,aliases:['doc','d'],action:'Switch to Documents',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   sheets:{arguments:0,aliases:['sh'],action:'Switch to Sheets',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   wiki:{arguments:0,aliases:['w'],action:'Switch to Wiki',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
+  lists:{arguments:0,action:'Switch to Lists',context:'Normal mode',options:'No arguments. Prompts for unsaved drafts and saves existing lists.'},
   settings:{arguments:0,aliases:['set'],action:'Switch to Settings',context:'Normal mode',options:'No arguments; prompts for unsaved drafts and saves existing items.'},
   backup:{arguments:0,action:'Open Backups settings',context:'Normal mode',options:'No arguments. Open Settings → Backups to prepare a SQLite backup.'},
   sync:{arguments:1,action:'Sync connected accounts',context:'Normal mode, including Settings',options:':sync [account name or ID]. Omit the account to sync all. Type a space after :sync for suggestions. Use ↑/↓ to choose, Tab to fill, and Enter to sync.'},

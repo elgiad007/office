@@ -8,5 +8,6 @@ export const itemTypes = {
     documents: { command: 'doc', label: 'Document', fields: [] },
     wiki: { command: 'page', label: 'Wiki page', fields: [] },
     sheets: { command: 'sheet', label: 'Sheet', fields: [] },
+    lists: { command: 'list', label: 'List', fields: [] },
 };
 export const creationTypes = Object.fromEntries(Object.entries(itemTypes).map(([kind, type]) => [type.command, kind]));

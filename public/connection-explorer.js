@@ -5,7 +5,7 @@ import { showProgressDialog } from './utils.js';
 import { itemTypes } from './item-types.js';
 import { connectionLayout, connectionGroupLayout, connectionTitleLines, connectionNeighbor, connectionArrivalPoint, visibleConnectionItems, GRAPH_LIMIT, GROUP_CARD } from './connection-layout.js';
 const typeLabel = (kind) => itemTypes[kind]?.label || kind;
-const symbols = { mail: '✉', calendar: '▦', tasks: '✓', contacts: '♙', documents: '▤', wiki: '◇', sheets: '▦' };
+const symbols = { mail: '✉', calendar: '▦', tasks: '✓', contacts: '♙', documents: '▤', wiki: '◇', sheets: '▦', lists: '☑' };
 const ORIGIN_ID = 'navigation-origin';
 const NEIGHBOR_HIGHLIGHT_KEY = 'office.connections.highlightDirect';
 export async function openConnectionExplorer(env, source = '') {
