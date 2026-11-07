@@ -2096,7 +2096,7 @@ async function syncAccounts(manual = true, accountQuery) {
     }
     // Never replace an active editor with network data.
     if (state.app === 'settings')
-        renderSettings();
+        refreshSettingsAccountStatus();
     else if (!state.dirty && !editable(document.activeElement))
         await load(undefined, { preserveSelection: state.app === 'mail' });
 }
@@ -2483,7 +2483,7 @@ async function repairMail(accountId, button) {
         busyButton(document.querySelector('#sync-button'), false);
         state.accounts = (await api('accounts')).accounts;
         if (state.app === 'settings')
-            renderSettings();
+            refreshSettingsAccountStatus();
         else
             await load();
     }
@@ -2656,6 +2656,17 @@ try {
         settingsPage = savedPage;
 }
 catch { /* Storage may be unavailable. */ }
+function settingsAccountStatus(account) {
+    const checked = account.last_sync ? 'Last checked ' + timestampLabel(account.last_sync, new Date(account.last_sync).toLocaleString()) : 'Not checked yet';
+    return checked + (account.error ? ' · ' + e(account.error) : '');
+}
+function refreshSettingsAccountStatus() {
+    for (const status of document.querySelectorAll('#settings-accounts [data-account-status]')) {
+        const account = state.accounts.find(a => a.id === status.dataset.accountStatus);
+        if (account)
+            status.innerHTML = settingsAccountStatus(account);
+    }
+}
 function renderSettings(entryVersion) {
     if (state.app !== 'settings' || (appEntryVisible() && entryVersion !== appEntryVersion))
         return;
@@ -2699,7 +2710,7 @@ function renderSettings(entryVersion) {
       <section class="card" id="mail-rules-panel"><h2>Mail Rules</h2><p>Loading rules…</p></section>
     </section>
     <section class="settings-grid" id="settings-accounts" data-settings-page="accounts"${settingsPage === 'accounts' ? '' : ' hidden'}>
-      <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small>${a.last_sync ? 'Last checked ' + timestampLabel(a.last_sync, new Date(a.last_sync).toLocaleString()) : 'Not checked yet'}${a.error ? ' · ' + e(a.error) : ''}</small></div><div class="actions">${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button></section>
+      <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small data-account-status="${e(a.id)}">${settingsAccountStatus(a)}</small></div><div class="actions">${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet" data-remove-account="${a.id}">Remove</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account">+ Add account</button></section>
       <section class="card" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section>
       <section class="card"><details><summary>Sync and connection details</summary><p>Office checks accounts every two minutes while the app is visible and you’ve used it in the last two minutes. You can also choose Sync now. Inbox, Archive, Trash and Junk: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, use the Google integration settings.</p></details></section>
     </section>
