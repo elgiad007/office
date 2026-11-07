@@ -22,6 +22,23 @@ export function upcomingEvents(rows, now) {
         return bounds && bounds.end > now && bounds.start < until ? [{ record, ...bounds }] : [];
     }).sort((a, b) => +a.start - +b.start);
 }
+export function agendaEventLabel({ start, end, allDay }, locale) {
+    const date = new Intl.DateTimeFormat(locale, { weekday: 'short', month: 'short', day: 'numeric' });
+    const duration = (value, unit) => new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'long', maximumFractionDigits: 2 }).format(value);
+    if (allDay) {
+        const lastDay = new Date(+end - 1);
+        const dates = dayKey(start) === dayKey(lastDay) ? date.format(start) : `${date.format(start)}–${date.format(lastDay)}`;
+        // Count calendar dates so daylight-saving transitions do not affect the duration.
+        const days = (Date.parse(dayKey(lastDay)) - Date.parse(dayKey(start))) / 86400000 + 1;
+        return `${dates} · All day (${duration(days, 'day')})`;
+    }
+    const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
+    const range = dayKey(start) === dayKey(end)
+        ? `${date.format(start)} · ${time.format(start)}–${time.format(end)}`
+        : `${date.format(start)}, ${time.format(start)}–${date.format(end)}, ${time.format(end)}`;
+    const minutes = (+end - +start) / 60000;
+    return `${range} (${minutes < 60 ? duration(minutes, 'minute') : duration(minutes / 60, 'hour')})`;
+}
 /** Assign overlapping intervals stable columns; touching endpoints can share a column. */
 export function timedLayout(rows, day) {
     const entries = eventsOn(rows, day).filter(r => !eventBounds(r).allDay).map(record => { const b = eventBounds(record); const start = b.start < day ? 0 : b.start.getHours() * 60 + b.start.getMinutes(); const end = b.end >= addDays(day, 1) ? 1440 : b.end.getHours() * 60 + b.end.getMinutes(); return { record, start, end: Math.max(start + 15, end), column: 0, columns: 1 }; });

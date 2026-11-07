@@ -1,8 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {calendarDate,dayKey,addDays,eventBounds,eventsOn,timedLayout,upcomingEvents} from '../public/calendar.js';
+import {agendaEventLabel,calendarDate,dayKey,addDays,eventBounds,eventsOn,timedLayout,upcomingEvents} from '../public/calendar.js';
 process.env.TZ='America/New_York';
 const event=(id,start,end)=>({id,title:id,meta:{start,end}});
+test('agenda labels show end times and durations for timed and all-day events',()=>{
+ const label=(start,end)=>agendaEventLabel(eventBounds(event('label',start,end)),'en-US');
+ assert.equal(label('2026-11-06T14:00','2026-11-06T15:30'),'Fri, Nov 6 · 2:00 PM–3:30 PM (1.5 hours)');
+ assert.equal(label('2026-11-06T14:00','2026-11-06T14:15'),'Fri, Nov 6 · 2:00 PM–2:15 PM (15 minutes)');
+ assert.equal(label('2026-11-06T22:00','2026-11-07T01:00'),'Fri, Nov 6, 10:00 PM–Sat, Nov 7, 1:00 AM (3 hours)');
+ assert.equal(label('2026-03-08','2026-03-09'),'Sun, Mar 8 · All day (1 day)');
+ assert.equal(label('2026-03-07','2026-03-10'),'Sat, Mar 7–Mon, Mar 9 · All day (3 days)');
+});
 test('date-only events use local dates and exclusive ends across DST',()=>{
  const r=event('all','2026-03-08','2026-03-09');
  assert.equal(dayKey(calendarDate('2026-03-08')),'2026-03-08');

@@ -18,7 +18,7 @@ import { mailView, mailViewPreferences, revealMailGroup } from './mail-view.js';
 import { taskView, taskViewPreferences, taskPriority, taskDue } from './task-view.js';
 import { renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
-import { createCalendar, dateOnly, upcomingEvents } from './calendar.js';
+import { agendaEventLabel, createCalendar, dateOnly, upcomingEvents } from './calendar.js';
 import { timestampLabel, configureTimeLabels, refreshTimeLabels } from './time-labels.js';
 const apps = {
     mail: { name: 'Mail', singular: 'message', empty: 'No messages yet.', hint: 'Connect an account in Settings, import an EML file, or compose your first message.', icon: 'M3 5h18v14H3z M3 5l9 7 9-7' },
@@ -599,10 +599,9 @@ function setupTopAgenda() {
             const { records } = await api('records&kind=calendar');
             if (!isCurrent())
                 return;
-            events.innerHTML = upcomingEvents(records, new Date()).map(({ record, start, allDay }) => {
-                const date = start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-                const time = allDay ? 'All day' : start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-                return `<button type="button" data-agenda-event="${e(record.id)}"><strong>${e(record.title || 'Untitled event')}</strong><small>${e(date)} · ${e(time)}</small></button>`;
+            events.innerHTML = upcomingEvents(records, new Date()).map(entry => {
+                const { record } = entry;
+                return `<button type="button" data-agenda-event="${e(record.id)}"><strong>${e(record.title || 'Untitled event')}</strong><small>${e(agendaEventLabel(entry))}</small></button>`;
             }).join('') || '<p role="status">No events in the next seven days.</p>';
         }
         catch {
