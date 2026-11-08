@@ -4,6 +4,8 @@ const mobileIconPaths = {
   menu: 'M4 6h16 M4 12h16 M4 18h16',
   back: 'M19 12H5 M12 5l-7 7 7 7',
   close: 'M6 6l12 12 M18 6 6 18',
+  expand: 'M9 4H4v5 M15 4h5v5 M20 15v5h-5 M4 15v5h5',
+  collapse: 'M4 9h5V4 M20 9h-5V4 M15 20v-5h5 M9 20v-5H4',
   folder: 'M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v11H3z',
   more: 'M5 12h.01 M12 12h.01 M19 12h.01',
   listView: 'M4 6h5m4 0h7 M4 12h9m4 0h3 M4 18h3m4 0h9 M9 3v6 M17 9v6 M7 15v6',

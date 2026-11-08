@@ -161,12 +161,12 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .calendar-time-day { position: relative; height: 1152px; border-left: 1px solid var(--line); }
 .calendar-slot { display: block; width: 100%; height: 48px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
 .calendar-undated { padding: 8px; }
-.calendar-detail.detail { position: absolute; right: 0; top: 0; bottom: 0; z-index: 4; width: min(520px,95%); background: var(--surface); box-shadow: -8px 0 25px #0003; border: 1px solid var(--line); padding: 18px; overflow: auto; }
-.calendar-detail[hidden] { display: none; }
+.calendar-item-pane { position: absolute; inset: 0 0 0 auto; z-index: 4; width: min(520px,95%); box-shadow: -8px 0 25px #0003; border: 1px solid var(--line); }
+.calendar-item-pane > .detail { padding: 18px; }
 .calendar-close { margin-bottom: 12px; }
 .compact .calendar-day { min-height: 92px; }
 @media(max-width:1000px) { .calendar-layout { grid-template-columns: 140px minmax(0,1fr); gap: 8px; } }
-@media(max-width:650px) { .calendar-layout { display:block; } .calendar-sidebar { display:flex; flex-wrap:wrap; gap:8px; padding:0; } .calendar-sidebar > strong,.calendar-sidebar .calendar-mini,.calendar-sidebar h3,.calendar-sidebar p { display:none; } .calendar-sidebar > label { margin:4px 0; } .calendar-day { min-height:100px; padding:2px; } .calendar-toolbar h2 { font-size:17px; } .calendar-board .calendar-event.item { font-size:10px; padding:3px 1px; } .calendar-event time { display:block; } .calendar-detail.detail { width:100%; } .calendar-workspace { min-height:650px; } }
+@media(max-width:650px) { .calendar-layout { display:block; } .calendar-sidebar { display:flex; flex-wrap:wrap; gap:8px; padding:0; } .calendar-sidebar > strong,.calendar-sidebar .calendar-mini,.calendar-sidebar h3,.calendar-sidebar p { display:none; } .calendar-sidebar > label { margin:4px 0; } .calendar-day { min-height:100px; padding:2px; } .calendar-toolbar h2 { font-size:17px; } .calendar-board .calendar-event.item { font-size:10px; padding:3px 1px; } .calendar-event time { display:block; } .calendar-item-pane { width:100%; } .calendar-workspace { min-height:650px; } }
 :root[data-accent="plum"] { --accent: #785279; --wash: #f1e9f1; }
 :root[data-theme="dark"][data-accent="blue"] { --accent: #9dbfe7; --wash: #2b3747; }
 :root[data-theme="dark"][data-accent="plum"] { --accent: #d3aed2; --wash: #423244; }
@@ -707,23 +707,34 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 @media screen and (max-width: 800px) {
   .work-grid { grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }
 }
-.item-fullscreen-exit { display: none; }
 @media screen {
-  .shell:has(.item-fullscreen) { grid-template-columns: minmax(0, 1fr); }
-  .shell:has(.item-fullscreen) :is(.sidebar, .topbar),
-  .item-fullscreen > :is(.list-pane, #calendar-surface),
-  .item-fullscreen .item-fullscreen-enter { display: none; }
-  .work-grid.item-fullscreen, .calendar-workspace.item-fullscreen {
+  .item-pane:not([hidden]) {
     display: grid;
-    grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
     min-height: 0;
     background: var(--surface);
   }
-  .item-fullscreen > .item-fullscreen-exit { display: inline-flex; justify-self: end; margin: 8px 14px; }
-  .item-fullscreen > .calendar-detail.detail { position: static; width: auto; box-shadow: none; border: 0; }
+  .item-pane > .detail { grid-row: 2; }
+  .item-pane-actions:not([hidden]) {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 14px 0;
+  }
+  .item-pane-actions .mobile-control-icon { display: block; }
+  .shell:has(.item-fullscreen) { grid-template-columns: minmax(0, 1fr); }
+  .shell:has(.item-fullscreen) :is(.sidebar, .topbar),
+  .item-fullscreen > :is(.list-pane, #calendar-surface) { display: none; }
+  .work-grid.item-fullscreen, .calendar-workspace.item-fullscreen {
+    display: grid;
+    grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+    min-height: 0;
+    background: var(--surface);
+  }
+  .item-fullscreen > .calendar-item-pane { position: static; width: auto; box-shadow: none; border: 0; }
 }
 @media print {
-  .item-fullscreen-enter { display: none !important; }
+  .item-pane-actions { display: none; }
   .compact .detail { padding: 0; }
   .detail-form { display: block; }
   .document-content, .document-content .rich-editor { display: block !important; }

@@ -118,13 +118,13 @@
     min-height: 0;
     overflow: hidden;
   }
-  #main :is(.work-grid, .calendar-workspace) > #detail { display: none; }
+  #main :is(.work-grid, .calendar-workspace) > .item-pane { display: none; }
   .shell.mobile-item-open .topbar { display: none; }
   .shell.mobile-item-open #main :is(.work-grid, .calendar-workspace) { grid-template-rows: auto minmax(0, 1fr); }
   .shell.mobile-item-open #main :is(.work-grid, .calendar-workspace) > :is(.list-pane, #calendar-surface),
-  #main :is(.item-fullscreen-enter, .item-fullscreen-exit, .calendar-close) { display: none; }
-  .shell.mobile-item-open #main :is(.work-grid, .calendar-workspace) > #detail:not([hidden]) {
-    display: flex;
+  #main :is(.item-pane-actions, .calendar-close) { display: none; }
+  .shell.mobile-item-open #main :is(.work-grid, .calendar-workspace) > .item-pane:not([hidden]) {
+    display: grid;
     position: static;
     width: auto;
     border: 0;

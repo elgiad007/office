@@ -1242,8 +1242,14 @@ phoneLayout.addEventListener('change', () => {
         return;
     showMobileMenu(false);
     setMailFolderPanel(false);
-    if (phoneLayout.matches && (isUnsavedDraft() || state.dirty || document.activeElement?.closest('#detail')))
-        openMobileItem();
+    if (phoneLayout.matches) {
+        if (fullScreenItemId || isUnsavedDraft() || state.dirty || document.activeElement?.closest('#detail'))
+            openMobileItem();
+        const toggleFocused = document.activeElement?.matches('[data-action="item-fullscreen"]');
+        setItemFullScreen(false);
+        if (toggleFocused && mobileItemOpen)
+            document.querySelector('.mobile-back')?.focus({ preventScroll: true });
+    }
     applyMobilePane();
     // An active editor stays mounted when rotating or resizing.
     if (state.app === 'calendar' && !state.dirty)
@@ -1264,22 +1270,27 @@ function fitMobileKeyboard() {
 window.visualViewport?.addEventListener('resize', fitMobileKeyboard);
 phoneLayout.addEventListener('change', fitMobileKeyboard);
 document.addEventListener('focusout', () => requestAnimationFrame(fitMobileKeyboard));
-const fullScreenButton = '<button type="button" class="quiet item-fullscreen-enter" data-action="item-fullscreen">Full screen</button>';
-const exitFullScreenButton = '<button type="button" class="item-fullscreen-exit" data-action="item-fullscreen">Exit full screen</button>';
+function itemPane(label, calendar = false) {
+    return `<div class="item-pane${calendar ? ' calendar-item-pane' : ''}"${calendar ? ' hidden' : ''}><div class="item-pane-actions" hidden><button type="button" data-action="item-fullscreen" aria-controls="detail">${mobileIcon('expand')}<span>Full Screen</span></button></div><section class="detail" id="detail" aria-label="${label}"></section></div>`;
+}
 function setItemFullScreen(expanded) {
     fullScreenItemId = expanded ? state.current?.id : undefined;
-    document.querySelector('#detail')?.parentElement?.classList.toggle('item-fullscreen', !!fullScreenItemId);
+    const pane = document.querySelector('.item-pane');
+    const workspace = pane?.parentElement;
+    const active = !!fullScreenItemId;
+    if (!workspace || workspace.classList.contains('item-fullscreen') === active)
+        return;
+    workspace.classList.toggle('item-fullscreen', active);
+    pane.querySelector('[data-action="item-fullscreen"]').innerHTML = `${mobileIcon(active ? 'collapse' : 'expand')}<span>${active ? 'Exit Full Screen' : 'Full Screen'}</span>`;
 }
 function toggleItemFullScreen() {
-    if (!state.current)
+    if (!state.current || phoneLayout.matches)
         return;
     const expanded = !fullScreenItemId;
     const focused = document.activeElement;
     setItemFullScreen(expanded);
-    if (focused?.matches('[data-action="item-fullscreen"],body')) {
-        const selector = expanded ? '.item-fullscreen-exit' : '.item-fullscreen-enter';
-        document.querySelector(selector)?.focus({ preventScroll: true });
-    }
+    if (focused === document.body)
+        document.querySelector('[data-action="item-fullscreen"]')?.focus({ preventScroll: true });
     if (!editable(document.activeElement))
         setMode('normal');
 }
@@ -1288,7 +1299,7 @@ function renderWorkspace(readerSnapshot) {
     const previousFolderActions = captureFolderActions();
     const a = apps[state.app];
     if (state.app === 'calendar') {
-        document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${exitFullScreenButton}${mobileBackButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
+        document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${mobileBackButton}<section id="calendar-surface"></section>${itemPane('Selected event', true)}</div>`;
         document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
         calendar.render();
         if (state.current && (!phoneLayout.matches || mobileItemOpen))
@@ -1296,7 +1307,7 @@ function renderWorkspace(readerSnapshot) {
         renderDetail();
         return;
     }
-    document.querySelector('#main').innerHTML = `<div class="work-grid">${exitFullScreenButton}${mobileBackButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app === 'mail' ? `<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>` : ''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+    document.querySelector('#main').innerHTML = `<div class="work-grid">${mobileBackButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app === 'mail' ? `<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>` : ''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected ' + a.singular)}</div>`;
     panelSizing.bindList(document.querySelector('[data-resize-panel="list"]'));
     document.querySelector('#search').oninput = event => { state.search = event.target.value; mailListLimit = 100; renderList(); };
     if (state.app === 'tasks')
@@ -1537,6 +1548,9 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
         keyboardScrollers.get(scrollingPanel)?.cancel();
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
     setItemFullScreen(!!r && r.id === fullScreenItemId);
+    panel.parentElement.querySelector('.item-pane-actions').hidden = !r;
+    if (state.app === 'calendar')
+        panel.parentElement.hidden = !r;
     if (phoneLayout.matches && !mobileItemOpen) {
         displayedMailId = null;
         if (!toolbarOnly)
@@ -1549,12 +1563,9 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
             panel.innerHTML = '<div class="empty mail-send-progress" role="status" tabindex="-1"><span class="connection-opening-spinner" aria-hidden="true"></span><h2>Sending message…</h2><p>You can keep working while Office sends this message.</p></div>';
         return;
     }
-    if (state.app === 'calendar') {
-        panel.hidden = !r;
-        if (!r) {
-            panel.innerHTML = '';
-            return;
-        }
+    if (state.app === 'calendar' && !r) {
+        panel.innerHTML = '';
+        return;
     }
     const contentFocused = !!r && document.activeElement === contentEntry();
     const openedMail = state.app === 'mail' && r ? r.id : null, newlyOpened = openedMail !== displayedMailId;
@@ -1580,7 +1591,6 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     const markup = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : isUnsavedDraft() ? 'Unsaved draft' : state.dirty ? 'Unsaved changes' : 'Saved'}</span>${!isUnsavedDraft() && ['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiEditing ? 'View page' : 'Edit source'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? `<button class="primary" data-action="save">Save</button><button class="quiet danger${discardDraft ? '' : ' mobile-icon-button'}" data-action="delete" title="${discardDraft ? 'Discard Draft' : 'Delete selected item'}" aria-label="${discardDraft ? 'Discard Draft' : 'Delete'}">${discardDraft ? 'Discard Draft' : mobileActionLabel('trash', 'Delete')}</button>` : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
     const template = document.createElement('template');
     template.innerHTML = markup;
-    template.content.querySelector(viewingMail ? '.mail-header-badges' : '.detail-toolbar .right')?.insertAdjacentHTML('beforeend', fullScreenButton);
     const toolbar = template.content.querySelector('.detail-toolbar .right');
     if (toolbar) {
         const secondary = template.content.querySelectorAll('.detail-toolbar [data-action="history"],.detail-toolbar [data-action="export"],.detail-toolbar [data-action="delete"]');
@@ -3702,7 +3712,7 @@ function activePane() {
     if (phoneLayout.matches)
         return mobileItemOpen ? 'content' : 'list';
     const node = document.activeElement;
-    if (fullScreenItemId || node?.closest('#detail'))
+    if (fullScreenItemId || node?.closest('.item-pane'))
         return 'content';
     if (node?.closest('#items'))
         return 'list';
@@ -3712,7 +3722,7 @@ document.addEventListener('focusin', event => {
     const node = event.target;
     if (phoneLayout.matches && !node.closest('#app-sidebar,#mobile-menu,dialog') && document.querySelector('#app-sidebar.mobile-expanded'))
         showMobileMenu(false);
-    if (node.closest('#detail'))
+    if (node.closest('.item-pane'))
         lastPane = 'content';
     else if (node.closest('#items,#main'))
         lastPane = 'list';
