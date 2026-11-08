@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {helpEntries,searchHelp} from '../public/help.js';
+import {contextualHelp,helpEntries,searchHelp} from '../public/help.js';
 import {commandRegistry,creationTypes,resolveCommand} from '../public/commands.js';
 const keys={down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U'};
 test('help follows current bindings including help and Sheets movement',()=>{
@@ -29,4 +29,34 @@ test('search covers every column, ignores case and whitespace, and requires ever
  assert.equal(searchHelp(rows,'  ').length,rows.length);
  assert.equal(searchHelp(rows,'no-such-shortcut').length,0);
  assert.equal(searchHelp(rows,'warnings spreadsheet').length,0);
+});
+test('contextual help matches the active pane and selected item capabilities',()=>{
+ const rows=helpEntries({...keys,move:'M'});
+ const base={app:'mail',pane:'list',mobile:false};
+ const visible=context=>new Set(contextualHelp(rows,{...base,...context}).map(row=>row.action));
+ const item={draft:false,unsaved:false,readOnly:true,complete:false,deletable:true,reply:true,move:true};
+ const inbox=visible({});
+ assert.ok(inbox.has('Undo last mail deletion'));
+ assert.ok(inbox.has('Next / previous item'));
+ assert.ok(!inbox.has('Reply to message'));
+ const reader=visible({pane:'content',item});
+ assert.ok(reader.has('Quick Move to folder'));
+ assert.ok(reader.has('Reply to message'));
+ assert.ok(reader.has('Scroll message; page down / up; top / bottom'));
+ assert.ok(!reader.has('Save changes'));
+ assert.ok(!reader.has('Next / previous item'));
+ assert.ok(!visible({item:{...item,move:false}}).has('Quick Move to folder'));
+ assert.equal(contextualHelp(rows,{...base,item}).find(row=>row.action==='Quick Move to folder').shortcut,'M');
+ const draft=visible({pane:'content',mobile:true,item:{...item,draft:true,readOnly:false,unsaved:true}});
+ assert.ok(draft.has('Send current message'));
+ assert.ok(draft.has('Save changes'));
+ assert.ok(!draft.has('Reply to message'));
+ assert.ok(!draft.has('Link an existing item'));
+ assert.ok(!draft.has('Toggle selected item full screen'));
+ const tasks=visible({app:'tasks',item:{...item,readOnly:false}});
+ assert.ok(tasks.has('Mark current task complete'));
+ assert.ok(!tasks.has('Undo last mail deletion'));
+ assert.ok(!visible({app:'tasks',item:{...item,readOnly:false,complete:true}}).has('Mark current task complete'));
+ assert.ok(visible({app:'settings'}).has('Focus next / previous / first / last category'));
+ assert.ok(!visible({app:'settings'}).has('Create an item / compose'));
 });

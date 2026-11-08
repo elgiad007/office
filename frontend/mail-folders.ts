@@ -220,13 +220,16 @@ export async function fileMail(env: FolderEnvironment) {
 }
 
 /** Quick Move keeps typing focus in the search box, including while navigating matches. */
+export function canQuickMoveMail(rows: OfficeRecord[]) {
+  return rows.length>0&&rows.every(r=>r.meta.remote&&!['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(r.meta.folder||''));
+}
 export async function quickMoveMail(env: FolderEnvironment) {
   const reload=env.mailDeletionReload?.();
   await env.commit();
   const {state,e}=env;
   if(state.app!=='mail')return;
   const rows=state.selected.size?state.rows.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent);
-  if(!rows.length||rows.some(r=>!r.meta.remote||['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(r.meta.folder||'')))throw Error('Select synchronized messages to move.');
+  if(!canQuickMoveMail(rows))throw Error('Select synchronized messages to move.');
   const accounts=state.accounts.filter(a=>['imap','google'].includes(a.type));
   env.modal('Move to folder',`<form id="quick-move-form"><label>Folder name<input id="quick-move-search" type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="quick-move-results" placeholder="Type a folder name…"></label><div id="quick-move-results" class="quick-move-results" role="listbox" aria-label="Matching folders"></div><p id="quick-move-status" class="muted" role="status"></p><p class="muted">↑ ↓ to choose · Enter to move · Esc to cancel</p></form>`);
   const form=env.dialog.querySelector<HTMLFormElement>('#quick-move-form')!,input=form.querySelector<HTMLInputElement>('input')!,list=form.querySelector<HTMLElement>('[role="listbox"]')!,status=form.querySelector<HTMLElement>('[role="status"]')!;

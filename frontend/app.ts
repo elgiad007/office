@@ -12,7 +12,7 @@ type MailSnapshot = Pick<OfficeRecord, 'id' | 'kind' | 'contentHash' | 'meta'>;
 import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
-import {captureFolderActions, renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
+import {captureFolderActions, renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, canQuickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
 import {renderMailRules} from './mail-rules.js';
 import {mailBody, mailDisplayControls, bindMailReader} from './mail-reader.js';
 import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
@@ -836,7 +836,7 @@ let mobileItemOpen=false;
 let mobileListPosition: {context: string; top: number; id?: string} | undefined;
 const mobileListContext=()=>JSON.stringify([state.app,state.mailFolder,state.mailScope?.account,state.mailScope?.folder,state.search]);
 const mobileListScroller=()=>document.querySelector<HTMLElement>(state.app==='calendar'?'#calendar-surface':'#items');
-const mobileBackButton=`<button type="button" class="mobile-only mobile-back mobile-icon-button" data-action="mobile-back" aria-label="Back to list" title="Back to list">${mobileIcon('back')}</button>`;
+const mobileItemControls=`<div class="mobile-item-controls"><button type="button" class="mobile-back mobile-icon-button" data-action="mobile-back" aria-label="Back to list" title="Back to list">${mobileIcon('back')}</button><button type="button" data-action="help">Help</button></div>`;
 
 function showMobileMenu(open: boolean, restoreFocus=false) {
   const trigger=document.querySelector<HTMLElement>('#mobile-menu');
@@ -938,13 +938,13 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   const previousFolderActions=captureFolderActions();
   const a=apps[state.app];
   if(state.app==='calendar'){
-    document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${mobileBackButton}<section id="calendar-surface"></section>${itemPane('Selected event',true)}</div>`;
+    document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${mobileItemControls}<section id="calendar-surface"></section>${itemPane('Selected event',true)}</div>`;
     document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;renderList();};
     calendar.render();
     if(state.current&&(!phoneLayout.matches||mobileItemOpen))calendar.ensureVisible(state.current.id);
     renderDetail();return;
   }
-  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid">${mobileBackButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app==='mail'?`<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>`:''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected '+a.singular)}</div>`;
+  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid">${mobileItemControls}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app==='mail'?`<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>`:''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected '+a.singular)}</div>`;
   panelSizing.bindList(document.querySelector<HTMLElement>('[data-resize-panel="list"]')!);
   document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;mailListLimit=100;renderList();};
   if(state.app==='tasks')bindTaskViewControls();
@@ -1767,7 +1767,43 @@ async function syncAccounts(manual=true,accountQuery?:string) {
   // Never replace an active editor with network data.
   if(state.app==='settings')refreshSettingsAccountStatus();else if(state.app!=='lists'&&!state.dirty&&!editable((document.activeElement as HTMLElement)))await load(undefined,{preserveSelection:state.app==='mail'});
 }
-function help() {openHelp(dialog,keys(),e,()=>setMode('normal'));}
+function help(button?: HTMLElement) {
+  const app=state.app,mobile=phoneLayout.matches;
+  const sidebar=(button||document.activeElement)?.closest('.sidebar');
+  const pane=sidebar?'sidebar':activePane();
+  const record=state.current?.kind===app&&(!mobile||mobileItemOpen)&&!viewingPendingSend()?state.current:null;
+  const draft=app==='mail'&&record?.meta.folder==='Drafts';
+  const unsaved=!!record&&isUnsavedDraft(),readOnly=!!record&&(!!record.meta.remote||app==='mail'&&!draft);
+  let heading: string,guidance: string;
+  if(app==='settings'){
+    heading='Settings · '+settingsPages.find(([id])=>id===settingsPage)![1];
+    guidance=mobile?'Tap Settings categories to switch sections.':'Choose a category, then use Tab to move through its controls.';
+    if(settingsPage==='keyboard')guidance+=' Change and save your single-key bindings here.';
+  }else{
+    const {name,singular,hint}=apps[app];
+    heading=record?name+' · '+(draft?'Draft':singular[0].toUpperCase()+singular.slice(1)):name;
+    guidance=hint;
+    if(app==='mail'&&!record)guidance=mobile?'Tap Folders to choose a mailbox, or tap a message to open it.':'Choose a folder from the sidebar and select a message to read it.';
+    if(record){
+      if(draft&&!readOnly)guidance='Save the draft to keep working on it later. Use Send message when it’s ready.';
+      else if(app==='mail'&&!draft)guidance='Use the message actions to reply or file the message. Open Details to view its original headers.';
+      else if(readOnly)guidance='This synced copy is read-only.';
+      else if(unsaved)guidance='Save this draft to add it to your workspace.';
+      else if(app==='sheets')guidance='Select a cell to navigate the grid or edit its value or formula.';
+      else if(app==='lists')guidance='Use the add field to create checklist entries. Select a checkbox to mark an entry done.';
+      else if(app==='wiki')guidance='Use Edit source to switch from the rendered page to its Markdown.';
+      else guidance='Open a field to edit it. Use Save to keep your changes.';
+    }
+  }
+  const item=record?{
+    draft,unsaved,readOnly,complete:!!record.meta.done,
+    deletable:app==='mail'?!protectedMail(record):!readOnly,
+    move:app==='mail'&&canQuickMoveMail(state.selected.size?state.rows.filter(row=>state.selected.has(row.id)):[record]),
+    reply:app==='mail'&&!!record.meta.from,
+  }:undefined;
+  const opener=mobile&&sidebar?document.querySelector<HTMLElement>('#mobile-menu'):button;
+  openHelp(dialog,keys(),{app,heading,guidance,pane,mobile,item},e,()=>setMode('normal'),opener);
+}
 async function history() {await requireSaved();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
 async function handleClick(event: MouseEvent) {
   const agenda=document.querySelector<HTMLDetailsElement>('#top-agenda');
@@ -1815,7 +1851,7 @@ async function handleClick(event: MouseEvent) {
     if(action==='close-mail-folders')setMailFolderPanel(false,true);
     if(action==='new')await createRecord();
     if(action==='save')await commit(true);
-    if(action==='help')help();
+    if(action==='help')help(button);
     if(action==='sync')await syncAccounts();
     if(action==='file-mail')await fileMail(mailFolderEnv());
     if(action?.startsWith('mail-junk-')&&state.current)await itemMenus.run(action.slice('mail-junk-'.length),[state.current.id],'mail');
@@ -1914,6 +1950,7 @@ async function sendMail() {
   }
   notice('Message accepted by the provider.');
 }
+const protectedMail=(r: OfficeRecord)=>r.meta.remote&&['Trash','Recovery copies','Not in Inbox'].includes(r.meta.folder||'');
 async function deleteSelectedMail() {
   if(state.app!=='mail')return;
   if(isUnsavedDraft()){document.querySelector<HTMLButtonElement>('#detail [data-action="delete"]')?.click();return;}
@@ -1921,7 +1958,6 @@ async function deleteSelectedMail() {
   const visible=filteredRows();
   const rows=state.selected.size?visible.filter(r=>state.selected.has(r.id)):[state.current].filter(isPresent).filter(r=>!isPendingSend(r.id));
   if(!rows.length)return;
-  const protectedMail=(r: OfficeRecord)=>r.meta.remote&&['Trash','Recovery copies','Not in Inbox'].includes(r.meta.folder||'');
   if(rows.some(protectedMail)){
     if(rows.length===1)throw Error(rows[0].meta.folder==='Trash'?'This email is already in Trash. Use Restore to Inbox to return it to your inbox.':'This is a recovery copy. Use Save locally to keep it or Discard copy to remove only the cached copy.');
     throw Error('The selection includes messages in Trash or recovery copies. Deselect them before deleting.');

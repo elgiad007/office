@@ -760,6 +760,16 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 dialog.help-dialog { box-sizing: border-box; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; padding: clamp(12px, 2vw, 28px); overflow: hidden; }
 dialog.help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
 .help-dialog .dialog-head { flex: none; margin: 0; }
+.help-tabs { flex: none; display: flex; gap: 8px; border-bottom: 1px solid var(--line); }
+.help-tabs button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.help-tabs [aria-selected="true"] { border-bottom: 2px solid var(--accent); font-weight: 700; }
+.help-panel:not([hidden]) { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 12px; }
+.help-context { overflow: auto; }
+.help-context :is(h3, p, dl) { margin: 0; }
+.help-context dl { max-width: 75ch; }
+.help-context dl > div { padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.help-context dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-weight: 700; }
+.help-context dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .help-tools { flex: none; display: flex; flex-wrap: wrap; align-items: end; gap: 10px 16px; }
 .help-tools p { flex-basis: 100%; margin: 0; }
 .help-tools label { flex: 1 1 240px; }
@@ -768,8 +778,7 @@ dialog.help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
 .help-table { width: 100%; border-collapse: collapse; }
 .help-table th, .help-table td { text-align: left; vertical-align: top; padding: 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .help-table th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
-.help-table kbd { white-space: normal; }
-@media (max-width: 600px) { .help-table th, .help-table td { padding: 8px; } .help-table { min-width: 680px; } }
+.help-dialog kbd { white-space: normal; overflow-wrap: anywhere; }
 /* Inset rings identify the active pane without changing its dimensions. */
 .list-pane:focus-within, .detail:focus-within, .detail:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);

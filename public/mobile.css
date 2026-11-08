@@ -1,4 +1,4 @@
-.mobile-only, .mobile-control-icon { display: none; }
+.mobile-only, .mobile-control-icon, .mobile-item-controls { display: none; }
 .item-secondary-actions { display: contents; }
 
 @media screen and (max-width: 800px),
@@ -17,7 +17,7 @@
   #view-activity { min-height: 36px; }
   :root[style*="--office-keyboard-height"] #activity-status { bottom: auto; top: calc(var(--office-keyboard-height) - var(--activity-height)); }
   .mobile-only:not([hidden]) { display: inline-flex; }
-  .mobile-menu-backdrop:not([hidden]), .mobile-back:not([hidden]), .panel-splitter { display: none; }
+  .mobile-menu-backdrop:not([hidden]), .panel-splitter { display: none; }
   .mobile-collapsible:not(.mobile-expanded) { display: none; }
   .mobile-disclosure::after { content: "▾" / ""; }
   .mobile-disclosure[aria-expanded="true"]::after { content: "▴" / ""; }
@@ -135,12 +135,32 @@
     border: 0;
     box-shadow: none;
   }
-  .shell.mobile-item-open .mobile-back:not([hidden]) {
-    display: inline-flex;
-    justify-self: start;
-    min-height: 44px;
+  .shell.mobile-item-open .mobile-item-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin: env(safe-area-inset-top) 8px 0;
   }
+  .mobile-item-controls button { min-height: 44px; }
+
+  dialog.help-dialog {
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+  dialog.help-dialog[open] { gap: 8px; }
+  .help-dialog .dialog-head { align-items: center; }
+  .help-dialog .dialog-head h2 { font-size: 18px; }
+  .help-dialog button { min-height: 44px; }
+  .help-dialog [data-close] { min-width: 44px; }
+  .help-panel { overflow: auto; }
+  .help-tools input { font-size: 16px; }
+  .help-results { flex: none; overflow: visible; }
+  .help-table, .help-table tbody { display: block; }
+  .help-table thead { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+  .help-table tbody tr { display: grid; gap: 4px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  .help-table td { border: 0; padding: 0; }
+  .help-table td:nth-child(2) { font-weight: 700; }
+  .help-table td:empty { display: none; }
 
   #main :is(.search-wrap, .list-summary) { padding: 6px 10px; }
   .search-wrap:has([data-action="mobile-folders"]) { display: flex; gap: 6px; flex-wrap: wrap; }

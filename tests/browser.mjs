@@ -65,6 +65,13 @@ try{
  await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
  await page.getByRole('button',{name:'New task',exact:true}).click();await page.getByRole('textbox',{name:'Title',exact:true}).fill('Second task');await page.keyboard.press('Escape');await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
  await page.locator('#main').focus();await page.keyboard.press('g');await page.keyboard.press('g');assert.equal(await page.locator('.item.selected').count(),1);await page.keyboard.press('j');assert.equal(await page.locator('.item.selected').count(),1);await page.evaluate(()=>document.activeElement.setAttribute('data-help-opener',''));await page.keyboard.press('?');await page.getByRole('heading',{name:'Keyboard shortcuts and commands',exact:true}).waitFor();
+ const viewHelp=page.getByRole('tabpanel',{name:'This view'});
+ await viewHelp.getByRole('heading',{name:'Tasks · Task',exact:true}).waitFor();
+ assert.equal(await viewHelp.getByText('Mark current task complete').isVisible(),true);
+ assert.equal(await viewHelp.getByText('Reply to message').count(),0);
+ await page.keyboard.press('ArrowRight');
+ assert.equal(await page.getByRole('tab',{name:'All help',selected:true}).evaluate(el=>el===document.activeElement),true);
+ await page.keyboard.press('Tab');
  assert.equal(await page.locator('[data-help-search]').evaluate(el=>el===document.activeElement),true);
  await page.locator('[data-help-search]').fill(':warnings');assert.equal(await page.locator('.help-table tbody tr').count(),1);
  await page.locator('[data-help-search]').fill('no-such-shortcut');assert.equal(await page.locator('[data-help-empty]').isVisible(),true);

@@ -72,6 +72,9 @@ export async function testMobileLayout(browser, url) {
     for(const name of ['Menu','Compose','More','Folders'])await iconButton(name);
     const shortcuts=button('Keyboard shortcuts');
     const shortcutsHeading=page.getByRole('heading',{name:'Keyboard shortcuts and commands',exact:true});
+    const viewHelp=page.getByRole('tabpanel',{name:'This view'});
+    const allHelp=page.getByRole('tabpanel',{name:'All help'});
+    const closeHelp=()=>button('Close help').tap();
     for(const viewport of [{width:320,height:568},{width:844,height:390}]){
       await page.setViewportSize(viewport);
       const landscape=viewport.width>viewport.height;
@@ -95,7 +98,14 @@ export async function testMobileLayout(browser, url) {
         await page.keyboard.press('Enter');
       }else await shortcuts.tap();
       await shortcutsHeading.waitFor();
-      await page.keyboard.press('Escape');
+      await viewHelp.getByRole('heading',{name:'Mail',exact:true}).waitFor();
+      await page.getByRole('tab',{name:'All help'}).tap();
+      const helpBounds=await allHelp.evaluate(node=>({fits:node.scrollWidth<=node.clientWidth,scrolls:node.scrollHeight>node.clientHeight}));
+      assert.equal(helpBounds.fits,true,'Help fits without sideways scrolling');
+      assert.equal(helpBounds.scrolls,true,'Help can scroll vertically');
+      await allHelp.getByRole('searchbox').fill('Quick Move');
+      await allHelp.getByText('Quick Move to folder',{exact:true}).waitFor();
+      await closeHelp();
       await shortcutsHeading.waitFor({state:'hidden'});
     }
     await page.setViewportSize({width:390,height:844});
@@ -124,6 +134,12 @@ export async function testMobileLayout(browser, url) {
     await mail.tap();
     await detail.getByRole('heading',{name:'Phone mail 20'}).waitFor();
     assert.equal(await button('Back to list').locator('svg').isVisible(),true);
+    await button('Help').tap();
+    await viewHelp.getByRole('heading',{name:'Mail · Message',exact:true}).waitFor();
+    assert.equal(await viewHelp.getByText('Reply to message').isVisible(),true);
+    assert.equal(await viewHelp.getByText('Quick Move to folder').count(),0,'Local mail has no Quick Move shortcut');
+    await closeHelp();
+    assert.equal(await button('Help').evaluate(node=>node===document.activeElement),true);
     await page.waitForFunction(()=>document.querySelector('#items [data-id="mail-20"]')?.classList.contains('mail-read'));
     assert.deepEqual(reads,['mail-20']);
     assert.equal(await page.locator('#items').isVisible(),false);
@@ -136,6 +152,11 @@ export async function testMobileLayout(browser, url) {
     await iconButton('Add files');
     await page.getByRole('textbox',{name:'Title',exact:true}).fill('Mobile draft');
     await detail.getByLabel('Message',{exact:true}).fill('Unsaved content');
+    await button('Help').tap();
+    await viewHelp.getByRole('heading',{name:'Mail · Draft',exact:true}).waitFor();
+    assert.equal(await viewHelp.getByText('Send current message').isVisible(),true);
+    assert.equal(await viewHelp.getByText('Reply to message').count(),0);
+    await closeHelp();
     await page.setViewportSize({width:390,height:410});
     const sendBounds=await button('Send message').boundingBox();
     assert.ok(sendBounds.y>=0&&sendBounds.y+sendBounds.height<=410,'Send remains reachable when the keyboard reduces the viewport');
@@ -219,7 +240,7 @@ export async function testMobileLayout(browser, url) {
         assert.ok(await fit(),'Long lists fit the phone width');
       }
       await back();
-      assert.equal(await detail.isVisible(),false);
+      await detail.waitFor({state:'hidden'});
     }
 
     await go('Tasks');
@@ -237,6 +258,10 @@ export async function testMobileLayout(browser, url) {
     await page.getByRole('button',{name:/Settings categories/}).tap();
     await button('Accounts settings').tap();
     await iconButton('Add account');
+    await button('Menu').tap();
+    await shortcuts.tap();
+    await viewHelp.getByRole('heading',{name:'Settings · Accounts',exact:true}).waitFor();
+    await closeHelp();
     for(const viewport of [{width:320,height:568},{width:844,height:390},{width:768,height:1024}]){
       await page.setViewportSize(viewport);
       await button('Menu').waitFor();
@@ -267,6 +292,19 @@ export async function testMobileLayout(browser, url) {
     assert.equal(await desktopDelete.locator('svg').isVisible(),false);
     await page.locator('#selected-item').focus();
     await page.keyboard.press('l');
+    assert.equal(await detail.evaluate(node=>node===document.activeElement),true);
+    await page.keyboard.press('?');
+    await viewHelp.getByRole('heading',{name:'Tasks · Task',exact:true}).waitFor();
+    assert.equal(await viewHelp.getByText('Mark current task complete').isVisible(),true);
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.getByRole('tab',{name:'All help',selected:true}).evaluate(node=>node===document.activeElement),true);
+    await page.keyboard.press('Tab');
+    const helpSearch=allHelp.getByRole('searchbox');
+    assert.equal(await helpSearch.evaluate(node=>node===document.activeElement),true);
+    await helpSearch.fill(':warnings');
+    assert.equal(await allHelp.getByRole('row').count(),2,'Search shows the header and the matching command');
+    await page.keyboard.press('Escape');
+    await shortcutsHeading.waitFor({state:'hidden'});
     assert.equal(await detail.evaluate(node=>node===document.activeElement),true);
     assert.deepEqual(errors,[]);
     console.log('PASS touch navigation, mail list return, drafts, all item editors, and phone/tablet layouts.');
