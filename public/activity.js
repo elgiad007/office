@@ -1,14 +1,16 @@
 // Generated from frontend/activity.ts by pnpm build. Do not edit.
-import { isPresent } from './utils.js';
+import { asError, isPresent } from './utils.js';
 import { escapeHtml as e } from './formats.js';
 import { timestampLabel, timestampText } from './time-labels.js';
-export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }) }) {
+export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), openItem }) {
     const bar = document.querySelector('#activity-status'), status = document.querySelector('#notice'), button = document.querySelector('#view-activity'), dialog = document.querySelector('#activity-dialog');
     let enabled = false, entries = [], cursor = 0, polling = false, generation = 0, lastMessage = 'Ready.', lastError = false, sequence = 0;
     const tasks = new Map();
     let idle = true, localErrorHeld = false, commandErrorHeld = false, idleTimer;
     let selectedId, keySequence = '', sequenceTime = 0;
     function selectEntry(id, scroll = false) {
+        if (id !== selectedId)
+            dialog.querySelector('#activity-feedback').textContent = '';
         selectedId = id;
         const list = dialog.querySelector('#activity-entries');
         list.querySelectorAll('[data-entry-id]').forEach(row => row.setAttribute('aria-selected', String(Number(row.dataset.entryId) === id)));
@@ -50,14 +52,23 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }) }) 
         const level = dialog.querySelector('#activity-level')?.value || '', account = dialog.querySelector('#activity-account')?.value || '';
         return entries.filter(entry => (!level || entry.level === level) && (!account || entry.account === account));
     }
+    function runTargets() {
+        // Completion can supply a newly created or replacement ID for earlier events.
+        const targets = new Map();
+        for (const entry of entries)
+            if (entry.run && entry.record_id)
+                targets.set(entry.run, entry.record_id);
+        return targets;
+    }
     function renderEntries() {
         if (!dialog.open)
             return;
         const select = dialog.querySelector('#activity-account'), selected = select.value;
         select.innerHTML = '<option value="">All accounts</option>' + [...new Set(entries.map(entry => entry.account).filter(isPresent))].sort().map(account => `<option ${account === selected ? 'selected' : ''}>${e(account)}</option>`).join('');
         const rows = filtered().slice().reverse();
+        const targets = runTargets();
         const list = dialog.querySelector('#activity-entries'), scrollTop = list.scrollTop;
-        list.innerHTML = rows.length ? rows.map(entry => `<li id="activity-entry-${entry.id}" data-entry-id="${entry.id}" role="option" data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${timestampLabel(entry.time, new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account ? ' · ' + e(entry.account) : ''}${entry.duration_ms !== null ? ' · ' + e(entry.duration_ms) + ' ms' : ''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join('') : '<li role="presentation">No recent activity matches these filters.</li>';
+        list.innerHTML = rows.length ? rows.map(entry => `<li id="activity-entry-${entry.id}" data-entry-id="${entry.id}" role="option" data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${timestampLabel(entry.time, new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account ? ' · ' + e(entry.account) : ''}${entry.duration_ms !== null ? ' · ' + e(entry.duration_ms) + ' ms' : ''}${openItem && (entry.record_id || targets.has(entry.run || '')) ? ' · Enter to open item' : ''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join('') : '<li role="presentation">No recent activity matches these filters.</li>';
         list.scrollTop = scrollTop;
         selectEntry(rows.some(entry => entry.id === selectedId) ? selectedId : rows[0]?.id, document.activeElement === list);
         dialog.querySelector('#activity-count').textContent = `${rows.length} of ${entries.length} recent entries · latest 500 retained`;
@@ -125,6 +136,7 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }) }) 
         }
         selectedId = undefined;
         keySequence = '';
+        dialog.returnValue = '';
         dialog.innerHTML = `<div class="dialog-head"><h2 id="activity-title">Recent activity</h2><button type="button" id="activity-close" aria-label="Close activity">✕</button></div>
       <p>Connection progress and recent Office activity. Passwords, tokens, mail contents and raw commands are excluded.</p>
       <div class="activity-tools"><label>Level<select id="activity-level" aria-label="Level"><option value="">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="success">Success</option><option value="info">Information</option></select></label><label>Account<select id="activity-account" aria-label="Account"><option value="">All accounts</option></select></label><button type="button" id="activity-copy">Copy visible log</button><button type="button" id="activity-clear">Clear log</button></div>
@@ -134,6 +146,8 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }) }) 
         dialog.querySelector('#activity-close').onclick = () => dialog.close();
         dialog.querySelectorAll('select').forEach(select => select.onchange = renderEntries);
         const list = dialog.querySelector('#activity-entries');
+        const feedback = dialog.querySelector('#activity-feedback');
+        let openingItem = false;
         list.onclick = event => {
             const row = event.target.closest('[data-entry-id]');
             if (row) {
@@ -162,6 +176,28 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }) }) 
                 return;
             }
             keySequence = '';
+            if (key === 'Enter') {
+                event.preventDefault();
+                const entry = rows.find(row => row.id === selectedId);
+                if (!openItem || !entry || openingItem || event.repeat)
+                    return;
+                const recordId = runTargets().get(entry.run || '') || entry.record_id;
+                if (!recordId)
+                    return;
+                const isCurrent = () => dialog.open && list.isConnected && selectedId === entry.id;
+                openingItem = true;
+                feedback.textContent = 'Opening related item…';
+                void openItem(recordId, () => {
+                    if (!isCurrent())
+                        return false;
+                    dialog.close('open-item');
+                    return true;
+                }).catch(cause => {
+                    if (isCurrent())
+                        feedback.textContent = asError(cause).status === 404 ? 'This item is no longer available.' : 'The related item could not be opened. Try again.';
+                }).finally(() => { openingItem = false; });
+                return;
+            }
             const direction = ['ArrowUp', 'ArrowLeft'].includes(key) ? -1 : ['ArrowDown', 'ArrowRight'].includes(key) ? 1 :
                 key === bindings.down ? 1 : key === bindings.up ? -1 : key === 'n' ? 1 : key === 'N' ? -1 : 0;
             if (!direction && key !== 'G' && key !== 'Home' && key !== 'End')
@@ -208,7 +244,8 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }) }) 
         void poll();
     }
     button.onclick = () => open();
-    dialog.addEventListener('close', () => button.focus());
+    dialog.addEventListener('close', () => { if (!dialog.open && dialog.returnValue !== 'open-item')
+        button.focus(); });
     setInterval(() => void poll(), 2000);
     renderStatus();
     return {

@@ -98,7 +98,8 @@ try {
         if($route==='mail-action'){$mail=get_record((string)($input['id']??''));$accountId=$mail['meta']['account']??null;}
         if(is_string($accountId)&&$accountId!=='')$label=account($accountId)['label'];
         $operation=$route==='mail-action'?(['trash'=>'Move to Trash','archive'=>'Archive mail','restore'=>'Restore to Inbox','read'=>'Mark mail read','unread'=>'Mark mail unread','move'=>'Move mail','discard'=>'Discard cached copy','keep-local'=>'Save local copy','label'=>'Add label','unlabel'=>'Remove label'][$input['action']??'']??'Update mail'):$activityNames[$route];
-        activity_begin($operation,$label,$route!=='backup'||($_GET['format']??'')==='json');
+        $recordId=in_array($route,['save','delete','send','mail-action'],true)?($input['id']??null):null;
+        activity_begin($operation,$label,$route!=='backup'||($_GET['format']??'')==='json',$recordId);
     }
     if ($route==='logout' && $method==='POST') { $_SESSION=[]; session_destroy(); json_response(['ok'=>true]); }
     if ($route==='mail-export' && $method==='GET') {
@@ -156,9 +157,12 @@ try {
             try{get_record($linkedTo);$record=save_record($input);connection_add($linkedTo,$record['id']);$db->commit();}
             catch(Throwable $e){if($db->inTransaction())$db->rollBack();throw $e;}
             $record['connectionCount']=(int)get_record($record['id'])['connectionCount'];
+            activity_set_record($record['id']);
             json_response(['record'=>$record,'connectionCounts'=>(object)connection_counts([$linkedTo,$record['id']])]);
         }
-        json_response(['record'=>save_record($input)]);
+        $record=save_record($input);
+        activity_set_record($record['id']);
+        json_response(['record'=>$record]);
     }
     if ($route==='import-items' && $method==='POST') {
         $items=$input['records']??null; if (!is_array($items) || count($items)>500) fail('Import up to 500 items at a time.');
@@ -394,11 +398,15 @@ try {
             }
             return $result;
         });
-        if(($input['summary']??false)===true && $result['record']!==null)$result['record']=mail_list_record($result['record']);
+        if($result['record']!==null){
+            activity_set_record($result['record']['id']);
+            if(($input['summary']??false)===true)$result['record']=mail_list_record($result['record']);
+        }
         json_response($result);
     }
     if($route==='mail-undo'&&$method==='POST'){
         session_write_close();$result=undo_mail_delete((string)($input['token']??''));
+        activity_set_record($result['record']['id']);
         $result['record']=mail_list_record($result['record']);json_response($result);
     }
     fail('Route not found.',404);

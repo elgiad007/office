@@ -134,7 +134,7 @@ function rememberSelection() {
   if(state.current)lastSelectedItems.set(state.app,state.current.id);
 }
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
-const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys()});
+const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys(),openItem:openActivityRecord});
 const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
 const connections=createConnections({api,icon,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
@@ -728,7 +728,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   }
   return snapshot;
 }
-async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,keepSidebar=false,entryVersion}: {selectFirst?: boolean;preserveSelection?: boolean;enteringApp?: boolean;revealMail?: boolean;keepSidebar?: boolean;entryVersion?: number}={},initialRecords?: RecordList) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,revealTask=false,keepSidebar=false,entryVersion}: {selectFirst?: boolean;preserveSelection?: boolean;enteringApp?: boolean;revealMail?: boolean;revealTask?: boolean;keepSidebar?: boolean;entryVersion?: number}={},initialRecords?: RecordList) {
   clearTimeout(mailQueryTimer);
   const requestVersion=++listLoadVersion,queryContext=mailQueryContext();
   const versionAtStart=appEntryVersion;
@@ -804,7 +804,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
     const rows=navigableRows();
     state.current=rows.find(r=>r.id===(preferId||lastSelectedItems.get(app)))||rows[0]||null;
   }
-  if(state.app==='tasks'&&(!state.current||!filteredRows().some(r=>r.id===state.current?.id)))state.current=selectFirst?navigableRows()[0]||null:null;
+  if(state.app==='tasks'&&(!state.current||(!revealTask&&!filteredRows().some(r=>r.id===state.current?.id))))state.current=selectFirst?navigableRows()[0]||null:null;
   if(preserveSelection){
     const rows=filteredRows(),visible=new Set(rows.map(r=>r.id));
     for(const id of state.selected)if(!visible.has(id))state.selected.delete(id);
@@ -1317,10 +1317,19 @@ async function commit(explicit=false): Promise<void> {
   if(firstSave)renderDetail(undefined,true);
   if(firstSave)void connections.section();
 }
-async function openConnectedRecord(id:string){
+async function openActivityRecord(id: string,dismiss: () => boolean) {
+  const record=(await api(`record&id=${encodeURIComponent(id)}`)).record;
+  if(!dismiss())return;
+  try{await openConnectedRecord(id,record);}
+  catch(cause){
+    if(cause instanceof DraftCancelled)document.querySelector<HTMLElement>('#view-activity')!.focus();
+    else activity.notice(asError(cause).message,true,{log:false});
+  }
+}
+async function openConnectedRecord(id:string,activityRecord?: OfficeRecord){
   await waitForAttachments();await leaveEditor();
   const version=appEntryVersion;
-  const record=(await api(`record&id=${encodeURIComponent(id)}`)).record;
+  const record=activityRecord??(await api(`record&id=${encodeURIComponent(id)}`)).record;
   if(version!==appEntryVersion)return;
   if(!apps[record.kind])throw new CommandError('This item type is not available in this version.');
   rememberSelection();
@@ -1333,13 +1342,16 @@ async function openConnectedRecord(id:string){
     state.mailFolder=record.meta.folder==='Not in Inbox'?'Recovery copies':record.meta.folder==='Custom folder'?'all':record.meta.folder||'Archive';
   }
   const opened=await showAppEntry(record.kind,async entryVersion=>{
-    await load(record.id,{selectFirst:record.kind!=='mail',revealMail:record.kind==='mail',entryVersion});
+    await load(record.id,{selectFirst:!activityRecord&&record.kind!=='mail',revealMail:record.kind==='mail',revealTask:!!activityRecord,entryVersion});
     if(entryVersion!==appEntryVersion)return;
     if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
-    if(record.kind==='lists'||phoneLayout.matches&&mobileItemOpen)focusContent();else focusList();
+    if(record.kind==='lists'||phoneLayout.matches&&mobileItemOpen||(activityRecord&&record.kind==='tasks'&&!document.querySelector('#selected-item')))focusContent();else focusList();
     document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
   });
-  if(opened&&record.kind==='mail'&&(state.current as OfficeRecord|null)?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
+  if(opened&&(state.current as OfficeRecord|null)?.id!==record.id){
+    if(activityRecord)throw new CommandError('This item is no longer available.');
+    if(record.kind==='mail')throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
+  }
 }
 async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope,settingsDestination?: typeof settingsPages[number][0]) {
   await waitForAttachments();await leaveEditor();rememberSelection();

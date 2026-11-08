@@ -103,6 +103,7 @@ export interface AppState {
 export interface ActivityEntry {
   id: number; time: string; level: string; account: string;
   operation: string; message: string; duration_ms: number | null; phase: string;
+  run?: string; record_id?: string | null;
 }
 export interface ConnectionCheck { label: string; status: string; message: string }
 export interface CheckResult { status: string; checks: ConnectionCheck[] }

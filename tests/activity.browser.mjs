@@ -2,11 +2,25 @@ import assert from 'node:assert/strict';
 
 export async function testActivityKeyboard(page,url) {
   let preferences={},entries=Array.from({length:40},(_,index)=>({id:index+1,time:new Date().toISOString(),level:index%2?'info':'warning',account:'Fixture',operation:'Keyboard fixture',message:'Event '+(index+1),duration_ms:null,phase:'diagnostic'}));
+  const records=[
+    {id:'completed-task',kind:'tasks',title:'Completed fixture task',body:'Task opened from activity.',meta:{done:true},revision:1,updated:new Date().toISOString()},
+    {id:'filed-mail',kind:'mail',title:'Filed fixture message',body:'Mail opened from activity.',meta:{folder:'Archive',read:true},revision:1,updated:new Date().toISOString()},
+  ];
+  entries[39].record_id='deleted-item';
+  entries[38].record_id=records[0].id;
+  Object.assign(entries[36],{run:'move-mail',phase:'start',record_id:'previous-mail-id'});
+  Object.assign(entries[37],{run:'move-mail',phase:'complete',record_id:records[1].id});
+  const lookups=[];
   const routes=target=>target.pathname.endsWith('/api.php');
   await page.route(routes,route=>{
-    const action=new URL(route.request().url()).searchParams.get('r');
+    const params=new URL(route.request().url()).searchParams,action=params.get('r');
     if(action==='status')return route.fulfill({json:{authenticated:true,activity:true,csrf:'fixture',preferences}});
-    if(action==='records')return route.fulfill({json:{records:[]}});
+    if(action==='records')return route.fulfill({json:{records:records.filter(record=>record.kind===params.get('kind'))}});
+    if(action==='record'){
+      const id=params.get('id'),record=records.find(record=>record.id===id);lookups.push(id);
+      return record?route.fulfill({json:{record}}):route.fulfill({status:404,json:{error:'Item not found.'}});
+    }
+    if(action==='connections')return route.fulfill({json:{links:[],items:[]}});
     if(action==='accounts')return route.fulfill({json:{accounts:[]}});
     if(action==='activity'){
       if(route.request().method()==='POST'){entries=[];return route.fulfill({json:{ok:true}});}
@@ -44,13 +58,34 @@ export async function testActivityKeyboard(page,url) {
     await page.reload();await page.getByRole('button',{name:/View activity \(/}).click();
     await expectSelected(41);await page.keyboard.press('z');await expectSelected(40);await page.keyboard.press('q');await expectSelected(41);
     await page.keyboard.press('j');await expectSelected(41);
+    const modal=page.locator('#activity-dialog');
+    await page.keyboard.press('Enter');await expectSelected(41);
+    await page.keyboard.press('z');
+    assert.match(await selected.textContent(),/Enter to open item/);
+    await page.keyboard.press('Enter');
+    await modal.getByText('This item is no longer available.',{exact:true}).waitFor();
+    await expectSelected(40);assert.equal(await focused(),true);
+    await page.keyboard.press('z');await expectSelected(39);await page.keyboard.press('Enter');
+    await modal.waitFor({state:'hidden'});
+    await page.waitForURL(/#tasks$/);
+    await page.locator('#detail').getByText('Completed fixture task',{exact:true}).waitFor({state:'attached'});
+    assert.equal(await page.locator('#detail').evaluate(node=>node.contains(document.activeElement)||node===document.activeElement),true);
+    await page.getByRole('button',{name:/View activity/}).click();
+    for(let i=0;i<4;i++)await page.keyboard.press('z');
+    await expectSelected(37);await page.keyboard.press('Enter');
+    await modal.waitFor({state:'hidden'});
+    await page.locator('#detail').getByRole('heading',{name:'Filed fixture message'}).waitFor();
+    assert.equal(await page.locator('#selected-item').getAttribute('data-id'),'filed-mail');
+    assert.equal(await page.locator('#selected-item').evaluate(node=>node===document.activeElement),true);
+    assert.deepEqual(lookups,['deleted-item','completed-task','filed-mail']);
+    await page.getByRole('button',{name:/View activity/}).click();
     await page.getByRole('button',{name:'Clear log',exact:true}).click();
     await list.getByText('No recent activity matches these filters.',{exact:true}).waitFor();
     await list.focus();await page.keyboard.press('j');await page.keyboard.press('G');
     assert.equal(await list.getAttribute('aria-activedescendant'),null);
     await page.keyboard.press('Escape');await page.getByRole('button',{name:'View activity',exact:true}).click();assert.equal(await focused(),true);
     await page.keyboard.press('Escape');
-    console.log('PASS activity initial focus, arrows, bindings, n/N, gg/G, scrolling, polling, filters, Tab, Escape and empty log.');
+    console.log('PASS activity keyboard selection, filters, focus, Enter navigation and unavailable items.');
   } finally {await page.unroute(routes);}
 }
 

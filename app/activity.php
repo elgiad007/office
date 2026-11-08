@@ -6,36 +6,46 @@ declare(strict_types=1);
 function activity_db(): PDO {
     static $db;
     if ($db) return $db;
-    $db=new PDO('sqlite:'.data_dir().'/activity.sqlite',null,null,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
-    $db->exec('PRAGMA busy_timeout=1000; CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, level TEXT NOT NULL, account TEXT NOT NULL, operation TEXT NOT NULL, message TEXT NOT NULL, duration_ms INTEGER, run TEXT NOT NULL, phase TEXT NOT NULL)');
+    $store=new PDO('sqlite:'.data_dir().'/activity.sqlite',null,null,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
+    $store->exec('PRAGMA busy_timeout=1000; CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, level TEXT NOT NULL, account TEXT NOT NULL, operation TEXT NOT NULL, message TEXT NOT NULL, duration_ms INTEGER, run TEXT NOT NULL, phase TEXT NOT NULL, record_id TEXT)');
+    $hasRecordId=static fn()=>$store->query("SELECT 1 FROM pragma_table_info('activity') WHERE name='record_id'")->fetchColumn();
+    if(!$hasRecordId()){
+        try{$store->exec('ALTER TABLE activity ADD COLUMN record_id TEXT');}
+        catch(PDOException $error){if(!$hasRecordId())throw $error;}
+    }
     @chmod(data_dir().'/activity.sqlite',0600);
-    return $db;
+    return $db=$store;
 }
 function activity_event(string $message,string $level='info',string $phase='progress',?int $duration=null): void {
     $context=$GLOBALS['office_activity']??[];
     try {
         $db=activity_db();$db->beginTransaction();
-        $db->prepare('INSERT INTO activity(time,level,account,operation,message,duration_ms,run,phase) VALUES(?,?,?,?,?,?,?,?)')->execute([
-            gmdate('Y-m-d\TH:i:s\Z'),$level,substr($context['account']??'',0,200),$context['operation']??'Office',
-            substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000),$duration,$context['run']??'', $phase]);
+        $entry=['time'=>gmdate('Y-m-d\TH:i:s\Z'),'level'=>$level,'account'=>substr($context['account']??'',0,200),
+            'operation'=>$context['operation']??'Office','message'=>substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000),
+            'duration_ms'=>$duration,'run'=>$context['run']??'','phase'=>$phase,'record_id'=>$context['record_id']??null];
+        $db->prepare('INSERT INTO activity(time,level,account,operation,message,duration_ms,run,phase,record_id) VALUES(?,?,?,?,?,?,?,?,?)')->execute(array_values($entry));
         $id=(int)$db->lastInsertId();
         // Prune once per group and at operation boundaries, rather than on every
         // transport event. Readers still expose exactly the newest 500 entries.
         if($id%50===0 || in_array($phase,['complete','error'],true))$db->exec('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT 500)');
         $db->commit();
         if(!empty($GLOBALS['office_activity_stream'])) {
-            echo json_encode(['type'=>'activity','entry'=>['id'=>$id,'time'=>gmdate('Y-m-d\TH:i:s\Z'),'level'=>$level,'account'=>$context['account']??'','operation'=>$context['operation']??'Office','message'=>substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000),'duration_ms'=>$duration,'run'=>$context['run']??'','phase'=>$phase]],JSON_INVALID_UTF8_SUBSTITUTE)."\n";
+            echo json_encode(['type'=>'activity','entry'=>['id'=>$id]+$entry],JSON_INVALID_UTF8_SUBSTITUTE)."\n";
             if(ob_get_level())@ob_flush();flush();
         }
     } catch (Throwable) { if(isset($db)&&$db->inTransaction())$db->rollBack(); /* Logging must not interrupt mail. */ }
 }
-function activity_begin(string $operation,string $account='',bool $stream=true): void {
+function activity_begin(string $operation,string $account='',bool $stream=true,mixed $recordId=null): void {
     if($stream && ($_SERVER['HTTP_X_OFFICE_PROGRESS']??'')==='1' && !headers_sent()) {
         $GLOBALS['office_activity_stream']=true;@ini_set('zlib.output_compression','0');
         header('Content-Type: application/x-ndjson');header('X-Accel-Buffering: no');
     }
     $GLOBALS['office_activity']=['operation'=>$operation,'account'=>$account,'run'=>bin2hex(random_bytes(8)),'started'=>microtime(true)];
+    if(is_string($recordId)&&preg_match('/^[a-zA-Z0-9_-]{1,100}$/D',$recordId))activity_set_record($recordId);
     activity_event('Started: '.$operation,'info','start');
+}
+function activity_set_record(string $recordId): void {
+    if(isset($GLOBALS['office_activity']))$GLOBALS['office_activity']['record_id']=$recordId;
 }
 function activity_step(string $message,string $level='info',?int $duration=null): void {
     if(isset($GLOBALS['office_activity']))activity_event($message,$level,'progress',$duration);

@@ -3,6 +3,19 @@ declare(strict_types=1);
 $testDir=sys_get_temp_dir().'/office-activity-'.bin2hex(random_bytes(8));putenv('OFFICE_DATA_DIR='.$testDir);
 require __DIR__.'/imap.php';
 try {
+    $legacy=new PDO('sqlite:'.data_dir().'/activity.sqlite');
+    $legacy->exec("CREATE TABLE activity (id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT NOT NULL, level TEXT NOT NULL, account TEXT NOT NULL, operation TEXT NOT NULL, message TEXT NOT NULL, duration_ms INTEGER, run TEXT NOT NULL, phase TEXT NOT NULL);
+        INSERT INTO activity VALUES (1,'2026-11-01T00:00:00Z','info','','Office','Legacy entry',NULL,'','notice')");
+    $legacy=null;
+    $entries=activity_rows();
+    check(count($entries)===1 && $entries[0]['message']==='Legacy entry' && $entries[0]['record_id']===null,'activity migration preserves older entries');
+    activity_begin('Move mail','Fixture account',false,'source-id');
+    activity_set_record('destination-id');
+    activity_finish(true);
+    $entries=activity_rows(1);
+    check(array_column($entries,'record_id')===['source-id','destination-id'],'activity records the source and the resulting item ID');
+    activity_db()->exec('DELETE FROM activity');
+
     activity_begin('Test connection','Fixture account');
     fixture([['LOGIN "private-user" "secret-password"',"{tag} OK private-server-text\r\n"]],fn($s)=>imap_command($s,'LOGIN "private-user" "secret-password"'));
     activity_finish(true);$entries=activity_rows();$json=json_encode($entries);
