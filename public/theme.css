@@ -211,11 +211,14 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 6px;
+  filter: drop-shadow(0 6px 10px #0006);
 }
 #swipe-undo[hidden] { display: none; }
-.swipe-undo-action { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 12px; padding: 6px 8px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.swipe-undo-action { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: 12px; padding: 6px 8px 6px 12px; border: 2px solid var(--accent); border-radius: 8px; background: var(--text); color: var(--surface); }
 .swipe-undo-action span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.swipe-undo-action button { min-height: 44px; touch-action: manipulation; }
+.swipe-undo-action button { min-height: 44px; touch-action: manipulation; border-color: transparent; background: var(--accent); color: var(--surface); font-weight: 700; }
+.swipe-undo-action button:hover { background: color-mix(in srgb, var(--accent) 90%, var(--text)); }
+.swipe-undo-action button:focus-visible { outline: 2px solid var(--surface); outline-offset: 2px; }
 @media print { #swipe-undo { display: none; } }
 .checklist-add { display:flex; align-items:center; gap:8px; }
 .checklist-title label, .checklist-add input { flex:1; min-width:0; }
