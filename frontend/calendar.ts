@@ -87,5 +87,11 @@ export function createCalendar(env:Environment) {
   }
   function ensureVisible(id:string,reveal=false) {if(reveal){const item=env.allRows().find(r=>r.id===id);if(item)hidden.delete(item.meta.account||'local');}const row=env.rows().find(r=>r.id===id);if(!row)return;if(!isVisible(row))return;if(!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)){const bounds=eventBounds(row);if(bounds){anchor=calendarDate(dayKey(bounds.start));chosenView='day';}else chosenView='agenda';render();}}
   function isVisible(record:OfficeRecord){return !hidden.has(record.meta.account||'local');}
-  return {render,ensureVisible,isVisible};
+  const position=()=>({anchor,chosenView,hidden:[...hidden],compactSourcesOpen});
+  function restorePosition(view: ReturnType<typeof position>) {
+    ({anchor,chosenView,compactSourcesOpen}=view);
+    hidden.clear();
+    view.hidden.forEach(source=>hidden.add(source));
+  }
+  return {render,ensureVisible,isVisible,position,restorePosition};
 }

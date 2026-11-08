@@ -451,6 +451,8 @@ async function boot() {
   setItemFullScreen(false);
   mobileItemOpen=false;
   mobileListPosition=undefined;
+  navigationHistory.length=0;
+  mobileBackId=undefined;
   appEntryVersion++;
   backupRequest?.abort();
   backupRequest=undefined;
@@ -736,7 +738,7 @@ function captureMailReader(): MailReaderSnapshot | undefined {
   }
   return snapshot;
 }
-async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,revealTask=false,keepSidebar=false,entryVersion}: {selectFirst?: boolean;preserveSelection?: boolean;enteringApp?: boolean;revealMail?: boolean;revealTask?: boolean;keepSidebar?: boolean;entryVersion?: number}={},initialRecords?: RecordList) {
+async function load(preferId?: string,{selectFirst=true,preserveSelection=false,enteringApp=false,revealMail=false,revealTask=false,keepSidebar=false,entryVersion,navigation}: {selectFirst?: boolean;preserveSelection?: boolean;enteringApp?: boolean;revealMail?: boolean;revealTask?: boolean;keepSidebar?: boolean;entryVersion?: number;navigation?: NavigationView}={},initialRecords?: RecordList) {
   clearTimeout(mailQueryTimer);
   const requestVersion=++listLoadVersion,queryContext=mailQueryContext();
   const versionAtStart=appEntryVersion;
@@ -769,7 +771,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   }
   // Retry snapshots taken across a deletion, rollback or read update.
   const app=state.app;let result: RecordList,version;
-  const route=recordsRoute(!!preferId&&!initialRecords);
+  const route=recordsRoute(!!preferId&&!initialRecords&&!navigation);
   do{version=mailDeleteVersion+mailReadVersion;result=initialRecords??await api(route);initialRecords=undefined;if(state.app!==app||versionAtStart!==appEntryVersion||requestVersion!==listLoadVersion||(app==='mail'&&queryContext!==mailQueryContext()))return;}while(app==='mail'&&version!==mailDeleteVersion+mailReadVersion);
   if(isUnsavedDraft() || (preserveSelection && state.dirty))return;
   if(preserveSelection&&selectionContext!==JSON.stringify([state.app,state.mailFolder,state.mailScope,state.search]))return;
@@ -783,7 +785,10 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   if (state.app==='calendar') state.rows.sort((a,b)=>(a.meta.start||'').localeCompare(b.meta.start||''));
   const previousId=state.current?.id;
   state.current=state.rows.find(r=>r.id===(preferId||previousId))||null;
-  if(state.app==='wiki'&&(enteringApp||state.current?.id!==previousId))state.wikiEditing=false;
+  if(state.app==='wiki') {
+    if(navigation)state.wikiEditing=navigation.wikiEditing;
+    else if(enteringApp||state.current?.id!==previousId)state.wikiEditing=false;
+  }
   if(state.app==='mail'&&revealMail&&state.current){
     // Use the freshly loaded location: a connection's earlier record can move during navigation.
     const record=state.current;
@@ -825,7 +830,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   }
   const reuseWorkspace=preserveSelection&&state.app==='mail'&&!!readerSnapshot&&!!document.querySelector('#detail.mail-reader');
   const restoreSidebar=captureSidebarFocus();
-  if(reuseWorkspace){document.querySelector('#mail-folder-navigation .account-folders')?.remove();renderMailFolders(mailFolderEnv());renderList();renderDetail(readerSnapshot);}else renderWorkspace(readerSnapshot);
+  if(reuseWorkspace){document.querySelector('#mail-folder-navigation .account-folders')?.remove();renderMailFolders(mailFolderEnv());renderList();renderDetail(readerSnapshot);}else renderWorkspace(navigation?.mailReader??readerSnapshot,!!navigation);
   restoreSidebar();
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
   restoreMailListViewport(listViewport);
@@ -845,6 +850,93 @@ const mobileListContext=()=>JSON.stringify([state.app,state.mailFolder,state.mai
 const mobileListScroller=()=>document.querySelector<HTMLElement>(state.app==='calendar'?'#calendar-surface':'#items');
 const mobileItemControls=`<div class="mobile-item-controls"><button type="button" class="mobile-back mobile-icon-button" data-action="mobile-back" aria-label="Back to list" title="Back to list">${mobileIcon('back')}</button><button type="button" data-action="help">Help</button></div>`;
 
+const navigationScrollers=['#main','#calendar-surface','#items','.calendar-time-scroll','#detail','.sheet-wrap'] as const;
+interface NavigationView {
+  app: AppName;
+  itemId?: string;
+  pane: 'content'|'list';
+  search: string;
+  mailFolder: string;
+  mailScope: MailScope|null;
+  mailLimit: number;
+  mailViewport?: MailListViewport;
+  mailReader?: MailReaderSnapshot;
+  settingsPage: string;
+  calendar?: ReturnType<typeof calendar.position>;
+  mobileItemOpen: boolean;
+  mobileListPosition: typeof mobileListPosition;
+  mobileBackId?: number;
+  fullScreen: boolean;
+  wikiEditing: boolean;
+  sheet: number;
+  cell: string;
+  scroll: {top:number;left:number}[];
+}
+const navigationHistory: {id:number;view:NavigationView;returnToOrigin:boolean}[]=[];
+let navigationId=0;
+let mobileBackId: number|undefined;
+let navigatingBack=false;
+
+function rememberNavigation(returnToOrigin=false) {
+  if(appEntryVisible())return;
+  const view: NavigationView={
+    app:state.app,itemId:state.current?.id,pane:activePane(),search:state.search,
+    mailFolder:state.mailFolder,mailScope:state.mailScope,mailLimit:mailListLimit,
+    mailViewport:captureMailListViewport(),mailReader:captureMailReader(),
+    settingsPage,calendar:state.app==='calendar'?calendar.position():undefined,
+    mobileItemOpen:phoneLayout.matches?mobileItemOpen:activePane()==='content',
+    mobileListPosition,mobileBackId,fullScreen:!!fullScreenItemId,
+    wikiEditing:state.wikiEditing,sheet:state.sheet,cell:state.cell,
+    scroll:navigationScrollers.map(selector=>{
+      const node=document.querySelector(selector);
+      return {top:node?.scrollTop??0,left:node?.scrollLeft??0};
+    }),
+  };
+  const id=++navigationId;
+  navigationHistory.push({id,view,returnToOrigin});
+  if(navigationHistory.length>50)navigationHistory.shift();
+  return id;
+}
+
+async function navigateBack() {
+  const entry=navigationHistory.at(-1);
+  if(!entry||navigatingBack)return;
+  navigatingBack=true;
+  const version=appEntryVersion;
+  try {
+    await waitForAttachments();await leaveEditor();
+    if(version!==appEntryVersion||entry!==navigationHistory.at(-1))return;
+    navigationHistory.pop();
+    const view=entry.view;
+    rememberSelection();
+    showMobileMenu(false);
+    setDisclosure(document.querySelector('#mobile-header-more'),false);
+    state.app=view.app;state.current=null;state.search=view.search;
+    state.mailFolder=view.mailFolder;state.mailScope=view.mailScope;mailListLimit=view.mailLimit;
+    state.sheet=view.sheet;state.cell=view.cell;
+    mobileItemOpen=view.mobileItemOpen;mobileListPosition=view.mobileListPosition;mobileBackId=view.mobileBackId;
+    if(view.calendar)calendar.restorePosition(view.calendar);
+    if(view.app==='settings')selectSettingsPage(view.settingsPage);
+    setMode('normal');location.hash=view.app;
+    await showAppEntry(view.app,async entryVersion=>{
+      await load(view.itemId,{selectFirst:false,revealTask:true,entryVersion,navigation:view});
+      if(entryVersion!==appEntryVersion)return;
+      if(view.fullScreen&&!phoneLayout.matches)setItemFullScreen(true);
+      restorePane(state.current?view.pane:'list');
+      navigationScrollers.forEach((selector,index)=>{
+        const node=document.querySelector(selector);
+        if(node)node.scrollTo(view.scroll[index]);
+      });
+      if(!phoneLayout.matches||!mobileItemOpen)restoreMailListViewport(view.mailViewport);
+    });
+  } finally {navigatingBack=false;}
+}
+
+function backFromMobileItem() {
+  const entry=navigationHistory.at(-1);
+  return entry?.returnToOrigin&&entry.id===mobileBackId?navigateBack():backToMobileList();
+}
+
 function showMobileMenu(open: boolean, restoreFocus=false) {
   const trigger=document.querySelector<HTMLElement>('#mobile-menu');
   const wasOpen=trigger?.getAttribute('aria-expanded')==='true';
@@ -855,6 +947,7 @@ function showMobileMenu(open: boolean, restoreFocus=false) {
 
 function openMobileItem(id?: string) {
   if(!mobileItemOpen){
+    mobileBackId=undefined;
     const list=mobileListScroller();
     if(list)mobileListPosition={context:mobileListContext(),top:list.scrollTop,id};
   }
@@ -864,11 +957,19 @@ function openMobileItem(id?: string) {
 function applyMobilePane() {
   if(!state.current)mobileItemOpen=false;
   document.querySelector('.shell')?.classList.toggle('mobile-item-open',mobileItemOpen);
+  const back=document.querySelector<HTMLElement>('.mobile-back');
+  const entry=navigationHistory.at(-1);
+  const label=entry?.returnToOrigin&&entry.id===mobileBackId?'Back':'Back to list';
+  back?.setAttribute('aria-label',label);
+  if(back)back.title=label;
 }
 
 async function backToMobileList() {
   await waitForAttachments();
   await leaveEditor();
+  const entry=navigationHistory.at(-1);
+  if(entry&&entry.id===mobileBackId&&!entry.returnToOrigin)navigationHistory.pop();
+  mobileBackId=undefined;
   mobileItemOpen=false;
   if(state.app==='calendar')state.current=null;
   setItemFullScreen(false);
@@ -940,7 +1041,7 @@ function toggleItemFullScreen() {
   if(!editable(document.activeElement))setMode('normal');
 }
 
-function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
+function renderWorkspace(readerSnapshot?: MailReaderSnapshot,restoringNavigation=false) {
   renderAppHeader();
   const previousFolderActions=captureFolderActions();
   const a=apps[state.app];
@@ -948,7 +1049,7 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
     document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${mobileItemControls}<section id="calendar-surface"></section>${itemPane('Selected event',true)}</div>`;
     document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;renderList();};
     calendar.render();
-    if(state.current&&(!phoneLayout.matches||mobileItemOpen))calendar.ensureVisible(state.current.id);
+    if(!restoringNavigation&&state.current&&(!phoneLayout.matches||mobileItemOpen))calendar.ensureVisible(state.current.id);
     renderDetail();return;
   }
   document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid">${mobileItemControls}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app==='mail'?`<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>`:''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected '+a.singular)}</div>`;
@@ -1341,6 +1442,7 @@ async function openConnectedRecord(id:string,activityRecord?: OfficeRecord){
   if(version!==appEntryVersion)return;
   if(!apps[record.kind])throw new CommandError('This item type is not available in this version.');
   rememberSelection();
+  mobileBackId=rememberNavigation(true);
   mobileItemOpen=true;
   mobileListPosition=undefined;
   if(record.kind==='mail')clearMailCache();
@@ -1363,8 +1465,10 @@ async function openConnectedRecord(id:string,activityRecord?: OfficeRecord){
 }
 async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope,settingsDestination?: typeof settingsPages[number][0]) {
   await waitForAttachments();await leaveEditor();rememberSelection();
+  if(name!==state.app||mailScope||settingsDestination&&settingsDestination!==settingsPage||state.search||phoneLayout.matches&&mobileItemOpen)rememberNavigation();
   mobileItemOpen=false;
   mobileListPosition=undefined;
+  mobileBackId=undefined;
   showMobileMenu(false);
   setDisclosure(document.querySelector('#mobile-header-more'),false);
   if(settingsDestination)selectSettingsPage(settingsDestination);
@@ -1431,12 +1535,18 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false,openItem=false) {
+async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false,openItem: boolean|'linked'=false) {
   const pane=activePane();
   await waitForAttachments();await leaveEditor();
   const previous=state.current?.id,origin=mailDraftOrigin(false);
-  state.current=state.rows.find(r=>r.id===id)||null;
-  if(state.current&&openItem)openMobileItem(id);
+  const record=state.rows.find(r=>r.id===id)||null;
+  const backId=record&&openItem&&(previous!==id||phoneLayout.matches&&!mobileItemOpen)
+    ?rememberNavigation(openItem==='linked'):undefined;
+  state.current=record;
+  if(record&&openItem){
+    openMobileItem(id);
+    if(backId!==undefined)mobileBackId=backId;
+  }
   if(state.app==='wiki'){state.wikiEditing=false;setMode('normal');}
   if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin);
   state.sheet=0;state.cell='A1';
@@ -1480,7 +1590,9 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
   await waitForAttachments(); await leaveEditor(); const kind=state.app;
   if (!apps[kind]) return;
   const previous=state.current;
+  const backId=rememberNavigation();
   openMobileItem(previous?.id);
+  mobileBackId=backId;
   const origin=kind==='mail'?mailDraftOrigin():undefined;
   const record: ItemInput={kind:kind as ItemKind,title:initial.title||'Untitled '+apps[kind].singular,body:initial.body||'',meta:{...(kind==='mail'?{folder:'Drafts'}:{}),...initial.meta}};
   if(kind==='mail' && !record.meta.sendAccount)record.meta.sendAccount=draftAccount(previous);
@@ -1841,11 +1953,11 @@ async function handleClick(event: MouseEvent) {
     if(button.dataset.action==='mobile-disclosure'){setDisclosure(button,button.getAttribute('aria-expanded')!=='true');return;}
     if(appEntryVisible()&&button.dataset.action!=='logout')return;
     if(button.dataset.id!){await clickRecord(button.dataset.id!,event);return;}
-    if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id,false,true);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
+    if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id,false,'linked');}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet!);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action!;
-    if(action==='mobile-back'){await backToMobileList();return;}
+    if(action==='mobile-back'){await backFromMobileItem();return;}
     if(action==='mobile-folders'){
       setDisclosure(document.querySelector('#mobile-folder-toggle'),true);
       showMobileMenu(true);
@@ -2671,6 +2783,12 @@ document.addEventListener('keydown',event=>{
     event.preventDefault();
     return;
   }
+  if(keySequence==='g'&&event.key==='b'&&Date.now()-sequenceTime<=900
+    &&!event.isComposing&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!editable(target)){
+    keySequence='';event.preventDefault();
+    if(!event.repeat)void attempt(navigateBack);
+    return;
+  }
   const appJump=keySequence==='g'&&/^[1-8]$/.test(event.key);
   if(appEntryVisible()&&!['g',':'].includes(event.key)&&!appJump)return;
   if(event.key==='Escape'&&document.querySelector('.folders-open')){setMailFolderPanel(false,true);event.preventDefault();return;}
@@ -2722,7 +2840,7 @@ document.addEventListener('keydown',event=>{
   if(action==='help'){event.preventDefault();help();return;}
   if(action==='left'){
     event.preventDefault();
-    if(phoneLayout.matches){if(mobileItemOpen)void attempt(backToMobileList);else showMobileMenu(true);}
+    if(phoneLayout.matches){if(mobileItemOpen)void attempt(backFromMobileItem);else showMobileMenu(true);}
     else if(state.app!=='settings'&&activePane()==='content')focusList();else focusSidebar();
     return;
   }

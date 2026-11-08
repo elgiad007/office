@@ -133,5 +133,11 @@ export function createCalendar(env) {
         render();
     } }
     function isVisible(record) { return !hidden.has(record.meta.account || 'local'); }
-    return { render, ensureVisible, isVisible };
+    const position = () => ({ anchor, chosenView, hidden: [...hidden], compactSourcesOpen });
+    function restorePosition(view) {
+        ({ anchor, chosenView, compactSourcesOpen } = view);
+        hidden.clear();
+        view.hidden.forEach(source => hidden.add(source));
+    }
+    return { render, ensureVisible, isVisible, position, restorePosition };
 }

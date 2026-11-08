@@ -632,6 +632,8 @@ async function boot() {
     setItemFullScreen(false);
     mobileItemOpen = false;
     mobileListPosition = undefined;
+    navigationHistory.length = 0;
+    mobileBackId = undefined;
     appEntryVersion++;
     backupRequest?.abort();
     backupRequest = undefined;
@@ -1045,7 +1047,7 @@ function captureMailReader() {
     }
     return snapshot;
 }
-async function load(preferId, { selectFirst = true, preserveSelection = false, enteringApp = false, revealMail = false, revealTask = false, keepSidebar = false, entryVersion } = {}, initialRecords) {
+async function load(preferId, { selectFirst = true, preserveSelection = false, enteringApp = false, revealMail = false, revealTask = false, keepSidebar = false, entryVersion, navigation } = {}, initialRecords) {
     clearTimeout(mailQueryTimer);
     const requestVersion = ++listLoadVersion, queryContext = mailQueryContext();
     const versionAtStart = appEntryVersion;
@@ -1093,7 +1095,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     // Retry snapshots taken across a deletion, rollback or read update.
     const app = state.app;
     let result, version;
-    const route = recordsRoute(!!preferId && !initialRecords);
+    const route = recordsRoute(!!preferId && !initialRecords && !navigation);
     do {
         version = mailDeleteVersion + mailReadVersion;
         result = initialRecords ?? await api(route);
@@ -1117,8 +1119,12 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
         state.rows.sort((a, b) => (a.meta.start || '').localeCompare(b.meta.start || ''));
     const previousId = state.current?.id;
     state.current = state.rows.find(r => r.id === (preferId || previousId)) || null;
-    if (state.app === 'wiki' && (enteringApp || state.current?.id !== previousId))
-        state.wikiEditing = false;
+    if (state.app === 'wiki') {
+        if (navigation)
+            state.wikiEditing = navigation.wikiEditing;
+        else if (enteringApp || state.current?.id !== previousId)
+            state.wikiEditing = false;
+    }
     if (state.app === 'mail' && revealMail && state.current) {
         // Use the freshly loaded location: a connection's earlier record can move during navigation.
         const record = state.current;
@@ -1175,7 +1181,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
         renderDetail(readerSnapshot);
     }
     else
-        renderWorkspace(readerSnapshot);
+        renderWorkspace(navigation?.mailReader ?? readerSnapshot, !!navigation);
     restoreSidebar();
     if (focusedId)
         document.querySelector(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
@@ -1201,6 +1207,90 @@ let mobileListPosition;
 const mobileListContext = () => JSON.stringify([state.app, state.mailFolder, state.mailScope?.account, state.mailScope?.folder, state.search]);
 const mobileListScroller = () => document.querySelector(state.app === 'calendar' ? '#calendar-surface' : '#items');
 const mobileItemControls = `<div class="mobile-item-controls"><button type="button" class="mobile-back mobile-icon-button" data-action="mobile-back" aria-label="Back to list" title="Back to list">${mobileIcon('back')}</button><button type="button" data-action="help">Help</button></div>`;
+const navigationScrollers = ['#main', '#calendar-surface', '#items', '.calendar-time-scroll', '#detail', '.sheet-wrap'];
+const navigationHistory = [];
+let navigationId = 0;
+let mobileBackId;
+let navigatingBack = false;
+function rememberNavigation(returnToOrigin = false) {
+    if (appEntryVisible())
+        return;
+    const view = {
+        app: state.app, itemId: state.current?.id, pane: activePane(), search: state.search,
+        mailFolder: state.mailFolder, mailScope: state.mailScope, mailLimit: mailListLimit,
+        mailViewport: captureMailListViewport(), mailReader: captureMailReader(),
+        settingsPage, calendar: state.app === 'calendar' ? calendar.position() : undefined,
+        mobileItemOpen: phoneLayout.matches ? mobileItemOpen : activePane() === 'content',
+        mobileListPosition, mobileBackId, fullScreen: !!fullScreenItemId,
+        wikiEditing: state.wikiEditing, sheet: state.sheet, cell: state.cell,
+        scroll: navigationScrollers.map(selector => {
+            const node = document.querySelector(selector);
+            return { top: node?.scrollTop ?? 0, left: node?.scrollLeft ?? 0 };
+        }),
+    };
+    const id = ++navigationId;
+    navigationHistory.push({ id, view, returnToOrigin });
+    if (navigationHistory.length > 50)
+        navigationHistory.shift();
+    return id;
+}
+async function navigateBack() {
+    const entry = navigationHistory.at(-1);
+    if (!entry || navigatingBack)
+        return;
+    navigatingBack = true;
+    const version = appEntryVersion;
+    try {
+        await waitForAttachments();
+        await leaveEditor();
+        if (version !== appEntryVersion || entry !== navigationHistory.at(-1))
+            return;
+        navigationHistory.pop();
+        const view = entry.view;
+        rememberSelection();
+        showMobileMenu(false);
+        setDisclosure(document.querySelector('#mobile-header-more'), false);
+        state.app = view.app;
+        state.current = null;
+        state.search = view.search;
+        state.mailFolder = view.mailFolder;
+        state.mailScope = view.mailScope;
+        mailListLimit = view.mailLimit;
+        state.sheet = view.sheet;
+        state.cell = view.cell;
+        mobileItemOpen = view.mobileItemOpen;
+        mobileListPosition = view.mobileListPosition;
+        mobileBackId = view.mobileBackId;
+        if (view.calendar)
+            calendar.restorePosition(view.calendar);
+        if (view.app === 'settings')
+            selectSettingsPage(view.settingsPage);
+        setMode('normal');
+        location.hash = view.app;
+        await showAppEntry(view.app, async (entryVersion) => {
+            await load(view.itemId, { selectFirst: false, revealTask: true, entryVersion, navigation: view });
+            if (entryVersion !== appEntryVersion)
+                return;
+            if (view.fullScreen && !phoneLayout.matches)
+                setItemFullScreen(true);
+            restorePane(state.current ? view.pane : 'list');
+            navigationScrollers.forEach((selector, index) => {
+                const node = document.querySelector(selector);
+                if (node)
+                    node.scrollTo(view.scroll[index]);
+            });
+            if (!phoneLayout.matches || !mobileItemOpen)
+                restoreMailListViewport(view.mailViewport);
+        });
+    }
+    finally {
+        navigatingBack = false;
+    }
+}
+function backFromMobileItem() {
+    const entry = navigationHistory.at(-1);
+    return entry?.returnToOrigin && entry.id === mobileBackId ? navigateBack() : backToMobileList();
+}
 function showMobileMenu(open, restoreFocus = false) {
     const trigger = document.querySelector('#mobile-menu');
     const wasOpen = trigger?.getAttribute('aria-expanded') === 'true';
@@ -1212,6 +1302,7 @@ function showMobileMenu(open, restoreFocus = false) {
 }
 function openMobileItem(id) {
     if (!mobileItemOpen) {
+        mobileBackId = undefined;
         const list = mobileListScroller();
         if (list)
             mobileListPosition = { context: mobileListContext(), top: list.scrollTop, id };
@@ -1222,10 +1313,20 @@ function applyMobilePane() {
     if (!state.current)
         mobileItemOpen = false;
     document.querySelector('.shell')?.classList.toggle('mobile-item-open', mobileItemOpen);
+    const back = document.querySelector('.mobile-back');
+    const entry = navigationHistory.at(-1);
+    const label = entry?.returnToOrigin && entry.id === mobileBackId ? 'Back' : 'Back to list';
+    back?.setAttribute('aria-label', label);
+    if (back)
+        back.title = label;
 }
 async function backToMobileList() {
     await waitForAttachments();
     await leaveEditor();
+    const entry = navigationHistory.at(-1);
+    if (entry && entry.id === mobileBackId && !entry.returnToOrigin)
+        navigationHistory.pop();
+    mobileBackId = undefined;
     mobileItemOpen = false;
     if (state.app === 'calendar')
         state.current = null;
@@ -1305,7 +1406,7 @@ function toggleItemFullScreen() {
     if (!editable(document.activeElement))
         setMode('normal');
 }
-function renderWorkspace(readerSnapshot) {
+function renderWorkspace(readerSnapshot, restoringNavigation = false) {
     renderAppHeader();
     const previousFolderActions = captureFolderActions();
     const a = apps[state.app];
@@ -1313,7 +1414,7 @@ function renderWorkspace(readerSnapshot) {
         document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${mobileItemControls}<section id="calendar-surface"></section>${itemPane('Selected event', true)}</div>`;
         document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
         calendar.render();
-        if (state.current && (!phoneLayout.matches || mobileItemOpen))
+        if (!restoringNavigation && state.current && (!phoneLayout.matches || mobileItemOpen))
             calendar.ensureVisible(state.current.id);
         renderDetail();
         return;
@@ -1971,6 +2072,7 @@ async function openConnectedRecord(id, activityRecord) {
     if (!apps[record.kind])
         throw new CommandError('This item type is not available in this version.');
     rememberSelection();
+    mobileBackId = rememberNavigation(true);
     mobileItemOpen = true;
     mobileListPosition = undefined;
     if (record.kind === 'mail')
@@ -2009,8 +2111,11 @@ async function changeApp(name, keepSidebar = false, mailScope, settingsDestinati
     await waitForAttachments();
     await leaveEditor();
     rememberSelection();
+    if (name !== state.app || mailScope || settingsDestination && settingsDestination !== settingsPage || state.search || phoneLayout.matches && mobileItemOpen)
+        rememberNavigation();
     mobileItemOpen = false;
     mobileListPosition = undefined;
+    mobileBackId = undefined;
     showMobileMenu(false);
     setDisclosure(document.querySelector('#mobile-header-more'), false);
     if (settingsDestination)
@@ -2110,9 +2215,15 @@ async function selectRecord(id, focus = false, openItem = false) {
     await waitForAttachments();
     await leaveEditor();
     const previous = state.current?.id, origin = mailDraftOrigin(false);
-    state.current = state.rows.find(r => r.id === id) || null;
-    if (state.current && openItem)
+    const record = state.rows.find(r => r.id === id) || null;
+    const backId = record && openItem && (previous !== id || phoneLayout.matches && !mobileItemOpen)
+        ? rememberNavigation(openItem === 'linked') : undefined;
+    state.current = record;
+    if (record && openItem) {
         openMobileItem(id);
+        if (backId !== undefined)
+            mobileBackId = backId;
+    }
     if (state.app === 'wiki') {
         state.wikiEditing = false;
         setMode('normal');
@@ -2191,7 +2302,9 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
     if (!apps[kind])
         return;
     const previous = state.current;
+    const backId = rememberNavigation();
     openMobileItem(previous?.id);
+    mobileBackId = backId;
     const origin = kind === 'mail' ? mailDraftOrigin() : undefined;
     const record = { kind: kind, title: initial.title || 'Untitled ' + apps[kind].singular, body: initial.body || '', meta: { ...(kind === 'mail' ? { folder: 'Drafts' } : {}), ...initial.meta } };
     if (kind === 'mail' && !record.meta.sendAccount)
@@ -2810,7 +2923,7 @@ async function handleClick(event) {
         if (button.dataset.wiki) {
             const page = state.rows.find(r => r.title === button.dataset.wiki);
             if (page) {
-                await selectRecord(page.id, false, true);
+                await selectRecord(page.id, false, 'linked');
             }
             else {
                 confirmation('Create page', `Create “${button.dataset.wiki}”?`, () => createRecord({ title: button.dataset.wiki }));
@@ -2830,7 +2943,7 @@ async function handleClick(event) {
         }
         const action = button.dataset.action;
         if (action === 'mobile-back') {
-            await backToMobileList();
+            await backFromMobileItem();
             return;
         }
         if (action === 'mobile-folders') {
@@ -4066,6 +4179,14 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         return;
     }
+    if (keySequence === 'g' && event.key === 'b' && Date.now() - sequenceTime <= 900
+        && !event.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && !editable(target)) {
+        keySequence = '';
+        event.preventDefault();
+        if (!event.repeat)
+            void attempt(navigateBack);
+        return;
+    }
     const appJump = keySequence === 'g' && /^[1-8]$/.test(event.key);
     if (appEntryVisible() && !['g', ':'].includes(event.key) && !appJump)
         return;
@@ -4244,7 +4365,7 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         if (phoneLayout.matches) {
             if (mobileItemOpen)
-                void attempt(backToMobileList);
+                void attempt(backFromMobileItem);
             else
                 showMobileMenu(true);
         }

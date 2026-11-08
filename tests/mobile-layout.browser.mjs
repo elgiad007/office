@@ -38,6 +38,7 @@ export async function testMobileLayout(browser, url) {
       status:{authenticated:true,csrf:'fixture',preferences:{}},
       accounts:{accounts:[]},
       records:{records:rows.filter(item=>item.kind===query.get('kind'))},
+      record:{record:rows.find(item=>item.id===query.get('id'))},
       'connection-search':{items:rows.filter(item=>item.id==='document')},
       connections:query.get('id')==='document'
         ?{items:rows.filter(item=>item.id==='contact'),links:[{}]}
@@ -71,6 +72,7 @@ export async function testMobileLayout(browser, url) {
   };
   const go=async name=>{await button('Menu').tap();await button(name).tap();await page.locator('#crumb').getByText(name,{exact:true}).waitFor();};
   const back=()=>button('Back to list').tap();
+  const historyBack=async()=>{await page.keyboard.press('g');await page.keyboard.press('b');};
   const fit=()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1);
   try{
     await page.goto(url+'#mail');
@@ -127,6 +129,11 @@ export async function testMobileLayout(browser, url) {
     const agenda=page.locator('#top-agenda');
     const agendaTrigger=agenda.locator('summary');
     const agendaPanel=agenda.getByRole('region',{name:'Upcoming agenda'});
+    const openAgendaEvent=async title=>{
+      await agendaTrigger.tap();
+      await agendaPanel.getByRole('button',{name:new RegExp(title)}).tap();
+      await page.waitForFunction(title=>document.querySelector('#detail input[name="title"]')?.value===title,title);
+    };
     for(const viewport of [{width:320,height:568},{width:390,height:844},{width:844,height:390}]){
       await page.setViewportSize(viewport);
       assert.equal(await more.getAttribute('aria-expanded'),'false');
@@ -171,6 +178,12 @@ export async function testMobileLayout(browser, url) {
     await mail.scrollIntoViewIfNeeded();
     const top=await page.locator('#items').evaluate(node=>node.scrollTop);
     assert.ok(top>0);
+    await openAgendaEvent('Phone event');
+    await button('Back').tap();
+    await mail.waitFor();
+    assert.equal(await search.inputValue(),'Phone mail');
+    assert.equal(await page.locator('#mail-folder').inputValue(),'Inbox');
+    assert.equal(await page.locator('#items').evaluate(node=>node.scrollTop),top);
     await mail.tap();
     await detail.getByRole('heading',{name:'Phone mail 20'}).waitFor();
     assert.equal(await button('Back to list').locator('svg').isVisible(),true);
@@ -183,6 +196,9 @@ export async function testMobileLayout(browser, url) {
     await page.waitForFunction(()=>document.querySelector('#items [data-id="mail-20"]')?.classList.contains('mail-read'));
     assert.deepEqual(reads,['mail-20']);
     assert.equal(await page.locator('#items').isVisible(),false);
+    await openAgendaEvent('Phone event');
+    await historyBack();
+    await detail.getByRole('heading',{name:'Phone mail 20'}).waitFor();
     await back();
     assert.equal(await search.inputValue(),'Phone mail');
     assert.equal(await page.locator('#items').evaluate(node=>node.scrollTop),top);
@@ -256,7 +272,16 @@ export async function testMobileLayout(browser, url) {
         await iconButton('Link item');
         await page.locator('#connection-count').tap();
         await iconButton('Remove connection to Edited Contacts');
-        await page.keyboard.press('Escape');
+        await page.locator('[data-connection-open="contact"]').tap();
+        await page.locator('#crumb').getByText('Contacts',{exact:true}).waitFor();
+        await button('Back').waitFor();
+        await openAgendaEvent('Edited Calendar');
+        await button('Back').tap();
+        await page.locator('#crumb').getByText('Contacts',{exact:true}).waitFor();
+        await button('Back').waitFor();
+        await historyBack();
+        await page.locator('#crumb').getByText('Documents',{exact:true}).waitFor();
+        await button('Back to list').waitFor();
       }
       if(app==='Lists'){
         await button('Help').tap();
@@ -365,9 +390,16 @@ export async function testMobileLayout(browser, url) {
     const desktopLongSize=await listTitleSize();
     assert.ok(desktopLongSize<desktopEmptySize&&desktopLongSize>=22);
     await assertListTitleAlignment();
+    await historyBack();
+    await page.locator('#items [data-id="empty-list"][aria-pressed="true"]').waitFor();
+    await page.locator('#items [data-id="list"]').click();
     await page.setViewportSize({width:1440,height:500});
     assert.ok(await listTitleSize()<desktopLongSize,'A shorter detail pane reduces title size');
     await page.setViewportSize({width:1440,height:1000});
+    await button('Tasks').click();
+    await page.locator('#items [data-id="task"]').waitFor();
+    await historyBack();
+    await page.locator('#items [data-id="list"][aria-pressed="true"]').waitFor();
     await button('Tasks').click();
     await page.locator('#items [data-id="task"]').click();
     await detail.waitFor();
@@ -393,6 +425,6 @@ export async function testMobileLayout(browser, url) {
     await shortcutsHeading.waitFor({state:'hidden'});
     assert.equal(await detail.evaluate(node=>node===document.activeElement),true);
     assert.deepEqual(errors,[]);
-    console.log('PASS touch navigation, mail list return, drafts, all item editors, and phone/tablet layouts.');
+    console.log('PASS navigation history, touch navigation, mail list return, drafts, all item editors, and phone/tablet layouts.');
   } finally {await page.close();}
 }
