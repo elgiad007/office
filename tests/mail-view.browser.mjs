@@ -103,7 +103,9 @@ export async function testMailView(page,url) {
     await header('Amy <a@example.com>').focus();await save(()=>page.keyboard.press('Enter'));
     await item('a000').click();await page.keyboard.press('G');await selected('b109');assert.equal((await order()).length,220);
     await open();await page.screenshot({path:'test-results/mail-view-desktop.png',fullPage:true});
-    await page.setViewportSize({width:390,height:844});await page.screenshot({path:'test-results/mail-view-mobile.png',fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    if(await page.locator('.mobile-back').isVisible())await page.locator('.mobile-back').click();
+    await open();await page.screenshot({path:'test-results/mail-view-mobile.png',fullPage:true});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     const menu=await page.locator('.mail-view-menu').boundingBox();assert.ok(menu.x>=0&&menu.x+menu.width<=390);
     console.log('PASS mail list view: grouping/sorting, collapse and native keyboard activation, hidden selection/reader and sync, persistence, expanded navigation/range/delete order, collapse-all, paging and mobile menu.');

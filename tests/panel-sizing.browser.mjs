@@ -58,6 +58,7 @@ export async function testPanelSizing(page, url) {
         await page.frameLocator('.mail-html').getByText('Short HTML content').waitFor();
         assert.ok(await overflow('#detail') <= 1, `${density}, ${viewport.width}: HTML frame fits below its header`);
         assert.ok(await page.frameLocator('.mail-html').locator('html').evaluate(node => node.scrollHeight <= innerHeight + 1), 'Short HTML content has no inner scrollbar');
+        if(viewport.width===390)await page.locator('.mobile-back').click();
         await page.locator('#items [data-id$="true"]').click();
         await page.frameLocator('.mail-html').getByText('Long HTML content').first().waitFor();
         assert.ok(await page.frameLocator('.mail-html').locator('html').evaluate(node => node.scrollHeight > innerHeight), 'Long HTML content remains scrollable');
@@ -71,8 +72,13 @@ export async function testPanelSizing(page, url) {
         await page.setViewportSize(viewport);
         await page.goto(url + '#mail');
         await page.reload();
-        await page.locator('#detail .empty').waitFor();
-        assert.ok(await overflow('#detail') <= 1, `${density}, ${viewport.width}: empty state fits`);
+        if(viewport.width===390){
+          await page.locator('#items .list-empty').waitFor();
+          assert.equal(await page.locator('#detail').isVisible(),false);
+        }else{
+          await page.locator('#detail .empty').waitFor();
+          assert.ok(await overflow('#detail') <= 1, `${density}, ${viewport.width}: empty state fits`);
+        }
       }
       empty = false;
     }
@@ -110,6 +116,7 @@ export async function testPanelSizing(page, url) {
     await mail.click();
     await folders.waitFor({state: 'visible'});
     await page.locator('#mail-folder').selectOption('all');
+    await folders.waitFor({state: 'hidden'});
     assert.equal(await mail.getAttribute('aria-expanded'), 'false');
     await mail.click();
     await folders.waitFor({state: 'visible'});
@@ -133,9 +140,8 @@ export async function testPanelSizing(page, url) {
     await page.setViewportSize({width: 390, height: 844});
     assert.equal(await sidebar.count(), 0);
     assert.equal(await list.count(), 0);
-    await mail.click();
-    await folders.waitFor({state: 'visible'});
-    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.mobile-back').isVisible(),true);
+    assert.equal(await draft.inputValue(), 'Keep this unsaved draft while resizing.');
     await page.setViewportSize({width: 1440, height: 1000});
     assert.equal(await width('#app-sidebar'), 150);
     assert.equal(await draft.inputValue(), 'Keep this unsaved draft while resizing.');

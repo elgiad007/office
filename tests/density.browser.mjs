@@ -54,14 +54,18 @@ export async function testDensity(page) {
   await page.emulateMedia({media:'screen'});
   await page.getByRole('button', {name:'Settings', exact:true}).click();
   await page.setViewportSize({width:390, height:844});
+  const categories=page.getByRole('button',{name:/Settings categories/});
   for (const name of ['Appearance', 'Mail', 'Accounts', 'Keyboard', 'Backups']) {
+    await categories.click();
     await category(name).click();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), name+' settings should fit the viewport');
   }
-  await category('Appearance').click();
+  await categories.click();await category('Appearance').click();
   await page.screenshot({path:'test-results/settings-compact-mobile.png', fullPage:true});
+  await page.getByRole('button', {name:'Menu', exact:true}).click();
   await page.getByRole('button', {name:'Tasks', exact:true}).click();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await page.getByRole('button', {name:'Menu', exact:true}).click();
   await page.getByRole('button', {name:'Settings', exact:true}).click();
   await page.setViewportSize({width:1440, height:1000});
   await saveDensity('comfortable');

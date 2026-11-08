@@ -22,6 +22,7 @@ import { createActivity } from './activity.js';
 import { agendaEventLabel, createCalendar, dateOnly, upcomingEvents } from './calendar.js';
 import { timestampLabel, configureTimeLabels, refreshTimeLabels } from './time-labels.js';
 import { panelSplitter, setupPanelSizing } from './panel-sizing.js';
+import { mobileDisclosure, phoneLayout, setDisclosure } from './mobile-layout.js';
 const apps = {
     mail: { name: 'Mail', singular: 'message', empty: 'No messages yet.', hint: 'Connect an account in Settings, import an EML file, or compose your first message.', icon: 'M3 5h18v14H3z M3 5l9 7 9-7' },
     calendar: { name: 'Calendar', singular: 'event', empty: 'No events yet.', hint: 'Add an event, import a calendar, or connect Google Calendar or CalDAV.', icon: 'M4 5h16v16H4z M8 3v4 M16 3v4 M4 10h16' },
@@ -150,7 +151,7 @@ function rememberSelection() {
 }
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys() });
-const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, open: selectRecord, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
+const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, compact: () => phoneLayout.matches, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
 const connections = createConnections({ api, icon, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
@@ -173,6 +174,7 @@ function returnFromMailDraft(id) {
     selectionAnchor = null;
     keyboardSelection = false;
     state.current = navigableRows().find(r => r.id === origin.selectedId) || navigableRows()[0] || null;
+    mobileItemOpen = false;
     renderWorkspace();
     setMode('normal');
     focusList();
@@ -182,7 +184,7 @@ let selectionAnchor = null, keyboardSelection = false;
 let sendingMail = false;
 let pendingSend = null;
 const isPendingSend = (id) => !!pendingSend && pendingSend.id === id;
-const viewingPendingSend = () => state.app === 'mail' && isPendingSend(state.current?.id);
+const viewingPendingSend = () => state.app === 'mail' && isPendingSend(state.current?.id) && (!phoneLayout.matches || mobileItemOpen);
 function renderSendStatus() {
     document.querySelector('#mail-send-status').hidden = !pendingSend || viewingPendingSend();
 }
@@ -623,6 +625,8 @@ function authView(status) {
 }
 async function boot() {
     setItemFullScreen(false);
+    mobileItemOpen = false;
+    mobileListPosition = undefined;
     appEntryVersion++;
     backupRequest?.abort();
     backupRequest = undefined;
@@ -667,7 +671,7 @@ function shell() {
     const syncStatus = document.querySelector('#sync-status');
     syncStatus.textContent = 'Automatic sync';
     syncStatus.hidden = false;
-    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? '<section id="mail-folder-navigation" aria-label="Mail folders"></section>' : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
+    root.innerHTML = `<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><button type="button" class="mobile-only mobile-menu-close" data-action="mobile-menu-close">Close menu</button><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id, a], i) => `<button data-app="${id}" title="${a.name} · g ${i + 1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i + 1}</kbd></button>${id === 'mail' ? `<div id="mobile-folder-control" class="mobile-only">${mobileDisclosure('mail-folder-navigation', 'Mail folders', 'mobile-folder-toggle')}</div><section id="mail-folder-navigation" aria-label="Mail folders"></section>` : ''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="mobile-only mobile-menu-backdrop" data-mobile-menu-backdrop></div><div class="workspace"><header class="topbar"><div class="breadcrumb"><button type="button" id="mobile-menu" class="mobile-only" data-action="mobile-menu" aria-controls="app-sidebar" aria-expanded="false">Menu</button><h1 id="crumb"></h1></div><div id="header-controls" class="topbar-controls"><button type="button" id="mobile-header-more" class="mobile-only mobile-disclosure" data-action="mobile-disclosure" aria-controls="header-controls" aria-expanded="false">More</button><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new', 'Compose', 'compose')}${headerAction('import', 'Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
     panelSizing = setupPanelSizing(root.querySelector('.shell'), () => setMailFolderPanel(false));
     setupTopAgenda();
     root.onclick = handleClick;
@@ -740,6 +744,12 @@ function setMailFolderPanel(open, restoreFocus = false) {
     const shell = root.querySelector('.shell');
     const trigger = shell.querySelector('[data-app="mail"]');
     const panel = shell.querySelector('#mail-folder-navigation');
+    if (phoneLayout.matches) {
+        shell.classList.remove('folders-open');
+        trigger.removeAttribute('aria-controls');
+        trigger.removeAttribute('aria-expanded');
+        return;
+    }
     const collapsed = shell.classList.contains('sidebar-collapsed');
     const wasOpen = shell.classList.contains('folders-open');
     shell.classList.toggle('folders-open', open);
@@ -761,6 +771,9 @@ function setMailFolderPanel(open, restoreFocus = false) {
 }
 function mailFolderEnv() {
     return { state, api, commit: leaveEditor, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, captureSidebarFocus, closeFolderPanel: () => {
+            mobileItemOpen = false;
+            if (phoneLayout.matches)
+                showMobileMenu(false, true);
             setMailFolderPanel(false, true);
         } };
 }
@@ -1051,6 +1064,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     panelSizing.refresh();
     document.querySelector('#mail-toolbar').hidden = state.app !== 'mail';
     document.querySelector('#mail-folder-navigation').hidden = state.app !== 'mail';
+    document.querySelector('#mobile-folder-control').hidden = state.app !== 'mail';
     if (state.app !== 'mail')
         setMailFolderPanel(false);
     if (entryVersion !== undefined && !initialRecords && !document.hidden) {
@@ -1172,6 +1186,84 @@ function renderAppHeader() {
     toolbar.innerHTML = toolbar.hidden ? '' : `${state.app === 'calendar' ? `<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">` : ''}<div class="header-action-group">${headerAction('new', 'New ' + a.singular)}${headerAction('import', 'Import')}${headerAction('export-all', 'Export')}</div>`;
 }
 let fullScreenItemId;
+let mobileItemOpen = false;
+let mobileListPosition;
+const mobileListContext = () => JSON.stringify([state.app, state.mailFolder, state.mailScope?.account, state.mailScope?.folder, state.search]);
+const mobileListScroller = () => document.querySelector(state.app === 'calendar' ? '#calendar-surface' : '#items');
+const mobileBackButton = '<button type="button" class="mobile-only mobile-back" data-action="mobile-back">← Back to list</button>';
+function showMobileMenu(open, restoreFocus = false) {
+    const trigger = document.querySelector('#mobile-menu');
+    const wasOpen = trigger?.getAttribute('aria-expanded') === 'true';
+    setDisclosure(trigger, open);
+    if (open)
+        focusSidebar();
+    else if (wasOpen && restoreFocus)
+        trigger?.focus({ preventScroll: true });
+}
+function openMobileItem(id) {
+    if (!mobileItemOpen) {
+        const list = mobileListScroller();
+        if (list)
+            mobileListPosition = { context: mobileListContext(), top: list.scrollTop, id };
+    }
+    mobileItemOpen = true;
+}
+function applyMobilePane() {
+    if (!state.current)
+        mobileItemOpen = false;
+    document.querySelector('.shell')?.classList.toggle('mobile-item-open', mobileItemOpen);
+}
+async function backToMobileList() {
+    await waitForAttachments();
+    await leaveEditor();
+    mobileItemOpen = false;
+    if (state.app === 'calendar')
+        state.current = null;
+    setItemFullScreen(false);
+    renderDetail();
+    setMode('normal');
+    lastPane = 'list';
+    const position = mobileListPosition;
+    mobileListPosition = undefined;
+    const list = mobileListScroller();
+    if (position?.context === mobileListContext() && list) {
+        list.scrollTop = position.top;
+        const row = position.id && list.querySelector(`[data-id="${CSS.escape(position.id)}"]`);
+        if (row) {
+            row.focus({ preventScroll: true });
+            return;
+        }
+    }
+    focusList();
+}
+phoneLayout.addEventListener('change', () => {
+    const panel = document.querySelector('#detail');
+    if (!panel)
+        return;
+    showMobileMenu(false);
+    setMailFolderPanel(false);
+    if (phoneLayout.matches && (isUnsavedDraft() || state.dirty || document.activeElement?.closest('#detail')))
+        openMobileItem();
+    applyMobilePane();
+    // An active editor stays mounted when rotating or resizing.
+    if (state.app === 'calendar' && !state.dirty)
+        calendar.render();
+    if (!state.dirty && !document.activeElement?.closest('#detail'))
+        renderDetail();
+});
+// Safari can shrink only the visual viewport when the keyboard opens.
+function fitMobileKeyboard() {
+    const viewport = window.visualViewport;
+    const editing = editable(document.activeElement);
+    const keyboard = phoneLayout.matches && viewport?.scale === 1 && editing && innerHeight - viewport.height > 120;
+    if (keyboard)
+        document.documentElement.style.setProperty('--office-keyboard-height', `${Math.round(viewport.height)}px`);
+    else
+        document.documentElement.style.removeProperty('--office-keyboard-height');
+}
+window.visualViewport?.addEventListener('resize', fitMobileKeyboard);
+phoneLayout.addEventListener('change', fitMobileKeyboard);
+document.addEventListener('focusout', () => requestAnimationFrame(fitMobileKeyboard));
 const fullScreenButton = '<button type="button" class="quiet item-fullscreen-enter" data-action="item-fullscreen">Full screen</button>';
 const exitFullScreenButton = '<button type="button" class="item-fullscreen-exit" data-action="item-fullscreen">Exit full screen</button>';
 function setItemFullScreen(expanded) {
@@ -1195,15 +1287,15 @@ function renderWorkspace(readerSnapshot) {
     renderAppHeader();
     const a = apps[state.app];
     if (state.app === 'calendar') {
-        document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${exitFullScreenButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
+        document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${exitFullScreenButton}${mobileBackButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
         document.querySelector('#search').oninput = event => { state.search = event.target.value; renderList(); };
         calendar.render();
-        if (state.current)
+        if (state.current && (!phoneLayout.matches || mobileItemOpen))
             calendar.ensureVisible(state.current.id);
         renderDetail();
         return;
     }
-    document.querySelector('#main').innerHTML = `<div class="work-grid">${exitFullScreenButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+    document.querySelector('#main').innerHTML = `<div class="work-grid">${exitFullScreenButton}${mobileBackButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app === 'mail' ? '<button type="button" class="mobile-only" data-action="mobile-folders">Folders</button>' : ''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
     panelSizing.bindList(document.querySelector('[data-resize-panel="list"]'));
     document.querySelector('#search').oninput = event => { state.search = event.target.value; mailListLimit = 100; renderList(); };
     if (state.app === 'tasks')
@@ -1218,6 +1310,7 @@ function renderWorkspace(readerSnapshot) {
             select.disabled = true;
             try {
                 await leaveEditor();
+                mobileItemOpen = false;
                 state.mailFolder = folder;
                 state.mailScope = null;
                 mailListLimit = 100;
@@ -1229,6 +1322,8 @@ function renderWorkspace(readerSnapshot) {
                 if (state.current?.meta.folder === 'Drafts')
                     mailDraftOrigins.set(state.current.id, mailDraftOrigin(false));
                 await load();
+                if (phoneLayout.matches)
+                    showMobileMenu(false, true);
                 setMailFolderPanel(false, true);
             }
             finally {
@@ -1434,12 +1529,19 @@ async function hydrateMailBody(record, manual = false) {
 }
 let displayedMailBody;
 function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false) {
+    applyMobilePane();
     renderSendStatus();
     const scrollingPanel = document.querySelector('#detail');
     if (scrollingPanel)
         keyboardScrollers.get(scrollingPanel)?.cancel();
     const panel = document.querySelector('#detail'), r = state.current, a = apps[state.app];
     setItemFullScreen(!!r && r.id === fullScreenItemId);
+    if (phoneLayout.matches && !mobileItemOpen) {
+        displayedMailId = null;
+        if (!toolbarOnly)
+            panel.replaceChildren();
+        return;
+    }
     if (viewingPendingSend()) {
         panel.classList.remove('mail-reader');
         if (!panel.querySelector('.mail-send-progress'))
@@ -1477,6 +1579,13 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     const template = document.createElement('template');
     template.innerHTML = markup;
     template.content.querySelector(viewingMail ? '.mail-header-badges' : '.detail-toolbar .right')?.insertAdjacentHTML('beforeend', fullScreenButton);
+    const toolbar = template.content.querySelector('.detail-toolbar .right');
+    if (toolbar) {
+        const secondary = template.content.querySelectorAll('.detail-toolbar [data-action="history"],.detail-toolbar [data-action="export"],.detail-toolbar [data-action="delete"]');
+        toolbar.insertAdjacentHTML('beforeend', mobileDisclosure('item-secondary-actions', 'More actions') + '<div id="item-secondary-actions" class="item-secondary-actions mobile-collapsible"></div>');
+        const actions = toolbar.lastElementChild;
+        secondary.forEach(button => actions.append(button));
+    }
     if (toolbarOnly) {
         for (const selector of ['.detail-toolbar', '.print-only'])
             panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
@@ -1605,13 +1714,13 @@ function detailContent(r) {
     if (state.app === 'mail')
         content += `<div class="fields">${field('To (one recipient)', 'to', m.to, 'email', 'required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount && !mailAccounts().some(a => a.id === m.sendAccount) ? `<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>` : ''}${mailAccounts().map(a => `<option value="${a.id}" ${m.sendAccount === a.id ? 'selected' : ''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
     if (state.app === 'documents')
-        content += `<div class="document-content"><div class="rich-toolbar" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
+        content += `<div class="document-content">${mobileDisclosure('document-formatting', 'Formatting')}<div id="document-formatting" class="rich-toolbar mobile-collapsible" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
     else if (state.app === 'sheets')
         content += sheetContent(r);
     else
         content += `<label>${state.app === 'wiki' ? 'Markdown source' : state.app === 'mail' ? 'Message' : 'Notes'}<textarea class="body-editor" name="body" ${disabled}>${e(r.body)}</textarea></label>`;
     if (state.app === 'mail')
-        content += attachmentSection(r) + `<div class="head-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail ? 'disabled' : ''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
+        content += attachmentSection(r) + `<div class="head-actions compose-send-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail ? 'disabled' : ''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
     return content + '</form>';
 }
 function localInput(value) { if (!value)
@@ -1825,6 +1934,8 @@ async function openConnectedRecord(id) {
     if (!apps[record.kind])
         throw new CommandError('This item type is not available in this version.');
     rememberSelection();
+    mobileItemOpen = true;
+    mobileListPosition = undefined;
     if (record.kind === 'mail')
         clearMailCache();
     state.app = record.kind;
@@ -1844,7 +1955,7 @@ async function openConnectedRecord(id) {
             return;
         if (record.kind === 'calendar')
             calendar.ensureVisible(record.id, true);
-        if (record.kind === 'lists')
+        if (record.kind === 'lists' || phoneLayout.matches && mobileItemOpen)
             focusContent();
         else
             focusList();
@@ -1857,6 +1968,10 @@ async function changeApp(name, keepSidebar = false, mailScope, settingsDestinati
     await waitForAttachments();
     await leaveEditor();
     rememberSelection();
+    mobileItemOpen = false;
+    mobileListPosition = undefined;
+    showMobileMenu(false);
+    setDisclosure(document.querySelector('#mobile-header-more'), false);
     if (settingsDestination)
         selectSettingsPage(settingsDestination);
     if (state.app === 'mail' && name !== 'mail' && !appEntryVisible()) {
@@ -1899,6 +2014,7 @@ async function changeApp(name, keepSidebar = false, mailScope, settingsDestinati
 }
 async function showAppEntry(name, open, warm = false) {
     setItemFullScreen(false);
+    document.querySelector('.shell')?.classList.remove('mobile-item-open');
     const version = ++appEntryVersion;
     const main = document.querySelector('#main');
     const controls = document.querySelectorAll('#app-toolbar,#mail-toolbar,#mail-folder-navigation');
@@ -1947,12 +2063,14 @@ function updateMailListItem(id) {
     if (label)
         label.textContent = row.meta.read ? 'Read' : 'Unread';
 }
-async function selectRecord(id, focus = false) {
+async function selectRecord(id, focus = false, openItem = false) {
     const pane = activePane();
     await waitForAttachments();
     await leaveEditor();
     const previous = state.current?.id, origin = mailDraftOrigin(false);
     state.current = state.rows.find(r => r.id === id) || null;
+    if (state.current && openItem)
+        openMobileItem(id);
     if (state.app === 'wiki') {
         state.wikiEditing = false;
         setMode('normal');
@@ -1974,6 +2092,12 @@ async function selectRecord(id, focus = false) {
     if (state.app === 'calendar')
         calendar.ensureVisible(id);
     renderDetail();
+    if (phoneLayout.matches && mobileItemOpen) {
+        if (previous !== id || openItem)
+            document.querySelector('#detail').scrollTop = 0;
+        document.querySelector('.mobile-back')?.focus({ preventScroll: true });
+        return;
+    }
     if (focus === true && pane === 'content') {
         focusContent();
         document.querySelector('#selected-item')?.scrollIntoView({ block: 'nearest' });
@@ -2011,7 +2135,7 @@ async function clickRecord(id, event) {
         selectionAnchor = id;
     }
     renderList();
-    await selectRecord(id, true);
+    await selectRecord(id, true, !event.shiftKey && !event.ctrlKey && !event.metaKey);
 }
 function mailAccounts() { return state.accounts.filter(a => ['imap', 'google'].includes(a.type)); }
 function draftAccount(context) {
@@ -2025,6 +2149,7 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
     if (!apps[kind])
         return;
     const previous = state.current;
+    openMobileItem(previous?.id);
     const origin = kind === 'mail' ? mailDraftOrigin() : undefined;
     const record = { kind: kind, title: initial.title || 'Untitled ' + apps[kind].singular, body: initial.body || '', meta: { ...(kind === 'mail' ? { folder: 'Drafts' } : {}), ...initial.meta } };
     if (kind === 'mail' && !record.meta.sendAccount)
@@ -2039,7 +2164,7 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
         record.meta.workbook = { sheets: [{ name: 'Sheet 1', cells: {} }] };
     if (kind === 'lists')
         record.meta.checklist = [];
-    if (kind === 'mail' && !keepMailList) {
+    if (kind === 'mail' && !keepMailList && !phoneLayout.matches) {
         state.mailScope = null;
         if (state.mailFolder !== 'all')
             state.mailFolder = 'Drafts';
@@ -2078,6 +2203,10 @@ function enterEdit(preferTitle = false) {
     if (state.current?.meta.remote) {
         notice('This synced copy is read-only.');
         return;
+    }
+    if (phoneLayout.matches && state.current && !mobileItemOpen) {
+        openMobileItem(state.current.id);
+        renderDetail();
     }
     if (state.app === 'wiki' && !state.wikiEditing) {
         state.wikiEditing = true;
@@ -2550,7 +2679,12 @@ async function handleClick(event) {
     await attempt(async () => {
         if (button.dataset.app) {
             const app = button.dataset.app;
-            if (app === 'mail' && button.closest('.sidebar-collapsed')) {
+            if (phoneLayout.matches && app === state.app && !appEntryVisible()) {
+                if (mobileItemOpen)
+                    await backToMobileList();
+                showMobileMenu(false, true);
+            }
+            else if (!phoneLayout.matches && app === 'mail' && button.closest('.sidebar-collapsed')) {
                 if (state.app === app && !appEntryVisible())
                     setMailFolderPanel(!button.closest('.folders-open'));
                 else if (await changeApp(app, true) && button.closest('.sidebar-collapsed'))
@@ -2558,6 +2692,18 @@ async function handleClick(event) {
             }
             else
                 await changeApp(app, event.detail === 0 && document.activeElement === button);
+            return;
+        }
+        if (button.dataset.action === 'mobile-menu') {
+            showMobileMenu(button.getAttribute('aria-expanded') !== 'true', true);
+            return;
+        }
+        if (button.dataset.action === 'mobile-menu-close') {
+            showMobileMenu(false, true);
+            return;
+        }
+        if (button.dataset.action === 'mobile-disclosure') {
+            setDisclosure(button, button.getAttribute('aria-expanded') !== 'true');
             return;
         }
         if (appEntryVisible() && button.dataset.action !== 'logout')
@@ -2569,7 +2715,7 @@ async function handleClick(event) {
         if (button.dataset.wiki) {
             const page = state.rows.find(r => r.title === button.dataset.wiki);
             if (page) {
-                await selectRecord(page.id);
+                await selectRecord(page.id, false, true);
             }
             else {
                 confirmation('Create page', `Create “${button.dataset.wiki}”?`, () => createRecord({ title: button.dataset.wiki }));
@@ -2588,6 +2734,25 @@ async function handleClick(event) {
             return;
         }
         const action = button.dataset.action;
+        if (action === 'mobile-back') {
+            await backToMobileList();
+            return;
+        }
+        if (action === 'mobile-folders') {
+            setDisclosure(document.querySelector('#mobile-folder-toggle'), true);
+            showMobileMenu(true);
+            document.querySelector('#mail-folder')?.focus();
+            return;
+        }
+        if (phoneLayout.matches && button.closest('.topbar') && action !== 'sync') {
+            const more = document.querySelector('#mobile-header-more');
+            if (more?.getAttribute('aria-expanded') === 'true') {
+                setDisclosure(more, false);
+                more.focus({ preventScroll: true });
+            }
+        }
+        if (phoneLayout.matches && button.closest('.sidebar-bottom'))
+            showMobileMenu(false, true);
         if (action === 'item-fullscreen') {
             toggleItemFullScreen();
             return;
@@ -3134,7 +3299,8 @@ function renderSettings(entryVersion) {
     const focusedCategory = focused?.closest('[data-settings-category]')?.dataset.settingsCategory;
     const focusedPage = focused?.closest('[data-settings-page]')?.dataset.settingsPage;
     main.innerHTML = `<div class="settings">
-    <nav class="settings-navigation" aria-label="Settings categories">
+    ${mobileDisclosure('settings-categories', e(settingsPages.find(([id]) => id === settingsPage)[1]) + ' · Settings categories')}
+    <nav id="settings-categories" class="settings-navigation mobile-collapsible" aria-label="Settings categories">
       ${settingsPages.map(([id, label]) => `<button type="button" data-settings-category="${id}" aria-label="${label} settings" aria-controls="settings-${id}" aria-current="${settingsPage === id ? 'page' : 'false'}" tabindex="${settingsPage === id ? 0 : -1}">${label}</button>`).join('')}
     </nav>
     <section class="settings-grid" id="settings-appearance" data-settings-page="appearance"${settingsPage === 'appearance' ? '' : ' hidden'}>
@@ -3200,6 +3366,12 @@ function renderSettings(entryVersion) {
         selectSettingsPage(button.dataset.settingsCategory);
         categories.forEach(category => category.setAttribute('aria-current', category === button ? 'page' : 'false'));
         pages.forEach(page => page.hidden = page.dataset.settingsPage !== settingsPage);
+        const categoryToggle = main.querySelector('#settings-categories-toggle');
+        categoryToggle.textContent = button.textContent + ' · Settings categories';
+        if (phoneLayout.matches) {
+            setDisclosure(categoryToggle, false);
+            categoryToggle.focus({ preventScroll: true });
+        }
         loadRules();
         main.scrollTop = 0;
     });
@@ -3288,8 +3460,15 @@ function focusList() {
         focusContent();
         return;
     }
+    if (phoneLayout.matches && mobileItemOpen) {
+        focusContent();
+        return;
+    }
     if (state.app === 'settings' && activeSettingsPanel()) {
-        focusSettingsCategory();
+        if (phoneLayout.matches)
+            document.querySelector('#settings-categories-toggle')?.focus({ preventScroll: true });
+        else
+            focusSettingsCategory();
         return;
     }
     const entry = document.querySelector('#selected-item') || document.querySelector('#items') || document.querySelector('#main');
@@ -3517,11 +3696,20 @@ function scrollFocusedPane(target, direction) {
     return true;
 }
 let lastPane = 'list';
-function activePane() { const node = document.activeElement; if (fullScreenItemId || node?.closest('#detail'))
-    return 'content'; if (node?.closest('#items'))
-    return 'list'; return lastPane; }
+function activePane() {
+    if (phoneLayout.matches)
+        return mobileItemOpen ? 'content' : 'list';
+    const node = document.activeElement;
+    if (fullScreenItemId || node?.closest('#detail'))
+        return 'content';
+    if (node?.closest('#items'))
+        return 'list';
+    return lastPane;
+}
 document.addEventListener('focusin', event => {
     const node = event.target;
+    if (phoneLayout.matches && !node.closest('#app-sidebar,#mobile-menu,dialog') && document.querySelector('#app-sidebar.mobile-expanded'))
+        showMobileMenu(false);
     if (node.closest('#detail'))
         lastPane = 'content';
     else if (node.closest('#items,#main'))
@@ -3563,6 +3751,20 @@ document.addEventListener('keydown', event => {
     if (document.querySelector('dialog[open]'))
         return;
     const target = event.target;
+    if (phoneLayout.matches && event.key === 'Escape' && document.querySelector('#app-sidebar.mobile-expanded')) {
+        event.preventDefault();
+        showMobileMenu(false, true);
+        return;
+    }
+    if (phoneLayout.matches && event.key === 'Escape') {
+        const toggle = [...document.querySelectorAll('.mobile-disclosure[aria-expanded="true"]')].find(button => button === target || document.getElementById(button.getAttribute('aria-controls'))?.contains(target));
+        if (toggle) {
+            event.preventDefault();
+            setDisclosure(toggle, false);
+            toggle.focus({ preventScroll: true });
+            return;
+        }
+    }
     if (target.closest('[data-mail-disclosure]') && !(fullScreenItemId && ['Escape', ':'].includes(event.key)))
         return;
     const exportMenu = target.closest('#mail-export-menu[open]');
@@ -3602,8 +3804,9 @@ document.addEventListener('keydown', event => {
         setMode('normal');
         focusList();
         const row = navigableRows()[0];
-        if (event.key === 'Enter' && row && row.id !== state.current?.id)
-            void attempt(() => selectRecord(row.id, true));
+        if (event.key === 'Enter' && row && (phoneLayout.matches || row.id !== state.current?.id)) {
+            void attempt(() => selectRecord(row.id, true, true));
+        }
         return;
     }
     if (state.app === 'lists' && event.key === 'Escape' && target.matches('.checklist-add input,.checklist-title input') && !event.isComposing) {
@@ -3655,7 +3858,7 @@ document.addEventListener('keydown', event => {
     }
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey)
         return;
-    if (!fullScreenItemId && event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
+    if (!phoneLayout.matches && !fullScreenItemId && event.key === 'Tab' && event.shiftKey && target === contentEntry()) {
         event.preventDefault();
         keySequence = '';
         focusList();
@@ -3665,7 +3868,7 @@ document.addEventListener('keydown', event => {
     const checklistArrow = checklistRow && (event.key === 'ArrowUp' || event.key === 'ArrowDown');
     if (!checklistArrow && target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input') && ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key))
         return;
-    if (event.key === 'Tab' && !event.shiftKey && (target.matches('#selected-item') || state.current && target.id === 'items')) {
+    if (!phoneLayout.matches && event.key === 'Tab' && !event.shiftKey && (target.matches('#selected-item') || state.current && target.id === 'items')) {
         event.preventDefault();
         keySequence = '';
         focusContent();
@@ -3747,7 +3950,13 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'left') {
         event.preventDefault();
-        if (state.app !== 'settings' && activePane() === 'content')
+        if (phoneLayout.matches) {
+            if (mobileItemOpen)
+                void attempt(backToMobileList);
+            else
+                showMobileMenu(true);
+        }
+        else if (state.app !== 'settings' && activePane() === 'content')
             focusList();
         else
             focusSidebar();
@@ -3755,10 +3964,14 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'right') {
         event.preventDefault();
-        afterListPage(() => { if (state.app === 'sheets' && state.current)
-            selectCell(state.cell, true);
-        else
-            focusContent(); });
+        afterListPage(async () => {
+            if (phoneLayout.matches && !mobileItemOpen && state.current)
+                await selectRecord(state.current.id, false, true);
+            if (state.app === 'sheets' && state.current)
+                selectCell(state.cell, true);
+            else
+                focusContent();
+        });
         return;
     }
     if (state.app === 'settings')
@@ -3784,8 +3997,14 @@ document.addEventListener('keydown', event => {
     }
     if (action === 'search') {
         event.preventDefault();
-        setItemFullScreen(false);
-        document.querySelector('#search')?.focus();
+        void attempt(async () => {
+            if (phoneLayout.matches && mobileItemOpen)
+                await backToMobileList();
+            setItemFullScreen(false);
+            if (phoneLayout.matches && state.app === 'calendar')
+                setDisclosure(document.querySelector('#mobile-header-more'), true);
+            document.querySelector('#search')?.focus();
+        });
         return;
     }
     if (action === 'connections') {
@@ -3905,6 +4124,8 @@ document.addEventListener('mousedown', event => {
 });
 document.addEventListener('pointerdown', event => {
     state.lastActivity = Date.now();
+    if (event.target.closest('[data-mobile-menu-backdrop]'))
+        showMobileMenu(false, true);
     if (document.querySelector('.folders-open') && !event.target.closest('#mail-folder-navigation,[data-app="mail"]'))
         setMailFolderPanel(false);
 }, { passive: true });

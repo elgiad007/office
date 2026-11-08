@@ -46,6 +46,7 @@ export async function testMailList(page,url) {
     await settings();await page.getByRole('button',{name:'Reset to default',exact:true}).click();await save();
     await page.setViewportSize({width:390,height:844});
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    await page.getByRole('button',{name:'Menu',exact:true}).click();
     await page.getByRole('button',{name:'Mail',exact:true}).click();await item().waitFor();
     assert.equal(await item().locator('.mail-list-line').count(),3);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));

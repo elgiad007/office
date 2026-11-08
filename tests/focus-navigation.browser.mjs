@@ -118,7 +118,7 @@ export async function testSettingsNavigation(page,url) {
     for(const remapped of [false,true]){
       keys=remapped?{left:'H',right:'L',down:'J',up:'K',pageDown:'F'}:{};
       const [left,right,down,up]=remapped?['H','L','J','K']:['h','l','j','k'];
-      await page.setViewportSize(remapped?{width:700,height:450}:{width:1440,height:600});
+      await page.setViewportSize(remapped?{width:900,height:450}:{width:1440,height:600});
       await page.goto(url+'#settings');
       await page.evaluate(()=>sessionStorage.removeItem('office-settings-page'));
       await page.reload();

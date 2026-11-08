@@ -68,6 +68,7 @@ export async function testTaskView(page,url) {
     await page.getByRole('menuitem',{name:'Mark complete',exact:true}).click();await selected('custom');
     assert.equal(records.find(r=>r.id==='later').meta.done,true);
     await page.setViewportSize({width:390,height:844});
+    if(await page.locator('.mobile-back').isVisible())await page.locator('.mobile-back').click();
     await open();assert.ok(await page.getByLabel('Sort tasks by').isVisible());
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.screenshot({path:'test-results/task-view-mobile.png',fullPage:true});

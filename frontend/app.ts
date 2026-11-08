@@ -27,6 +27,7 @@ import {createActivity} from './activity.js';
 import {agendaEventLabel,createCalendar,dateOnly,upcomingEvents} from './calendar.js';
 import {timestampLabel, configureTimeLabels, refreshTimeLabels} from './time-labels.js';
 import {panelSplitter, setupPanelSizing} from './panel-sizing.js';
+import {mobileDisclosure, phoneLayout, setDisclosure} from './mobile-layout.js';
 
 const apps: Record<string, {name: string; singular: string; empty: string; hint: string; icon: string}> = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -134,7 +135,7 @@ function rememberSelection() {
 }
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys()});
-const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,open:selectRecord,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
+const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
 const connections=createConnections({api,icon,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
@@ -152,6 +153,7 @@ function returnFromMailDraft(id: string) {
   state.mailFolder=origin.folder;state.mailScope=structuredClone(origin.scope);state.search=origin.search;
   state.selected.clear();selectionAnchor=null;keyboardSelection=false;
   state.current=navigableRows().find(r=>r.id===origin.selectedId)||navigableRows()[0]||null;
+  mobileItemOpen=false;
   renderWorkspace();setMode('normal');focusList();
 }
 let saveTimer: ReturnType<typeof setTimeout>, keySequence='', sequenceTime=0;
@@ -159,7 +161,7 @@ let selectionAnchor: string | null=null,keyboardSelection=false;
 let sendingMail=false;
 let pendingSend: OfficeRecord | null=null;
 const isPendingSend=(id: string | undefined)=>!!pendingSend&&pendingSend.id===id;
-const viewingPendingSend=()=>state.app==='mail'&&isPendingSend(state.current?.id);
+const viewingPendingSend=()=>state.app==='mail'&&isPendingSend(state.current?.id)&&(!phoneLayout.matches||mobileItemOpen);
 function renderSendStatus() {
   document.querySelector<HTMLElement>('#mail-send-status')!.hidden=!pendingSend||viewingPendingSend();
 }
@@ -444,6 +446,8 @@ function authView(status: Status) {
 }
 async function boot() {
   setItemFullScreen(false);
+  mobileItemOpen=false;
+  mobileListPosition=undefined;
   appEntryVersion++;
   backupRequest?.abort();
   backupRequest=undefined;
@@ -469,7 +473,7 @@ window.addEventListener('resize',()=>panelSizing?.refresh());
 function shell() {
   const syncStatus=document.querySelector<HTMLElement>('#sync-status')!;
   syncStatus.textContent='Automatic sync';syncStatus.hidden=false;
-  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?'<section id="mail-folder-navigation" aria-label="Mail folders"></section>':''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="workspace"><header class="topbar"><div class="breadcrumb"><h1 id="crumb"></h1></div><div class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new','Compose','compose')}${headerAction('import','Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><button type="button" class="mobile-only mobile-menu-close" data-action="mobile-menu-close">Close menu</button><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?`<div id="mobile-folder-control" class="mobile-only">${mobileDisclosure('mail-folder-navigation','Mail folders','mobile-folder-toggle')}</div><section id="mail-folder-navigation" aria-label="Mail folders"></section>`:''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="mobile-only mobile-menu-backdrop" data-mobile-menu-backdrop></div><div class="workspace"><header class="topbar"><div class="breadcrumb"><button type="button" id="mobile-menu" class="mobile-only" data-action="mobile-menu" aria-controls="app-sidebar" aria-expanded="false">Menu</button><h1 id="crumb"></h1></div><div id="header-controls" class="topbar-controls"><button type="button" id="mobile-header-more" class="mobile-only mobile-disclosure" data-action="mobile-disclosure" aria-controls="header-controls" aria-expanded="false">More</button><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new','Compose','compose')}${headerAction('import','Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button class="quiet" data-action="sync" id="sync-button" title="Refresh connected accounts">↻ <span>Sync now</span></button><span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary title="Upcoming agenda"><time></time></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
   panelSizing=setupPanelSizing(root.querySelector<HTMLElement>('.shell')!,()=>setMailFolderPanel(false));
   setupTopAgenda();
   root.onclick=handleClick;
@@ -525,6 +529,12 @@ function setMailFolderPanel(open: boolean,restoreFocus=false) {
   const shell=root.querySelector<HTMLElement>('.shell')!;
   const trigger=shell.querySelector<HTMLButtonElement>('[data-app="mail"]')!;
   const panel=shell.querySelector<HTMLElement>('#mail-folder-navigation')!;
+  if(phoneLayout.matches){
+    shell.classList.remove('folders-open');
+    trigger.removeAttribute('aria-controls');
+    trigger.removeAttribute('aria-expanded');
+    return;
+  }
   const collapsed=shell.classList.contains('sidebar-collapsed');
   const wasOpen=shell.classList.contains('folders-open');
   shell.classList.toggle('folders-open',open);
@@ -543,6 +553,8 @@ function setMailFolderPanel(open: boolean,restoreFocus=false) {
   }
 }
 function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,captureSidebarFocus,closeFolderPanel:()=>{
+  mobileItemOpen=false;
+  if(phoneLayout.matches)showMobileMenu(false,true);
   setMailFolderPanel(false,true);
 }}; }
 function mailLocation(record: OfficeRecord) {
@@ -735,6 +747,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   panelSizing.refresh();
   document.querySelector<HTMLElement>('#mail-toolbar')!.hidden=state.app!=='mail';
   document.querySelector<HTMLElement>('#mail-folder-navigation')!.hidden=state.app!=='mail';
+  document.querySelector<HTMLElement>('#mobile-folder-control')!.hidden=state.app!=='mail';
   if(state.app!=='mail')setMailFolderPanel(false);
   if(entryVersion!==undefined&&!initialRecords&&!document.hidden){
     // Let the loading screen paint before a fast response triggers rendering.
@@ -818,6 +831,77 @@ function renderAppHeader() {
   toolbar.innerHTML=toolbar.hidden?'':`${state.app==='calendar'?`<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">`:''}<div class="header-action-group">${headerAction('new','New '+a.singular)}${headerAction('import','Import')}${headerAction('export-all','Export')}</div>`;
 }
 let fullScreenItemId: string | undefined;
+let mobileItemOpen=false;
+let mobileListPosition: {context: string; top: number; id?: string} | undefined;
+const mobileListContext=()=>JSON.stringify([state.app,state.mailFolder,state.mailScope?.account,state.mailScope?.folder,state.search]);
+const mobileListScroller=()=>document.querySelector<HTMLElement>(state.app==='calendar'?'#calendar-surface':'#items');
+const mobileBackButton='<button type="button" class="mobile-only mobile-back" data-action="mobile-back">← Back to list</button>';
+
+function showMobileMenu(open: boolean, restoreFocus=false) {
+  const trigger=document.querySelector<HTMLElement>('#mobile-menu');
+  const wasOpen=trigger?.getAttribute('aria-expanded')==='true';
+  setDisclosure(trigger,open);
+  if(open)focusSidebar();
+  else if(wasOpen&&restoreFocus)trigger?.focus({preventScroll:true});
+}
+
+function openMobileItem(id?: string) {
+  if(!mobileItemOpen){
+    const list=mobileListScroller();
+    if(list)mobileListPosition={context:mobileListContext(),top:list.scrollTop,id};
+  }
+  mobileItemOpen=true;
+}
+
+function applyMobilePane() {
+  if(!state.current)mobileItemOpen=false;
+  document.querySelector('.shell')?.classList.toggle('mobile-item-open',mobileItemOpen);
+}
+
+async function backToMobileList() {
+  await waitForAttachments();
+  await leaveEditor();
+  mobileItemOpen=false;
+  if(state.app==='calendar')state.current=null;
+  setItemFullScreen(false);
+  renderDetail();
+  setMode('normal');
+  lastPane='list';
+  const position=mobileListPosition;
+  mobileListPosition=undefined;
+  const list=mobileListScroller();
+  if(position?.context===mobileListContext()&&list){
+    list.scrollTop=position.top;
+    const row=position.id&&list.querySelector<HTMLElement>(`[data-id="${CSS.escape(position.id)}"]`);
+    if(row){row.focus({preventScroll:true});return;}
+  }
+  focusList();
+}
+
+phoneLayout.addEventListener('change',()=>{
+  const panel=document.querySelector<HTMLElement>('#detail');
+  if(!panel)return;
+  showMobileMenu(false);
+  setMailFolderPanel(false);
+  if(phoneLayout.matches&&(isUnsavedDraft()||state.dirty||document.activeElement?.closest('#detail')))openMobileItem();
+  applyMobilePane();
+  // An active editor stays mounted when rotating or resizing.
+  if(state.app==='calendar'&&!state.dirty)calendar.render();
+  if(!state.dirty&&!document.activeElement?.closest('#detail'))renderDetail();
+});
+
+// Safari can shrink only the visual viewport when the keyboard opens.
+function fitMobileKeyboard() {
+  const viewport=window.visualViewport;
+  const editing=editable(document.activeElement);
+  const keyboard=phoneLayout.matches&&viewport?.scale===1&&editing&&innerHeight-viewport.height>120;
+  if(keyboard)document.documentElement.style.setProperty('--office-keyboard-height',`${Math.round(viewport.height)}px`);
+  else document.documentElement.style.removeProperty('--office-keyboard-height');
+}
+window.visualViewport?.addEventListener('resize',fitMobileKeyboard);
+phoneLayout.addEventListener('change',fitMobileKeyboard);
+document.addEventListener('focusout',()=>requestAnimationFrame(fitMobileKeyboard));
+
 const fullScreenButton = '<button type="button" class="quiet item-fullscreen-enter" data-action="item-fullscreen">Full screen</button>';
 const exitFullScreenButton = '<button type="button" class="item-fullscreen-exit" data-action="item-fullscreen">Exit full screen</button>';
 
@@ -842,11 +926,13 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   renderAppHeader();
   const a=apps[state.app];
   if(state.app==='calendar'){
-    document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${exitFullScreenButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
+    document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${exitFullScreenButton}${mobileBackButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
     document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;renderList();};
-    calendar.render();if(state.current)calendar.ensureVisible(state.current.id);renderDetail();return;
+    calendar.render();
+    if(state.current&&(!phoneLayout.matches||mobileItemOpen))calendar.ensureVisible(state.current.id);
+    renderDetail();return;
   }
-  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid">${exitFullScreenButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap"><label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
+  document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="work-grid">${exitFullScreenButton}${mobileBackButton}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app==='mail'?'<button type="button" class="mobile-only" data-action="mobile-folders">Folders</button>':''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section><section class="detail" id="detail" aria-label="Selected ${a.singular}"></section></div>`;
   panelSizing.bindList(document.querySelector<HTMLElement>('[data-resize-panel="list"]')!);
   document.querySelector<HTMLInputElement>('#search')!.oninput=event=>{state.search=(event.target as HTMLInputElement).value;mailListLimit=100;renderList();};
   if(state.app==='tasks')bindTaskViewControls();
@@ -859,9 +945,11 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
       const select=(event.target as HTMLSelectElement), folder=select.value, restoreSidebar=captureSidebarFocus(); select.disabled=true;
       try {
         await leaveEditor();
+        mobileItemOpen=false;
         state.mailFolder=folder; state.mailScope=null;mailListLimit=100; state.current=navigableRows()[0]||null; state.selected.clear(); selectionAnchor=null;keyboardSelection=false;setMode('normal');
         if(state.current?.meta.folder==='Drafts')mailDraftOrigins.set(state.current.id,mailDraftOrigin(false));
         await load();
+        if(phoneLayout.matches)showMobileMenu(false,true);
         setMailFolderPanel(false,true);
       } finally { select.value=state.mailFolder; select.disabled=false; restoreSidebar(); }
     });
@@ -991,11 +1079,17 @@ async function hydrateMailBody(record: OfficeRecord,manual=false) {
 }
 let displayedMailBody: string | undefined;
 function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
+  applyMobilePane();
   renderSendStatus();
   const scrollingPanel=document.querySelector<HTMLElement>('#detail');
   if(scrollingPanel)keyboardScrollers.get(scrollingPanel)?.cancel();
   const panel=document.querySelector<HTMLElement>('#detail')!, r=state.current, a=apps[state.app];
   setItemFullScreen(!!r&&r.id===fullScreenItemId);
+  if(phoneLayout.matches&&!mobileItemOpen){
+    displayedMailId=null;
+    if(!toolbarOnly)panel.replaceChildren();
+    return;
+  }
   if(viewingPendingSend()){
     panel.classList.remove('mail-reader');
     if(!panel.querySelector('.mail-send-progress'))panel.innerHTML='<div class="empty mail-send-progress" role="status" tabindex="-1"><span class="connection-opening-spinner" aria-hidden="true"></span><h2>Sending message…</h2><p>You can keep working while Office sends this message.</p></div>';
@@ -1023,6 +1117,13 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const markup=`${viewingMail?'':`<div class="detail-toolbar"><div class="left ${state.app==='mail'?'mail-detail-heading':''}"><span class="eyebrow">${remote?(state.app==='mail'?'Cached message':'Synced · read only'):a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote?'Cached copy':isUnsavedDraft()?'Unsaved draft':state.dirty?'Unsaved changes':'Saved'}</span>${!isUnsavedDraft()&&['wiki','documents'].includes(state.app)?'<button class="quiet" data-action="history">History</button>':''}${state.app==='wiki'?`<button data-action="wiki-mode">${state.wikiEditing?'View page':'Edit source'}</button>`:''}<button class="quiet" data-action="export">Export</button>${!remote?`<button class="primary" data-action="save">Save</button><button class="quiet danger" data-action="delete" title="${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete selected item'}">${isUnsavedDraft()||r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft':'Delete'}</button>`:''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
   const template=document.createElement('template');template.innerHTML=markup;
   template.content.querySelector(viewingMail?'.mail-header-badges':'.detail-toolbar .right')?.insertAdjacentHTML('beforeend',fullScreenButton);
+  const toolbar=template.content.querySelector('.detail-toolbar .right');
+  if(toolbar){
+    const secondary=template.content.querySelectorAll('.detail-toolbar [data-action="history"],.detail-toolbar [data-action="export"],.detail-toolbar [data-action="delete"]');
+    toolbar.insertAdjacentHTML('beforeend',mobileDisclosure('item-secondary-actions','More actions')+'<div id="item-secondary-actions" class="item-secondary-actions mobile-collapsible"></div>');
+    const actions=toolbar.lastElementChild!;
+    secondary.forEach(button=>actions.append(button));
+  }
   if(toolbarOnly){
     for(const selector of ['.detail-toolbar','.print-only'])panel.querySelector(selector)?.replaceWith(template.content.querySelector(selector)!);
     updateSaveButton();
@@ -1094,10 +1195,10 @@ function detailContent(r: OfficeRecord) {
   if (state.app==='contacts') content+=`<div class="fields">${field('Email','email',m.email,'email')}${field('Phone','phone',m.phone,'tel')}${field('Company','company',m.company)}${field('Group','group',m.group)}</div>`;
   if (state.app==='calendar') content+=`<label class="check-label"><input type="checkbox" name="allDay" ${dateOnly(m.start)?'checked':''} ${disabled}> All day</label><div class="fields">${field('Start (local time)','start',dateOnly(m.start)?m.start:localInput(m.start),dateOnly(m.start)?'date':'datetime-local',disabled)}${field(dateOnly(m.start)?'End (exclusive date)':'End (local time)','end',dateOnly(m.start)?m.end:localInput(m.end),dateOnly(m.start)?'date':'datetime-local',disabled)}${field('Location','location',m.location,'text',disabled)}</div>${m.rawIcs||m.raw?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>`:''}`;
   if (state.app==='mail') content+=`<div class="fields">${field('To (one recipient)','to',m.to,'email','required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount&&!mailAccounts().some(a=>a.id===m.sendAccount)?`<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>`:''}${mailAccounts().map(a=>`<option value="${a.id}" ${m.sendAccount===a.id?'selected':''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
-  if (state.app==='documents') content+=`<div class="document-content"><div class="rich-toolbar" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
+  if (state.app==='documents') content+=`<div class="document-content">${mobileDisclosure('document-formatting','Formatting')}<div id="document-formatting" class="rich-toolbar mobile-collapsible" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
   else if (state.app==='sheets') content+=sheetContent(r);
   else content+=`<label>${state.app==='wiki'?'Markdown source':state.app==='mail'?'Message':'Notes'}<textarea class="body-editor" name="body" ${disabled}>${e(r.body)}</textarea></label>`;
-  if (state.app==='mail') content+=attachmentSection(r)+`<div class="head-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail?'disabled':''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
+  if (state.app==='mail') content+=attachmentSection(r)+`<div class="head-actions compose-send-actions"><button type="button" class="primary" data-action="send" title="Send message (Ctrl+Enter)" ${sendingMail?'disabled':''}>Send message</button><span class="muted">Ctrl+Enter to send. Saved drafts are never sent automatically.</span></div>`;
   return content+'</form>';
 }
 function localInput(value?: string) { if (!value) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value+'T00:00'; if (!/[Zz]|[+-]\d\d:\d\d$/.test(value)) return value.slice(0,16); const d=new Date(value); return new Date(+d-d.getTimezoneOffset()*60000).toISOString().slice(0,16); }
@@ -1210,6 +1311,8 @@ async function openConnectedRecord(id:string){
   if(version!==appEntryVersion)return;
   if(!apps[record.kind])throw new CommandError('This item type is not available in this version.');
   rememberSelection();
+  mobileItemOpen=true;
+  mobileListPosition=undefined;
   if(record.kind==='mail')clearMailCache();
   state.app=record.kind;state.current=null;state.search='';state.sheet=0;state.cell='A1';setMode('normal');location.hash=record.kind;
   if(record.kind==='mail'){
@@ -1220,13 +1323,17 @@ async function openConnectedRecord(id:string){
     await load(record.id,{selectFirst:record.kind!=='mail',revealMail:record.kind==='mail',entryVersion});
     if(entryVersion!==appEntryVersion)return;
     if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
-    if(record.kind==='lists')focusContent();else focusList();
+    if(record.kind==='lists'||phoneLayout.matches&&mobileItemOpen)focusContent();else focusList();
     document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
   });
   if(opened&&record.kind==='mail'&&(state.current as OfficeRecord|null)?.id!==record.id)throw new CommandError('This linked item is no longer available. Reopen the connections window and try again.');
 }
 async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope,settingsDestination?: typeof settingsPages[number][0]) {
   await waitForAttachments();await leaveEditor();rememberSelection();
+  mobileItemOpen=false;
+  mobileListPosition=undefined;
+  showMobileMenu(false);
+  setDisclosure(document.querySelector('#mobile-header-more'),false);
   if(settingsDestination)selectSettingsPage(settingsDestination);
   if(state.app==='mail'&&name!=='mail'&&!appEntryVisible()){
     retainMailRows();
@@ -1256,6 +1363,7 @@ async function changeApp(name: AppName,keepSidebar=false,mailScope?: MailScope,s
 }
 async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>,warm=false) {
   setItemFullScreen(false);
+  document.querySelector('.shell')?.classList.remove('mobile-item-open');
   const version=++appEntryVersion;
   const main=document.querySelector<HTMLElement>('#main')!;
   const controls=document.querySelectorAll<HTMLElement>('#app-toolbar,#mail-toolbar,#mail-folder-navigation');
@@ -1289,7 +1397,27 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false) { const pane=activePane(); await waitForAttachments(); await leaveEditor(); const previous=state.current?.id,origin=mailDraftOrigin(false);state.current=state.rows.find(r=>r.id===id)||null;if(state.app==='wiki'){state.wikiEditing=false;setMode('normal');}if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin); state.sheet=0; state.cell='A1'; if(state.app==='mail'){if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();if(previous)updateMailListItem(previous);if(state.current)updateMailListItem(state.current!.id);}else renderList(); if(state.app==='calendar')calendar.ensureVisible(id);renderDetail(); if(focus===true&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
+async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false,openItem=false) {
+  const pane=activePane();
+  await waitForAttachments();await leaveEditor();
+  const previous=state.current?.id,origin=mailDraftOrigin(false);
+  state.current=state.rows.find(r=>r.id===id)||null;
+  if(state.current&&openItem)openMobileItem(id);
+  if(state.app==='wiki'){state.wikiEditing=false;setMode('normal');}
+  if(state.app==='mail'&&state.current?.meta.folder==='Drafts'&&previous!==id)mailDraftOrigins.set(id,origin);
+  state.sheet=0;state.cell='A1';
+  if(state.app==='mail'){
+    if(!document.querySelector('#items [data-id="'+CSS.escape(id)+'"]'))renderList();
+    if(previous)updateMailListItem(previous);
+    if(state.current)updateMailListItem(state.current.id);
+  }else renderList();
+  if(state.app==='calendar')calendar.ensureVisible(id);
+  renderDetail();
+  if(phoneLayout.matches&&mobileItemOpen){
+    if(previous!==id||openItem)document.querySelector<HTMLElement>('#detail')!.scrollTop=0;
+    document.querySelector<HTMLElement>('.mobile-back')?.focus({preventScroll:true});return;
+  }
+  if(focus===true&&pane==='content'){focusContent();document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});}else if(focus){
   const selected=document.querySelector<HTMLElement>('#selected-item');
   selected?.focus({preventScroll:true});
   if(focus===true)selected?.scrollIntoView({block:'nearest',inline:'nearest'});
@@ -1307,7 +1435,7 @@ async function clickRecord(id: string,event: MouseEvent) {
     if(state.selected.has(id))state.selected.delete(id);else state.selected.add(id);
     selectionAnchor=id;
   }else{if(!keyboardSelection)state.selected.clear();selectionAnchor=id;}
-  renderList();await selectRecord(id,true);
+  renderList();await selectRecord(id,true,!event.shiftKey&&!event.ctrlKey&&!event.metaKey);
 }
 function mailAccounts() { return state.accounts.filter(a=>['imap','google'].includes(a.type)); }
 function draftAccount(context?: OfficeRecord | null) {
@@ -1318,13 +1446,14 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
   await waitForAttachments(); await leaveEditor(); const kind=state.app;
   if (!apps[kind]) return;
   const previous=state.current;
+  openMobileItem(previous?.id);
   const origin=kind==='mail'?mailDraftOrigin():undefined;
   const record: ItemInput={kind:kind as ItemKind,title:initial.title||'Untitled '+apps[kind].singular,body:initial.body||'',meta:{...(kind==='mail'?{folder:'Drafts'}:{}),...initial.meta}};
   if(kind==='mail' && !record.meta.sendAccount)record.meta.sendAccount=draftAccount(previous);
   if(kind==='calendar'&&!record.meta.start) { const start=new Date(); start.setMinutes(0,0,0); record.meta.start=start.toISOString(); record.meta.end=new Date(+start+3600000).toISOString(); }
   if(kind==='sheets')record.meta.workbook={sheets:[{name:'Sheet 1',cells:{}}]};
   if(kind==='lists')record.meta.checklist=[];
-  if(kind==='mail'&&!keepMailList){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
+  if(kind==='mail'&&!keepMailList&&!phoneLayout.matches){state.mailScope=null;if(state.mailFolder!=='all')state.mailFolder='Drafts';}
   try {
     const now=new Date().toISOString();
     state.current={...record,id:'draft-'+crypto.randomUUID(),revision:0,created:now,updated:now};unsavedDraft=state.current;
@@ -1341,6 +1470,7 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
 }
 function enterEdit(preferTitle=false) {
   if (state.current?.meta.remote) {notice('This synced copy is read-only.');return;}
+  if(phoneLayout.matches&&state.current&&!mobileItemOpen){openMobileItem(state.current.id);renderDetail();}
   if(state.app==='wiki'&&!state.wikiEditing){state.wikiEditing=true;renderDetail();}
   const title=preferTitle||state.app==='lists';
   const target=state.app==='sheets'?document.querySelector<HTMLInputElement>('#formula')!:title?document.querySelector<HTMLInputElement>('.title-input')!:state.app==='documents'?document.querySelector<HTMLElement>('#rich-editor')!:document.querySelector<HTMLTextAreaElement>('#detail [name=body]')!;
@@ -1624,18 +1754,36 @@ async function handleClick(event: MouseEvent) {
   await attempt(async()=>{
     if(button.dataset.app){
       const app=button.dataset.app as AppName;
-      if(app==='mail'&&button.closest('.sidebar-collapsed')){
+      if(phoneLayout.matches&&app===state.app&&!appEntryVisible()){
+        if(mobileItemOpen)await backToMobileList();
+        showMobileMenu(false,true);
+      }else if(!phoneLayout.matches&&app==='mail'&&button.closest('.sidebar-collapsed')){
         if(state.app===app&&!appEntryVisible())setMailFolderPanel(!button.closest('.folders-open'));
         else if(await changeApp(app,true)&&button.closest('.sidebar-collapsed'))setMailFolderPanel(true);
       }else await changeApp(app,event.detail===0&&document.activeElement===button);
       return;
     }
+    if(button.dataset.action==='mobile-menu'){showMobileMenu(button.getAttribute('aria-expanded')!=='true',true);return;}
+    if(button.dataset.action==='mobile-menu-close'){showMobileMenu(false,true);return;}
+    if(button.dataset.action==='mobile-disclosure'){setDisclosure(button,button.getAttribute('aria-expanded')!=='true');return;}
     if(appEntryVisible()&&button.dataset.action!=='logout')return;
     if(button.dataset.id!){await clickRecord(button.dataset.id!,event);return;}
-    if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
+    if(button.dataset.wiki!){const page=state.rows.find(r=>r.title===button.dataset.wiki!);if(page){await selectRecord(page.id,false,true);}else{confirmation('Create page',`Create “${button.dataset.wiki!}”?`,()=>createRecord({title:button.dataset.wiki!}));}return;}
     if(button.dataset.cell!){selectCell(button.dataset.cell!,true);return;}
     if(button.dataset.sheet!==undefined){await commit();state.sheet=Number(button.dataset.sheet!);state.cell='A1';renderDetail();return;}
     const action=button.dataset.action!;
+    if(action==='mobile-back'){await backToMobileList();return;}
+    if(action==='mobile-folders'){
+      setDisclosure(document.querySelector('#mobile-folder-toggle'),true);
+      showMobileMenu(true);
+      document.querySelector<HTMLElement>('#mail-folder')?.focus();
+      return;
+    }
+    if(phoneLayout.matches&&button.closest('.topbar')&&action!=='sync'){
+      const more=document.querySelector<HTMLElement>('#mobile-header-more');
+      if(more?.getAttribute('aria-expanded')==='true'){setDisclosure(more,false);more.focus({preventScroll:true});}
+    }
+    if(phoneLayout.matches&&button.closest('.sidebar-bottom'))showMobileMenu(false,true);
     if(action==='item-fullscreen'){toggleItemFullScreen();return;}
     if(action==='connections'){await connections.view(true);return;}
     if(action==='close-mail-folders')setMailFolderPanel(false,true);
@@ -1943,7 +2091,8 @@ function renderSettings(entryVersion?: number) {
   const focusedCategory=focused?.closest<HTMLElement>('[data-settings-category]')?.dataset.settingsCategory;
   const focusedPage=focused?.closest<HTMLElement>('[data-settings-page]')?.dataset.settingsPage;
   main.innerHTML=`<div class="settings">
-    <nav class="settings-navigation" aria-label="Settings categories">
+    ${mobileDisclosure('settings-categories',e(settingsPages.find(([id])=>id===settingsPage)![1])+' · Settings categories')}
+    <nav id="settings-categories" class="settings-navigation mobile-collapsible" aria-label="Settings categories">
       ${settingsPages.map(([id,label])=>`<button type="button" data-settings-category="${id}" aria-label="${label} settings" aria-controls="settings-${id}" aria-current="${settingsPage===id?'page':'false'}" tabindex="${settingsPage===id?0:-1}">${label}</button>`).join('')}
     </nav>
     <section class="settings-grid" id="settings-appearance" data-settings-page="appearance"${settingsPage==='appearance'?'':' hidden'}>
@@ -2008,6 +2157,9 @@ function renderSettings(entryVersion?: number) {
     selectSettingsPage(button.dataset.settingsCategory!);
     categories.forEach(category=>category.setAttribute('aria-current',category===button?'page':'false'));
     pages.forEach(page=>page.hidden=page.dataset.settingsPage!==settingsPage);
+    const categoryToggle=main.querySelector<HTMLElement>('#settings-categories-toggle')!;
+    categoryToggle.textContent=button.textContent+' · Settings categories';
+    if(phoneLayout.matches){setDisclosure(categoryToggle,false);categoryToggle.focus({preventScroll:true});}
     loadRules();
     main.scrollTop=0;
   });
@@ -2077,7 +2229,12 @@ function restoreConnectionsFocus(opener:HTMLElement|null) {
 }
 function focusList() {
   if(fullScreenItemId){focusContent();return;}
-  if(state.app==='settings'&&activeSettingsPanel()){focusSettingsCategory();return;}
+  if(phoneLayout.matches&&mobileItemOpen){focusContent();return;}
+  if(state.app==='settings'&&activeSettingsPanel()){
+    if(phoneLayout.matches)document.querySelector<HTMLElement>('#settings-categories-toggle')?.focus({preventScroll:true});
+    else focusSettingsCategory();
+    return;
+  }
   const entry=document.querySelector<HTMLElement>('#selected-item')||document.querySelector<HTMLElement>('#items')||document.querySelector<HTMLElement>('#main');
   if(entry){if(entry.id!=='selected-item')entry.tabIndex=-1;entry.focus({preventScroll:true});}
 }
@@ -2236,9 +2393,16 @@ function scrollFocusedPane(target: HTMLElement,direction: ScrollDirection) {
   return true;
 }
 let lastPane: 'content'|'list'='list';
-function activePane(): 'content'|'list' {const node=document.activeElement;if(fullScreenItemId||node?.closest('#detail'))return 'content';if(node?.closest('#items'))return 'list';return lastPane;}
+function activePane(): 'content'|'list' {
+  if(phoneLayout.matches)return mobileItemOpen?'content':'list';
+  const node=document.activeElement;
+  if(fullScreenItemId||node?.closest('#detail'))return 'content';
+  if(node?.closest('#items'))return 'list';
+  return lastPane;
+}
 document.addEventListener('focusin',event=>{
   const node=event.target as HTMLElement;
+  if(phoneLayout.matches&&!node.closest('#app-sidebar,#mobile-menu,dialog')&&document.querySelector('#app-sidebar.mobile-expanded'))showMobileMenu(false);
   if(node.closest('#detail'))lastPane='content';
   else if(node.closest('#items,#main'))lastPane='list';
   else if(node.closest('.sidebar')){lastSidebarEntry=sidebarEntrySelector(node);keySequence='';setMode('normal');}
@@ -2253,6 +2417,14 @@ document.addEventListener('keydown',event=>{
   if(!document.querySelector('.shell'))return;
   state.lastActivity=Date.now();if(document.querySelector<HTMLDialogElement>('dialog[open]')!)return;
   const target=event.target as HTMLElement;
+  if(phoneLayout.matches&&event.key==='Escape'&&document.querySelector('#app-sidebar.mobile-expanded')){
+    event.preventDefault();showMobileMenu(false,true);return;
+  }
+  if(phoneLayout.matches&&event.key==='Escape'){
+    const toggle=[...document.querySelectorAll<HTMLElement>('.mobile-disclosure[aria-expanded="true"]')].find(button=>
+      button===target||document.getElementById(button.getAttribute('aria-controls')!)?.contains(target));
+    if(toggle){event.preventDefault();setDisclosure(toggle,false);toggle.focus({preventScroll:true});return;}
+  }
   if(target.closest('[data-mail-disclosure]')&&!(fullScreenItemId&&['Escape',':'].includes(event.key)))return;
   const exportMenu=target.closest<HTMLDetailsElement>('#mail-export-menu[open]');
   if(event.key==='Escape'&&exportMenu){
@@ -2275,7 +2447,9 @@ document.addEventListener('keydown',event=>{
   if(state.app==='lists'&&target.id==='search'&&(event.key==='Enter'||event.key==='Escape')&&!event.isComposing){
     event.preventDefault();setMode('normal');focusList();
     const row=navigableRows()[0];
-    if(event.key==='Enter'&&row&&row.id!==state.current?.id)void attempt(()=>selectRecord(row.id,true));
+    if(event.key==='Enter'&&row&&(phoneLayout.matches||row.id!==state.current?.id)){
+      void attempt(()=>selectRecord(row.id,true,true));
+    }
     return;
   }
   if(state.app==='lists'&&event.key==='Escape'&&target.matches('.checklist-add input,.checklist-title input')&&!event.isComposing){
@@ -2288,11 +2462,11 @@ document.addEventListener('keydown',event=>{
   const vimDirection=vimScrollDirection(event);
   if(vimDirection){if(scrollFocusedPane(event.target as HTMLElement,vimDirection)!==false){event.preventDefault();keySequence='';}return;}
   if(event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
-  if(!fullScreenItemId&&event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';focusList();return;}
+  if(!phoneLayout.matches&&!fullScreenItemId&&event.key==='Tab'&&event.shiftKey&&target===contentEntry()){event.preventDefault();keySequence='';focusList();return;}
   const checklistRow=target.closest<HTMLElement>('[data-checklist-row]');
   const checklistArrow=checklistRow&&(event.key==='ArrowUp'||event.key==='ArrowDown');
   if(!checklistArrow&&target.closest('button:not(#items [data-id]):not([data-cell]),a,summary,select,input')&&['Enter',' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return;
-  if(event.key==='Tab'&& !event.shiftKey && (target.matches('#selected-item')||state.current&&target.id==='items')){event.preventDefault();keySequence='';focusContent();return;}
+  if(!phoneLayout.matches&&event.key==='Tab'&&!event.shiftKey&&(target.matches('#selected-item')||state.current&&target.id==='items')){event.preventDefault();keySequence='';focusContent();return;}
   if(event.key===':'&&!event.isComposing&&state.mode==='normal'){event.preventDefault();if(!event.repeat)openCommand();return;}
   const k=keys(), key=event.key;setMode('normal');
   const mailBody=state.app==='mail'&&state.current&&state.current.meta.folder!=='Drafts'&&!!target.closest('.mail-body,.mail-html');
@@ -2308,8 +2482,20 @@ document.addEventListener('keydown',event=>{
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
   if(action==='help'){event.preventDefault();help();return;}
-  if(action==='left'){event.preventDefault();if(state.app!=='settings'&&activePane()==='content')focusList();else focusSidebar();return;}
-  if(action==='right'){event.preventDefault();afterListPage(()=>{if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();});return;}
+  if(action==='left'){
+    event.preventDefault();
+    if(phoneLayout.matches){if(mobileItemOpen)void attempt(backToMobileList);else showMobileMenu(true);}
+    else if(state.app!=='settings'&&activePane()==='content')focusList();else focusSidebar();
+    return;
+  }
+  if(action==='right'){
+    event.preventDefault();
+    afterListPage(async()=>{
+      if(phoneLayout.matches&&!mobileItemOpen&&state.current)await selectRecord(state.current.id,false,true);
+      if(state.app==='sheets'&&state.current)selectCell(state.cell,true);else focusContent();
+    });
+    return;
+  }
   if(state.app==='settings')return;
   if(state.app==='lists'&&action==='addChecklistItem'&&activePane()==='content'){
     event.preventDefault();document.querySelector<HTMLInputElement>('.checklist-add input')?.focus();return;
@@ -2321,7 +2507,16 @@ document.addEventListener('keydown',event=>{
     const control=action==='completeTask'?'input':action==='edit'?'[data-checklist-edit]':action==='delete'?'[data-checklist-delete]':undefined;
     if(control){event.preventDefault();if(!event.repeat)checklistRow.querySelector<HTMLElement>(control)?.click();return;}
   }
-  if(action==='search'){event.preventDefault();setItemFullScreen(false);document.querySelector<HTMLInputElement>('#search')!?.focus();return;}
+  if(action==='search'){
+    event.preventDefault();
+    void attempt(async()=>{
+      if(phoneLayout.matches&&mobileItemOpen)await backToMobileList();
+      setItemFullScreen(false);
+      if(phoneLayout.matches&&state.app==='calendar')setDisclosure(document.querySelector('#mobile-header-more'),true);
+      document.querySelector<HTMLInputElement>('#search')?.focus();
+    });
+    return;
+  }
   if(action==='connections'){event.preventDefault();if(!event.repeat)void attempt(()=>connections.view());return;}
   if(action==='new'){event.preventDefault();void attempt(createRecord);return;}
   if(action==='completeTask'&&state.app==='tasks'&&!event.shiftKey){event.preventDefault();void attempt(completeTask);return;}
@@ -2357,6 +2552,7 @@ document.addEventListener('mousedown',event=>{
 });
 document.addEventListener('pointerdown',event=>{
   state.lastActivity=Date.now();
+  if((event.target as Element).closest('[data-mobile-menu-backdrop]'))showMobileMenu(false,true);
   if(document.querySelector('.folders-open')&&!(event.target as Element).closest('#mail-folder-navigation,[data-app="mail"]'))setMailFolderPanel(false);
 },{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});

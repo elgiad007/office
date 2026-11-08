@@ -90,7 +90,9 @@ export async function testMailCompact(page,url) {
     await page.getByRole('button',{name:'Check attachments',exact:true}).click();await page.locator('[data-file-status]').filter({hasText:'No file attachments.'}).waitFor();assert.equal(fileRequests,2);
     await page.reload();await select('unknown');assert.equal(await page.locator('[data-mail-disclosure="files"]').count(),0,'Confirmed empty manifest hides on subsequent renders');
     for(const viewport of [{width:900,height:650},{width:390,height:844}]){
-      await page.setViewportSize(viewport);await select('long');
+      await page.setViewportSize(viewport);
+      if(await page.locator('.mobile-back').isVisible())await page.locator('.mobile-back').click();
+      await select('long');
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Long subject and addresses fit viewport');
       await firstFrameMenu();assert.ok(await page.locator('.mail-more-popover').evaluate(node=>node.getBoundingClientRect().right<=innerWidth+1));
       await page.keyboard.press('Escape');await page.screenshot({path:`test-results/mail-compact-${viewport.width}.png`,fullPage:true});

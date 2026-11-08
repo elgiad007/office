@@ -19,6 +19,7 @@ export async function testAccountFolders(page,url) {
     else if(action==='accounts')json={accounts};
     else if(action==='sync')json={count:0};
     else if(action==='records')json={records};
+    else if(action==='connections')json={items:[],links:[],more:false};
     else if(action==='save'){
       const record={...input,id:input.id||'new-local-draft',revision:(input.revision||0)+1};records=records.filter(r=>r.id!==record.id);records.push(record);json={record};
     }
@@ -86,10 +87,10 @@ export async function testAccountFolders(page,url) {
     await open('gmail-a','Inbox');assert.equal(await page.locator('[data-manage-folder="delete"], [data-manage-folder="rename"]').count(),0,'system folder has no rename/delete controls');
     await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
     assert.equal(await page.locator('#mail-folder-navigation').isVisible(),false);
-    await page.locator('[data-app="mail"]').click();await page.locator('#mail-folder-navigation').waitFor({state:'visible'});
+    await page.getByRole('button',{name:'Folders',exact:true}).click();await page.locator('#mail-folder-navigation').waitFor({state:'visible'});
     await page.screenshot({path:'test-results/account-folders-mobile.png',fullPage:true});
     await open('imap-b','Travel');await page.locator('#mail-folder-navigation').waitFor({state:'hidden'});
-    assert.equal(await page.locator('[data-app="mail"]').getAttribute('aria-expanded'),'false');
+    assert.equal(await page.getByRole('button',{name:'Menu',exact:true}).getAttribute('aria-expanded'),'false');
     await page.setViewportSize({width:1440,height:1000});await open('imap-a','Orders');await page.screenshot({path:'test-results/account-folders.png',fullPage:true});
     holdNext=true;await page.locator('#folder-refresh').click();
     await page.waitForFunction(()=>document.querySelector('#folder-refresh').disabled);
@@ -98,7 +99,8 @@ export async function testAccountFolders(page,url) {
     const refreshed=page.waitForResponse(r=>r.url().includes('r=mail-folder-sync'));releaseSync();await refreshed;
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     assert.equal(await page.locator('[name="body"]').inputValue(),'Keep typing while a folder request finishes.','late folder response cannot replace a dirty draft');
-    await page.keyboard.press('Escape');await page.keyboard.press('Control+s');await page.getByText('Saved',{exact:true}).waitFor();
+    await page.keyboard.press('Escape');await page.keyboard.press('Control+s');
+    await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
     console.log('PASS account folders: discovery, nesting, account isolation, load more, cached failure, bulk filing, Gmail labels, management, system protection, mobile.');
   }finally{await page.unroute(routes);await page.goto(url+'#mail');await page.reload();await page.locator('.shell').waitFor();}
 }

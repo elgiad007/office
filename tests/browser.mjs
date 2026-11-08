@@ -40,6 +40,7 @@ import {testQuickMove} from './quick-move.browser.mjs';
 import {testSyncProgress} from './sync-progress.browser.mjs';
 import {testSyncScheduling,testOfflineSyncWindows} from './mail-sync-performance.browser.mjs';
 import {testItemMenus} from './item-menus.browser.mjs';
+import {testMobileLayout} from './mobile-layout.browser.mjs';
 const require=createRequire(process.env.OFFICE_NODE_MODULES || new URL('../package.json',import.meta.url));
 const {chromium}=require('playwright');
 const browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
@@ -48,6 +49,7 @@ await mkdir('test-results',{recursive:true});
 const url=process.env.OFFICE_TEST_URL||'http://127.0.0.1:8787/';
 const data=process.env.OFFICE_TEST_DATA||'.runtime/browser-data';
 try{
+ await testMobileLayout(browser,url);
  await page.goto(url);
  await page.locator('#auth-form, .shell').waitFor();
  if(await page.getByLabel('Setup token',{exact:true}).count()){

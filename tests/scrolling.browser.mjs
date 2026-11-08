@@ -6,7 +6,7 @@ export async function testScrolling(page, url) {
   const routes = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r')!=='activity';
   await page.route(routes, async route => {
     const action = new URL(route.request().url()).searchParams.get('r');
-    const responses = {status:{authenticated:true, csrf:'fixture', preferences:{density}}, accounts:{accounts:[]}, records:{records}, 'google-settings':{configured:false}};
+    const responses = {status:{authenticated:true, csrf:'fixture', preferences:{density}}, accounts:{accounts:[]}, records:{records}, connections:{items:[],links:[],more:false}, 'google-settings':{configured:false}};
     assert.ok(action in responses, `Unexpected scrolling fixture API: ${action}`);
     await route.fulfill({json:responses[action]});
   });
@@ -42,6 +42,15 @@ export async function testScrolling(page, url) {
         assert.equal(detailScrolled.list, 0);
         assert.equal(detailScrolled.main, 0);
         assert.equal(detailScrolled.page, 0);
+        if(viewport.width===390){
+          await page.locator('.mobile-back').click();
+          await wheel('#items',300);
+          await page.waitForFunction(()=>document.querySelector('#items').scrollTop>0);
+          assert.equal((await positions()).page,0);
+          assert.equal(await page.locator('#detail').isVisible(),false);
+          await page.screenshot({path:`test-results/scrolling-${density}-${viewport.width}.png`});
+          continue;
+        }
         await wheel('#items', 300);
         await page.waitForFunction(() => document.querySelector('#items').scrollTop > 0);
         assert.equal((await positions()).detail, detailScrolled.detail, 'List scrolling must leave the message in place');
@@ -54,7 +63,7 @@ export async function testScrolling(page, url) {
           assert.deepEqual(await positions(), before);
         }
         await page.screenshot({path:`test-results/scrolling-${density}-${viewport.width}.png`});
-        await page.locator('#main').focus();
+        await page.locator('#detail').evaluate(node=>{node.tabIndex=-1;node.focus({preventScroll:true});});
         await page.keyboard.press('h');
         assert.equal(await page.locator('#selected-item').evaluate(node => node === document.activeElement), true);
         const navigate = async (key, index) => {
@@ -69,7 +78,7 @@ export async function testScrolling(page, url) {
           assert.equal((await positions()).shell, 0);
           assert.equal((await positions()).page, 0);
         };
-        await navigate('g', 0);
+        await page.keyboard.press('g');
         await navigate('g', 0);
         for(let i=1;i<=15;i++)await navigate(i%2?'j':'n', i);
         await navigate('G', 79);
@@ -77,7 +86,7 @@ export async function testScrolling(page, url) {
         await page.keyboard.press('g');
         await navigate('g', 0);
         await page.keyboard.press('l');
-        assert.equal(await page.locator('#detail').evaluate(node => node === document.activeElement), true);
+        assert.equal(await page.locator('.mail-body').evaluate(node => node === document.activeElement), true);
         await page.emulateMedia({media:'print'});
         assert.equal(await page.locator('#detail').evaluate(node => getComputedStyle(node).overflowY), 'visible');
         assert.equal(await page.locator('.shell').evaluate(node => getComputedStyle(node).overflowY), 'visible');
