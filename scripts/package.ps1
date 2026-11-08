@@ -1,4 +1,4 @@
-param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256,[string]$ApacheRuntimeArchive,[string]$ApacheExpectedSha256)
+param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256,[string]$ApacheRuntimeArchive,[string]$ApacheExpectedSha256,[string]$DestinationPath)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 & node (Join-Path $PSScriptRoot 'frontend.mjs') --check
@@ -26,6 +26,7 @@ if($ApacheRuntimeArchive){
     if(!$ApacheExpectedSha256 -or (Get-FileHash -LiteralPath $ApacheRuntimeArchive -Algorithm SHA256).Hash -ne $ApacheExpectedSha256){throw 'A matching publisher SHA-256 is required for the Apache archive.'}
     Expand-Archive -LiteralPath $ApacheRuntimeArchive -DestinationPath (Join-Path $officePackage 'runtime\apache') -Force
 }
-Compress-Archive -LiteralPath $officePackage -DestinationPath (Join-Path $officeDist $officeZipName) -Force
-Write-Host (Join-Path $officeDist $officeZipName)
+$officeZip = if ($DestinationPath) { $DestinationPath } else { Join-Path $officeDist $officeZipName }
+Compress-Archive -LiteralPath $officePackage -DestinationPath $officeZip -Force
+if (!$DestinationPath) { Write-Host $officeZip }
 # Keep the clean extracted build for inspection. No user data or credentials are copied.

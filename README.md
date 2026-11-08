@@ -239,6 +239,18 @@ For a Windows ZIP, download an official PHP x64 NTS distribution, compare its ha
 
 The packaging script copies only release sources and an empty data directory. It never includes your live `data/`, `.runtime/` or test output. Release ZIPs and clean extracted build folders go into ignored `dist/`.
 
+### Prepare a GitHub release
+
+Set the release version in [`app/VERSION`](app/VERSION). Office shows it beneath the heading in **Keyboard shortcuts** (`?`). Place an official PHP x64 NTS ZIP at `.runtime/php.zip` and use its published SHA-256 when running the release command:
+
+```powershell
+./scripts/release.ps1 -ExpectedSha256 '<official PHP SHA-256>'
+```
+
+Use `-WindowsRuntimeArchive` to select a different PHP ZIP. To bundle portable Apache in the Windows ZIP, also supply `-ApacheRuntimeArchive` and `-ApacheExpectedSha256`.
+
+For version `0.1.0`, upload `portable-office-v0.1.0-hosting.zip`, `portable-office-v0.1.0-windows.zip`, and `SHA256SUMS.txt` from `dist/release-v0.1.0/`. Use tag `v0.1.0` and select the commit that matches the packaged files. To rebuild the same version, move its existing release folder first.
+
 See [the implementation plan](docs/implementation-plan.md) for staged work and acceptance criteria. No real-account or shared-host compatibility is implied by local tests.
 
 Gmail IMAP uses the server-designated Trash and All Mail folders for the default Trash/Archive actions, even when custom labels named `Trash` or `Archive` also exist. Moves reopen the source to verify removal and locate the destination through Gmail's account-wide message ID. Proven cached appearances of the moved message are reconciled together; unrelated messages with identical content are kept. After upgrading from the earlier app-password connector, refresh Office, choose **Refresh folders** for the Gmail account and use **Repair / resync** to refresh previously cached locations. An earlier custom `Trash` label is retained; messages filed there can be selected and moved to the actual Trash using the mail action. Live Gmail deletion acceptance remains separate from fixture checks.

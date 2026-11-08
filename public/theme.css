@@ -786,6 +786,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 dialog.help-dialog { box-sizing: border-box; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; padding: clamp(12px, 2vw, 28px); overflow: hidden; }
 dialog.help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
 .help-dialog .dialog-head { flex: none; margin: 0; }
+.help-version { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .help-tabs { flex: none; display: flex; gap: 8px; border-bottom: 1px solid var(--line); }
 .help-tabs button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .help-tabs [aria-selected="true"] { border-bottom: 2px solid var(--accent); font-weight: 700; }

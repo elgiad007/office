@@ -135,6 +135,7 @@ export function openHelp(dialog, keys, context, escape, onClose, onLink, opener 
         return;
     const entries = helpEntries(keys);
     const relevant = contextualHelp(entries, context);
+    const version = document.querySelector('meta[name="office-version"]')?.content;
     const itemName = context.app === 'lists' ? 'list' : 'item';
     let connectionGuide = '';
     if (context.app !== 'settings') {
@@ -148,7 +149,7 @@ export function openHelp(dialog, keys, context, escape, onClose, onLink, opener 
       <p>To create a new item with a link back to this ${itemName}, use a command such as <kbd>:new linked task Follow up</kbd>. Office creates the link when you first save the new item.</p>`;
     }
     dialog.classList.add('help-dialog');
-    dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">Keyboard shortcuts and commands</h2><button class="quiet" data-close aria-label="Close help">✕</button></div>
+    dialog.innerHTML = `<div class="dialog-head"><div><h2 id="dialog-title">Keyboard shortcuts and commands</h2><p class="help-version">${version ? `Office version ${escape(version)}` : 'Office version unavailable'}</p></div><button class="quiet" data-close aria-label="Close help">✕</button></div>
     <div class="help-tabs" role="tablist" aria-label="Help">
       <button type="button" role="tab" id="help-view-tab" aria-selected="true" aria-controls="help-view">This view</button>
       <button type="button" role="tab" id="help-all-tab" aria-selected="false" aria-controls="help-all" tabindex="-1">All help</button>
