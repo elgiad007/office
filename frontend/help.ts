@@ -52,7 +52,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('Ctrl+Enter','Send current message','Mail, normal or insert mode','Press Enter to confirm or Escape to cancel. Change confirmation in Settings → Mail.','draft');
   add(':','Open command line','Normal mode, including Settings','Enter executes once. Escape dismisses suggestions while keeping command mode and text; with suggestions closed, Escape exits and restores focus.','workspace');
   for(const [name,entry] of Object.entries(commandRegistry)){
-    const scopes: HelpScope[]=name==='head'?['message']:name==='link'||name==='unlink'?['saved']:[];
+    const scopes: HelpScope[]=name==='head'?['message']:name==='unlink'?['saved']:[];
     add(':'+name,entry.action,entry.context,entry.options+('aliases' in entry?' Aliases: '+entry.aliases.map(alias=>':'+alias).join(', ')+'.':''),...scopes);
   }
   add('Arrow keys','Move between cells','Sheets, focused cell','30 rows × 12 columns; item shortcuts still navigate records.','sheet');
@@ -118,10 +118,19 @@ export function contextualHelp(entries: HelpEntry[],{app,pane,mobile,item}: Help
   return entries.filter(entry=>entry.scopes.some(scope=>scopes.has(scope)));
 }
 
-export function openHelp(dialog: HTMLDialogElement,keys: Record<string,string>,context: HelpContext,escape: (value: string)=>string,onClose: ()=>void,opener=document.activeElement as HTMLElement | null) {
+export function openHelp(dialog: HTMLDialogElement,keys: Record<string,string>,context: HelpContext,escape: (value: string)=>string,onClose: ()=>void,onLink: ()=>void,opener=document.activeElement as HTMLElement | null) {
   if(dialog.open)return;
   const entries=helpEntries(keys);
   const relevant=contextualHelp(entries,context);
+  const itemName=context.app==='lists'?'list':'item';
+  let connectionGuide='';
+  if(context.app!=='settings'){
+    if(!context.item)connectionGuide=`<p>Open ${itemName==='list'?'a list':'an item'} to link it to another Office item.</p>`;
+    else if(context.item.unsaved)connectionGuide=`<p>Save this ${itemName} before linking it to another Office item.</p>`;
+    else connectionGuide=`<div><button type="button" data-help-link>Link an existing item</button> <kbd>:link</kbd></div>
+      <p>Search by name or item type, choose a result, then press Enter to create the link.</p>
+      <p>To create a new item with a link back to this ${itemName}, use a command such as <kbd>:new linked task Follow up</kbd>. Office creates the link when you first save the new item.</p>`;
+  }
   dialog.classList.add('help-dialog');
   dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">Keyboard shortcuts and commands</h2><button class="quiet" data-close aria-label="Close help">✕</button></div>
     <div class="help-tabs" role="tablist" aria-label="Help">
@@ -130,6 +139,7 @@ export function openHelp(dialog: HTMLDialogElement,keys: Record<string,string>,c
     </div>
     <section class="help-panel help-context" role="tabpanel" id="help-view" aria-labelledby="help-view-tab" tabindex="0">
       <h3>${escape(context.heading)}</h3><p>${escape(context.guidance)}</p>
+      ${connectionGuide?`<section class="help-connections" aria-labelledby="help-connections-title"><h4 id="help-connections-title">Connections</h4>${connectionGuide}</section>`:''}
       <dl>${relevant.map(row=>`<div><dt>${escape(row.action)} <kbd>${escape(row.shortcut)}</kbd></dt><dd>${escape(row.context)}${row.options?' · '+escape(row.options):''}</dd></div>`).join('')}</dl>
     </section>
     <section class="help-panel" role="tabpanel" id="help-all" aria-labelledby="help-all-tab" hidden>
@@ -169,6 +179,18 @@ export function openHelp(dialog: HTMLDialogElement,keys: Record<string,string>,c
     dialog.close();
   };
   input.oninput=render;clear.onclick=()=>{input.value='';render();input.focus();};dialog.querySelector<HTMLButtonElement>('[data-close]')!.onclick=()=>dialog.close();
-  dialog.addEventListener('close',()=>{dialog.classList.remove('help-dialog');onClose();if(opener?.isConnected)opener.focus({preventScroll:true});},{once:true});
+  const restore=()=>{
+    dialog.classList.remove('help-dialog');
+    onClose();
+    if(opener?.isConnected)opener.focus({preventScroll:true});
+  };
+  dialog.addEventListener('close',restore,{once:true});
+  const link=dialog.querySelector<HTMLButtonElement>('[data-help-link]');
+  if(link)link.onclick=()=>{
+    dialog.removeEventListener('close',restore);
+    dialog.close();
+    restore();
+    onLink();
+  };
   render();dialog.showModal();tabs[0].focus();
 }

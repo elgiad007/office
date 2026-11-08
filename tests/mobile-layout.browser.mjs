@@ -17,7 +17,7 @@ export async function testMobileLayout(browser, url) {
     row('lists','list','Phone list',{checklist:[]}),
     row('lists','empty-list','Empty checklist',{checklist:[]}),
   ];
-  const reads=[],saves=[];
+  const reads=[],saves=[],links=[];
   await page.route('**/api.php?*',async route=>{
     const query=new URL(route.request().url()).searchParams,action=query.get('r');
     const input=route.request().postDataJSON();
@@ -29,10 +29,16 @@ export async function testMobileLayout(browser, url) {
       await route.fulfill({json:{record}});
       return;
     }
+    if(action==='connection'){
+      links.push(input);
+      await route.fulfill({json:{ok:true}});
+      return;
+    }
     const responses={
       status:{authenticated:true,csrf:'fixture',preferences:{}},
       accounts:{accounts:[]},
       records:{records:rows.filter(item=>item.kind===query.get('kind'))},
+      'connection-search':{items:rows.filter(item=>item.id==='document')},
       connections:query.get('id')==='document'
         ?{items:rows.filter(item=>item.id==='contact'),links:[{}]}
         :{items:[],links:[]},
@@ -171,6 +177,14 @@ export async function testMobileLayout(browser, url) {
 
     for(const [app,id] of [['Calendar','event'],['Tasks','task'],['Contacts','contact'],['Documents','document'],['Wiki','page'],['Sheets','sheet'],['Lists','list']]){
       await go(app);
+      if(app==='Lists'){
+        await button('Menu').tap();
+        await shortcuts.tap();
+        const connectionsHelp=viewHelp.getByRole('region',{name:'Connections',exact:true});
+        await connectionsHelp.getByText('Open a list to link it to another Office item.').waitFor();
+        assert.equal(await connectionsHelp.getByRole('button').count(),0);
+        await closeHelp();
+      }
       if(app==='Calendar'){
         await page.locator('.calendar-agenda').waitFor();
         await page.locator('.calendar-sources summary').tap();
@@ -211,6 +225,20 @@ export async function testMobileLayout(browser, url) {
         await page.keyboard.press('Escape');
       }
       if(app==='Lists'){
+        await button('Help').tap();
+        const connectionsHelp=viewHelp.getByRole('region',{name:'Connections',exact:true});
+        await connectionsHelp.getByText(':new linked task Follow up',{exact:true}).waitFor();
+        await connectionsHelp.getByRole('button',{name:'Link an existing item'}).tap();
+        await shortcutsHeading.waitFor({state:'hidden'});
+        const command=page.getByRole('combobox',{name:'Command'});
+        assert.equal(await command.inputValue(),':link ');
+        assert.equal(await command.evaluate(node=>node===document.activeElement),true);
+        await command.fill(':link Edited Documents');
+        await page.getByRole('option',{name:/Edited Documents/}).tap();
+        const linked=page.waitForResponse(response=>new URL(response.url()).searchParams.get('r')==='connection'&&response.ok());
+        await command.press('Enter');
+        await linked;
+        assert.deepEqual(links,[{id:'list',target:'document',action:'add'}]);
         await iconButton('Rename list');
         await assertListTitleAlignment();
         const emptySize=await listTitleSize();
@@ -243,6 +271,16 @@ export async function testMobileLayout(browser, url) {
       await detail.waitFor({state:'hidden'});
     }
 
+    await button('New list').tap();
+    await button('Help').tap();
+    const draftConnectionsHelp=viewHelp.getByRole('region',{name:'Connections',exact:true});
+    await draftConnectionsHelp.getByText('Save this list before linking it to another Office item.').waitFor();
+    assert.equal(await draftConnectionsHelp.getByRole('button').count(),0);
+    await closeHelp();
+    await back();
+    await page.getByRole('dialog').getByRole('button',{name:'Discard Draft',exact:true}).tap();
+    await detail.waitFor({state:'hidden'});
+
     await go('Tasks');
     await button('New task').tap();
     await detail.getByRole('textbox',{name:'Title',exact:true}).fill('Created on a phone');
@@ -274,6 +312,13 @@ export async function testMobileLayout(browser, url) {
     await button('Lists').click();
     await page.locator('#items [data-id="empty-list"]').click();
     await assertListTitleAlignment();
+    await page.keyboard.press('?');
+    const desktopLink=viewHelp.getByRole('button',{name:'Link an existing item'});
+    await desktopLink.press('Enter');
+    const linkCommand=page.getByRole('combobox',{name:'Command'});
+    assert.equal(await linkCommand.inputValue(),':link ');
+    await linkCommand.press('Escape');
+    await linkCommand.waitFor({state:'hidden'});
     const desktopEmptySize=await listTitleSize();
     await page.locator('#items [data-id="list"]').click();
     const desktopLongSize=await listTitleSize();

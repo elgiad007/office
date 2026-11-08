@@ -1802,7 +1802,10 @@ function help(button?: HTMLElement) {
     reply:app==='mail'&&!!record.meta.from,
   }:undefined;
   const opener=mobile&&sidebar?document.querySelector<HTMLElement>('#mobile-menu'):button;
-  openHelp(dialog,keys(),{app,heading,guidance,pane,mobile,item},e,()=>setMode('normal'),opener);
+  openHelp(dialog,keys(),{app,heading,guidance,pane,mobile,item},e,()=>setMode('normal'),()=>{
+    if(record?.id!==state.current?.id){notice('The selected item changed. Reopen Help to link it.',true);return;}
+    openCommand(':link ');
+  },opener);
 }
 async function history() {await requireSaved();const r=await api(`history&id=${state.current!.id}`);modal('Revision history',r.revisions.map(h=>`<button class="history-row" data-revision="${h.revision}">Revision ${h.revision} · ${e(h.snapshot.title)}</button>`).join('')||'<p>No saved revisions.</p>');dialog.querySelectorAll<HTMLButtonElement>('[data-revision]').forEach(b=>b.onclick=()=>{const h=r.revisions.find(x=>x.revision===Number(b.dataset.revision!))!;modal('Revision '+h.revision,`<pre class="mail-body">${e(h.snapshot.body)}</pre><button id="restore-revision">Restore this content</button>`);dialog.querySelector<HTMLButtonElement>('#restore-revision')!.onclick=()=>void attempt(async()=>{state.current!.title=h.snapshot.title;state.current!.body=h.snapshot.body;state.current!.meta=h.snapshot.meta;state.dirty=true;dialog.close();renderDetail();await commit();});});}
 async function handleClick(event: MouseEvent) {

@@ -765,7 +765,8 @@ dialog.help-dialog[open] { display: flex; flex-direction: column; gap: 12px; }
 .help-tabs [aria-selected="true"] { border-bottom: 2px solid var(--accent); font-weight: 700; }
 .help-panel:not([hidden]) { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 12px; }
 .help-context { overflow: auto; }
-.help-context :is(h3, p, dl) { margin: 0; }
+.help-context :is(h3, h4, p, dl) { margin: 0; }
+.help-connections { display: grid; flex: none; gap: 8px; max-width: 75ch; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--wash); }
 .help-context dl { max-width: 75ch; }
 .help-context dl > div { padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .help-context dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-weight: 700; }

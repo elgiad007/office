@@ -51,10 +51,11 @@ test('contextual help matches the active pane and selected item capabilities',()
  assert.ok(draft.has('Send current message'));
  assert.ok(draft.has('Save changes'));
  assert.ok(!draft.has('Reply to message'));
- assert.ok(!draft.has('Link an existing item'));
+ assert.ok(!draft.has('Remove a connection'));
  assert.ok(!draft.has('Toggle selected item full screen'));
  const tasks=visible({app:'tasks',item:{...item,readOnly:false}});
  assert.ok(tasks.has('Mark current task complete'));
+ assert.ok(tasks.has('Remove a connection'));
  assert.ok(!tasks.has('Undo last mail deletion'));
  assert.ok(!visible({app:'tasks',item:{...item,readOnly:false,complete:true}}).has('Mark current task complete'));
  assert.ok(visible({app:'settings'}).has('Focus next / previous / first / last category'));
