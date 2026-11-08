@@ -199,6 +199,12 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .swipe-preview.armed { background: var(--accent); color: var(--surface); }
 .swipe-preview.danger.armed { background: var(--danger); color: var(--surface); }
 #swipe-preferences fieldset { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--line); border-radius: 5px; }
+#swipe-undo { position: fixed; z-index: 16; inset: auto 12px calc(var(--activity-height) + 8px) auto; width: min(360px, calc(100vw - 24px)); max-height: 40vh; overflow: auto; display: grid; gap: 6px; }
+#swipe-undo[hidden] { display: none; }
+.swipe-undo-action { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 8px 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.swipe-undo-action span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swipe-undo-action button { min-height: 44px; flex: none; touch-action: manipulation; }
+@media print { #swipe-undo { display: none; } }
 .checklist-add { display:flex; align-items:center; gap:8px; }
 .checklist-title label, .checklist-add input { flex:1; min-width:0; }
 .checklist { margin-top:16px; }

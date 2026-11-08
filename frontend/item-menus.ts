@@ -1,5 +1,5 @@
 import {asError} from './utils.js';
-import type {AppName, ConnectionDeletionChoices, MenuEnvironment, OfficeRecord} from './types.js';
+import type {AppName, ConnectionDeletionChoices, DeferItemAction, MenuEnvironment, OfficeRecord} from './types.js';
 function blockTarget(row: OfficeRecord,action: string) {
   const from=row.meta.from?.trim()||'';
   const address=(from.match(/^[^<>]*<([^<>]+)>$/)?.[1]||from).trim().toLowerCase();
@@ -47,7 +47,7 @@ export function installItemMenus(env: MenuEnvironment) {
     if(local)add('delete',single&&r.kind==='mail'&&r.meta.folder==='Drafts'?'Discard Draft…':single?'Delete…':`Delete ${rows.length} items…`,true);
     return result;
   }
-  async function run(id: string,ids: string[],app: AppName) {
+  async function run(id: string,ids: string[],app: AppName,defer?: DeferItemAction) {
     if(state.app!==app)throw Error('The application changed. Open the menu again.');
     await env.commit();
     if(state.app!==app)throw Error('The application changed. Open the menu again.');
@@ -64,8 +64,11 @@ export function installItemMenus(env: MenuEnvironment) {
       state.selected=new Set(ids);await env.fileMail();return;
     }
     const apply=async(choices:ConnectionDeletionChoices={})=>{
-      if(state.app!==app)throw Error('The application changed. Open the menu again.');
-      await env.commit();let count=0;
+      if(!defer){
+        if(state.app!==app)throw Error('The application changed. Open the menu again.');
+        await env.commit();
+      }
+      let count=0;
       if(app==='mail'&&(['delete','trash','discard'].includes(id)||(id==='archive'&&rows.every(row=>row.meta.remote)))){
         await env.deleteMailImmediately(rows,row=>id==='delete'?env.api('delete',{id:row.id,revision:row.revision,undoable:true,...choices[row.id]}):env.api('mail-action',{id:row.id,revision:row.revision,action:id,undoable:id==='trash',...choices[row.id]}),['delete','trash'].includes(id));
         env.notice(`${rows.length} ${rows.length===1?'item':'items'} updated.`);return;
@@ -75,7 +78,8 @@ export function installItemMenus(env: MenuEnvironment) {
         catch(cause){throw Error(`${count} of ${rows.length} items updated. ${asError(cause).message}`);}
         env.notice(`${count} ${count===1?'item':'items'} updated.`);return;
       }
-      const reload=env.mailDeletionReload(),removed=[],reconciled=new Set<string>();
+      const reload=state.app===app?env.mailDeletionReload():undefined,removed: string[]=[],reconciled=new Set<string>();
+      let updated: OfficeRecord | undefined;
       try{
         for(const row of rows){
           if(reconciled.has(row.id)){count++;continue;}
@@ -89,20 +93,29 @@ export function installItemMenus(env: MenuEnvironment) {
             if(id==='complete'||id==='incomplete')copy.meta.done=id==='complete';
             else if(id==='archive')copy.meta.folder='Archive';
             else copy.meta.read=id==='read';
-            await env.api('save',copy);
+            updated=(await env.api('save',copy)).record;
           }
           count++;
           if(['delete','trash','discard','archive','junk','block-sender','block-domain'].includes(id)||(id==='not-junk'&&(row.meta.folder==='Junk'||state.mailFolder==='Suspected Junk')))removed.push(row.id);
         }
       }catch(cause) { const error=asError(cause);throw Error(`${count} of ${rows.length} items updated. ${error.message}`);}
-      finally{await reload(removed);}
+      finally{
+        if(state.app===app){
+          if(defer&&(state.dirty||state.savePromise)){
+            // Reconcile the row without replacing an editor opened during the grace period.
+            if(id==='delete')state.rows=state.rows.filter(row=>!removed.includes(row.id));
+            if(updated)state.rows=state.rows.map(row=>row.id===updated!.id?updated!:row);
+          }else await reload?.(removed);
+        }
+      }
       env.notice(`${count} ${count===1?'item':'items'} updated.`);
     };
-    if(['delete','discard','trash'].includes(id))await env.confirmDeletion(rows,id==='trash'?'Move to Trash':id==='delete'?(app==='mail'&&rows.length===1&&rows[0].meta.folder==='Drafts'?'Discard Draft':rows.length===1?'Delete item':'Delete selected items'):'Discard copies',id==='trash'?`Move ${rows.length} selected message(s) to Trash? Undo is available for fifteen minutes.`:id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply,id==='trash');
+    const submit=(choices?: ConnectionDeletionChoices)=>defer?defer(rows[0],()=>apply(choices)):apply(choices);
+    if(['delete','discard','trash'].includes(id))await env.confirmDeletion(rows,id==='trash'?'Move to Trash':id==='delete'?(app==='mail'&&rows.length===1&&rows[0].meta.folder==='Drafts'?'Discard Draft':rows.length===1?'Delete item':'Delete selected items'):'Discard copies',id==='trash'?`Move ${rows.length} selected message(s) to Trash? Undo is available for fifteen minutes.`:id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:defer?'Delete this item and its revision history? You can undo for five seconds after confirming.':`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,submit,id==='trash');
     else if(id==='block-sender'||id==='block-domain'){
       const label=id==='block-sender'?'Sender':'Domain';
       env.confirmation('Block '+label,`Block ${blockTarget(rows[0],id)} for this account and move this message to Junk?`,apply);
-    } else await apply();
+    } else await submit();
   }
   async function open(row: HTMLElement,x: number,y: number) {
     const restore=env.capturePane();close();restoreOrigin=restore;const token=generation,app=state.app,id=row.dataset.id!;

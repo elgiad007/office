@@ -167,6 +167,7 @@ export interface RequestApi {
   <R extends ApiRoute>(route: R, data?: ApiData): Promise<ApiResponse<R>>;
 }
 export type Attempt = <T>(fn: () => T | Promise<T>) => Promise<T | undefined>;
+export type DeferItemAction = (row: OfficeRecord, apply: () => Promise<void>) => void;
 export type Confirmation = (title: string, message: string, action: () => unknown, confirmLabel?: string) => void;
 export type ConnectionDeletionChoices = Record<string,{connectionHubTitle?: string}>;
 export type ConfirmDeletion = (rows: OfficeRecord[],title: string,message: string,action: (choices: ConnectionDeletionChoices) => unknown,skipUnconnected?: boolean) => Promise<void>;

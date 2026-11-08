@@ -215,7 +215,7 @@ function closeCommand(restore=false) {
   if(restore)(commandFocus?.isConnected?commandFocus:document.querySelector<HTMLElement>('#main'))?.focus({preventScroll:true});
   commandFocus=null;
 }
-async function signOut() {await waitForAttachments();await leaveEditor();await api('logout',{});await boot();}
+async function signOut() {await waitForAttachments();await leaveEditor();clearSwipeActions();await api('logout',{});await boot();}
 const commandHandlers={
   mail:async(accountQuery?:string)=>{
     if(accountQuery===undefined){await changeApp('mail');return;}
@@ -447,6 +447,7 @@ function authView(status: Status) {
   document.querySelector<HTMLFormElement>('#auth-form')!.onsubmit=async event=>{event.preventDefault(); const button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!; busyButton(button,true); try { const r=await api(setup?'setup':'login',Object.fromEntries(new FormData(event.target as HTMLFormElement))); state.csrf=r.csrf; await boot(); } catch(cause) { const error=asError(cause); document.querySelector<HTMLElement>('#auth-error')!.textContent=error.message; } finally { busyButton(button,false); } };
 }
 async function boot() {
+  clearSwipeActions();
   setItemFullScreen(false);
   mobileItemOpen=false;
   mobileListPosition=undefined;
@@ -580,12 +581,13 @@ function inMailView(record: OfficeRecord) {
   if(state.mailFolder==='Local Junk')return folder==='Junk'&&!record.meta.remote;
   return folder===state.mailFolder;
 }
-function matchingRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>(state.app!=='calendar'||calendar.isVisible(r))&&(state.app!=='mail'||inMailView(r))&&(!q||searchableText(r).includes(q))); }
+function matchingRows() { const q=state.search.toLocaleLowerCase(); return state.rows.filter(r=>!swipeHidesRow(r.id)&&(state.app!=='calendar'||calendar.isVisible(r))&&(state.app!=='mail'||inMailView(r))&&(!q||searchableText(r).includes(q))); }
 function filteredRows() {const rows=matchingRows();return state.app==='mail'?mailView(rows,state.prefs.mailView).rows:state.app==='tasks'?taskView(rows,state.prefs.taskView).rows:rows;}
 function navigableRows() {return state.app==='mail'?mailView(matchingRows(),state.prefs.mailView).visible:state.app==='tasks'?taskView(matchingRows(),state.prefs.taskView).visible:filteredRows();}
 async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<DeleteMail>[1],undoable=false) {
+  const inMail=state.app==='mail'&&!appEntryVisible();
   const pane=activePane();
-  const ids=new Set(rows.map(r=>r.id)),visible=navigableRows().map(r=>r.id),currentId=state.current?.id!;
+  const ids=new Set(rows.map(r=>r.id)),visible=inMail?navigableRows().map(r=>r.id):[],currentId=inMail?state.current?.id:undefined;
   const context=JSON.stringify([state.mailFolder,state.mailScope,state.search]);
   const completingDraft=rows.some(r=>r.id===currentId&&r.meta.folder==='Drafts');
   let gesture: MailDeleteGesture | undefined;
@@ -596,21 +598,24 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
   }
   for(const id of ids){pendingMailDeletes.add(id);failedMailActions.delete(id);}
   mailDeleteVersion++;
-  state.rows=state.rows.filter(r=>!ids.has(r.id));state.selected.clear();itemMenus.close();
-  const advance=ids.has(currentId),index=visible.indexOf(currentId);
-  if(advance){
-    const next=[...visible.slice(index+1),...visible.slice(0,index).reverse()].find(id=>!ids.has(id));
-    state.current=state.rows.find(r=>r.id===next)||null;
+  const index=visible.indexOf(currentId!);
+  if(inMail){
+    state.rows=state.rows.filter(r=>!ids.has(r.id));state.selected.clear();itemMenus.close();
+    const advance=ids.has(currentId!);
+    if(advance){
+      const next=[...visible.slice(index+1),...visible.slice(0,index).reverse()].find(id=>!ids.has(id));
+      state.current=state.rows.find(r=>r.id===next)||null;
+    }
+    renderList();if(advance)renderDetail();
+    restorePane(pane);
+    document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
   }
   const nextId=state.current?.id;
   if(gesture)gesture.nextId=state.current?.id;
-  renderList();if(advance)renderDetail();
-  restorePane(pane);
-  document.querySelector<HTMLElement>('#selected-item')!?.scrollIntoView({block:'nearest'});
   let count=0;
   const reconciled=new Set<string>();
   const refresh=()=>{
-    if(state.app!=='mail')return;
+    if(state.app!=='mail'||appEntryVisible())return;
     const focused=(document.activeElement as HTMLElement)?.closest<HTMLElement>('#items [data-id]')?.dataset.id!;
     renderList();
     if(focused)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focused)}"]`)!?.focus({preventScroll:true});
@@ -621,7 +626,7 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
       const result=await operation(row);count++;pendingMailDeletes.delete(row.id);mailDeleteVersion++;
       if(gesture&&result.undoToken)gesture.receipts.push({token:result.undoToken,account:row.meta.account,id:row.id,postId:result.record?.id});
       for(const id of result?.removedIds||[])reconciled.add(id);
-      if(state.app==='mail' && result?.removedIds?.length){
+      if(state.app==='mail'&&!appEntryVisible()&&result?.removedIds?.length){
         state.rows=state.rows.filter(r=>!reconciled.has(r.id));
         for(const id of reconciled)state.selected.delete(id);
         if(reconciled.has(state.current?.id!)){
@@ -634,13 +639,13 @@ async function deleteMailImmediately(rows: OfficeRecord[],operation: Parameters<
       // Keep confirmed moves available when switching folders.
       if(state.app==='mail'&&row.meta.remote&&result?.record){state.rows=state.rows.filter(r=>r.id!==row.id&&r.id!==result.record!.id);state.rows.push(result.record);state.rows.sort(compareMail);}
     }
-    if(completingDraft&&state.app==='mail'&&state.current?.id===nextId&&context===JSON.stringify([state.mailFolder,state.mailScope,state.search]))returnFromMailDraft(currentId);
+    if(completingDraft&&state.app==='mail'&&!appEntryVisible()&&state.current?.id===nextId&&context===JSON.stringify([state.mailFolder,state.mailScope,state.search]))returnFromMailDraft(currentId!);
     for(const row of rows)mailDraftOrigins.delete(row.id);
   }catch(cause) { const error=asError(cause);
     const remaining=rows.slice(count);
     for(const row of remaining){pendingMailDeletes.delete(row.id);failedMailActions.set(row.id,error.message);}
     mailDeleteVersion++;
-    if(state.app==='mail'){
+    if(state.app==='mail'&&!appEntryVisible()){
       for(const row of remaining)if(!state.rows.some(r=>r.id===row.id))state.rows.push(structuredClone(latestMail(row.id)||row));
       state.rows.sort(compareMail);
       if(!state.current&&context===JSON.stringify([state.mailFolder,state.mailScope,state.search])){
@@ -1053,11 +1058,12 @@ function renderList() {
   const item=(r: OfficeRecord)=>{
     const hint=state.app==='mail'?(r.meta.from||r.meta.to||r.meta.folder||'Local archive'):state.app==='calendar'?(r.meta.start?dateLabel(r.meta.start)+' · ':'')+e(r.meta.location||''):state.app==='tasks'?(r.meta.done?'Completed':r.meta.due?'Due '+dateLabel(r.meta.due):'No due date'):state.app==='contacts'?e(r.meta.email||r.meta.company||''):state.app==='wiki'?e(r.title.includes(':')?r.title.split(':').slice(0,-1).join(':'):'Root namespace'):state.app==='lists'?checklistProgress(r.meta.checklist??[]):'Edited '+dateLabel(r.updated);
     const selected=state.current?.id===r.id;
-    const readState=state.app==='mail'?(r.meta.read?'read':'unread'):'';
+    const displayed=state.app==='mail'?swipeMailDisplay(r):r;
+    const readState=state.app==='mail'?(displayed.meta.read?'read':'unread'):'';
     const readStatus=readState?`<span class="mail-read-status"><span class="file-input">${readState==='unread'?'Unread':'Read'}</span></span>`:'';
     const badges=state.app==='mail'?'':`<span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span>`;
     const itemIcon=state.app==='mail'?renderMailListIcon(r,state.selected.has(r.id),icon('mail')):`<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>`;
-    return `<button class="item ${state.app==='tasks'&&r.meta.done?'task-completed':''} ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}${itemIcon}${state.app==='mail'?renderMailListCopy(r,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app==='tasks'?taskBadges(r):''}</span>`}${badges}</button>`;
+    return `<button class="item ${state.app==='tasks'&&r.meta.done?'task-completed':''} ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}${itemIcon}${state.app==='mail'?renderMailListCopy(displayed,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app==='tasks'?taskBadges(r):''}</span>`}${badges}</button>`;
   };
   const list=document.querySelector<HTMLElement>('#items')!,focusedGroup=(document.activeElement as HTMLElement)?.closest<HTMLElement>('[data-mail-group-key]')?.dataset.mailGroupKey;
   const included=new Set(visible.map(row=>row.id));
@@ -1414,8 +1420,9 @@ async function showAppEntry(name: AppName,open: (version: number)=>Promise<void>
   }
 }
 function updateMailListItem(id: string) {
-  const row=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
-  if(!row||!button)return;
+  const record=state.rows.find(r=>r.id===id),button=document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(id)}"]`)!;
+  if(!record||!button)return;
+  const row=swipeMailDisplay(record);
   const selected=state.current?.id===id;
   const copy=button.querySelector('.item-copy');if(copy)copy.outerHTML=renderMailListCopy(row,state.prefs.mailList,failedMailActions.get(row.id));
   button.classList.toggle('selected',selected);button.classList.toggle('mail-read',!!row.meta.read);button.classList.toggle('mail-unread',!row.meta.read);
@@ -2045,7 +2052,7 @@ async function setMailRead(record: OfficeRecord,read: boolean) {
   await pending;
 }
 function markOpenedMailRead(record: OfficeRecord) {
-  if(record.meta.read || ['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(record.meta.folder||'') || pendingMailReads.has(record.id))return;
+  if(record.meta.read || ['Drafts','Sending','Delivery uncertain','Recovery copies','Not in Inbox'].includes(record.meta.folder||'') || pendingMailReads.has(record.id)||pendingSwipeActions.has(record.id))return;
   const previousRevision=record.revision;
   mailReadVersion++;
   // Rendering and navigation remain synchronous; only mutations of this message wait.
@@ -2326,27 +2333,115 @@ function accountDialog() {
   }});
 }
 const itemMenus=installItemMenus({confirmDeletion:connections.confirmDeletion,state,e,commit:leaveEditor,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,setMailRead,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+interface PendingSwipeAction {timer?: number; read?: boolean}
+const pendingSwipeActions=new Map<string,PendingSwipeAction>();
+const swipeUndoPanel=document.querySelector<HTMLElement>('#swipe-undo')!;
+const swipeUndoWindow=5000;
+function swipeHidesRow(id: string) {
+  const pending=pendingSwipeActions.get(id);
+  return pending?.timer!==undefined&&pending.read===undefined;
+}
+function swipeMailDisplay(row: OfficeRecord) {
+  const pending=pendingSwipeActions.get(row.id);
+  return pending?.timer!==undefined&&pending.read!==undefined?{...row,meta:{...row.meta,read:pending.read}}:row;
+}
+function clearSwipeActions() {
+  for(const pending of pendingSwipeActions.values())window.clearTimeout(pending.timer);
+  pendingSwipeActions.clear();
+  swipeUndoPanel.replaceChildren();swipeUndoPanel.hidden=true;
+}
+function refreshSwipeRows(row: OfficeRecord,focusRestoredRow=false) {
+  if(state.app!==row.kind||appEntryVisible()||!document.querySelector('#items'))return;
+  const focused=(document.activeElement as HTMLElement|null)?.closest<HTMLElement>('#items .item[data-id]');
+  const viewport=captureMailListViewport();
+  renderList();
+  restoreMailListViewport(viewport);
+  if(focusRestoredRow||focused){
+    const id=focusRestoredRow?row.id:focused?.dataset.id||'';
+    const button=document.querySelector<HTMLElement>(`#items .item[data-id="${CSS.escape(id)}"]`);
+    if(button)button.focus({preventScroll:true});else focusList();
+  }
+}
+function deferSwipeAction(row: OfficeRecord,label: string,read: boolean | undefined,apply: () => Promise<void>) {
+  if(state.app!==row.kind||pendingSwipeActions.has(row.id))return;
+  const revision=row.revision;
+  const toast=document.createElement('div');toast.className='swipe-undo-action';
+  const status=document.createElement('span');status.setAttribute('role','status');status.textContent=`${label} · ${row.title}`;
+  const button=document.createElement('button');button.type='button';button.textContent='Undo';
+  button.setAttribute('aria-label',`Undo ${label.toLowerCase()} for ${row.title}`);
+  toast.append(status,button);
+  const dismiss=()=>{
+    const focused=toast.contains(document.activeElement);
+    toast.remove();swipeUndoPanel.hidden=!swipeUndoPanel.childElementCount;
+    return focused;
+  };
+  const undo=()=>{
+    if(pending.timer===undefined)return;
+    window.clearTimeout(pending.timer);
+    pending.timer=undefined;
+    pendingSwipeActions.delete(row.id);
+    refreshSwipeRows(row,dismiss());
+    notice('Swipe action undone.');
+  };
+  const pending: PendingSwipeAction={read};
+  button.onclick=undo;
+  // A browser can suppress the click immediately following a touch swipe.
+  let tap: {pointer: number; x: number; y: number} | undefined;
+  button.onpointerdown=event=>{
+    if(event.isPrimary&&event.pointerType==='touch')tap={pointer:event.pointerId,x:event.clientX,y:event.clientY};
+  };
+  button.onpointercancel=()=>{tap=undefined;};
+  button.onpointerup=event=>{
+    if(!tap||event.pointerId!==tap.pointer)return;
+    const distance=Math.hypot(event.clientX-tap.x,event.clientY-tap.y);
+    tap=undefined;
+    if(distance<10&&button.contains(document.elementFromPoint(event.clientX,event.clientY)))undo();
+  };
+  pending.timer=window.setTimeout(()=>{
+    pending.timer=undefined;
+    const focused=dismiss();
+    if(focused&&!dialog.open)focusList();
+    void attempt(async()=>{
+      const current=state.rows.find(record=>record.id===row.id);
+      if((current&&current.revision!==revision)||(state.current?.id===row.id&&(state.dirty||state.savePromise)))throw Error('The swiped item changed. Swipe it again to apply the action.');
+      await apply();
+    }).finally(()=>{
+      if(pendingSwipeActions.get(row.id)!==pending)return;
+      pendingSwipeActions.delete(row.id);
+      refreshSwipeRows(row);
+    });
+  },swipeUndoWindow);
+  pendingSwipeActions.set(row.id,pending);
+  swipeUndoPanel.append(toast);swipeUndoPanel.hidden=false;
+  refreshSwipeRows(row);
+}
+window.addEventListener('pagehide',clearSwipeActions);
+window.addEventListener('pageshow',event=>{
+  if(event.persisted&&document.querySelector('#items')&&!appEntryVisible())renderList();
+});
 let swipeActionRunning=false;
 installRowSwipes((button,direction)=>{
   if(swipeActionRunning||dialog.open)return;
   const {app}=state;
   const row=state.rows.find(record=>record.id===button.dataset.id);
-  if(!row||isPendingSend(row.id)||pendingMailDeletes.has(row.id))return;
+  if(!row||isPendingSend(row.id)||pendingMailDeletes.has(row.id)||pendingSwipeActions.has(row.id))return;
   const prefs=swipePreferences(state.prefs.swipe);
   const action=prefs[app==='mail'?'mail':'items'][direction];
   if(action==='off')return;
   const id=action==='delete'&&app==='mail'&&row.meta.remote?'trash':action;
   if(id==='move'?!canQuickMoveMail([row]):!itemMenus.actions([row]).some(option=>option.id===id))return;
   if(id==='archive'&&protectedMail(row))return;
+  const label=id==='trash'?'Move to Trash':id==='delete'&&row.meta.folder==='Drafts'?'Discard Draft':mailSwipeActions[action];
   return {
-    label:id==='trash'?'Move to Trash':id==='delete'&&row.meta.folder==='Drafts'?'Discard Draft':mailSwipeActions[action],
+    label,
     danger:action==='delete',
     run:()=>{
       if(state.app!==app||swipeActionRunning||dialog.open)return;
       swipeActionRunning=true;
       void attempt(async()=>{
-        if(id==='move')await quickMoveMail(mailFolderEnv(),row.id);
-        else await itemMenus.run(id,[row.id],app);
+        const defer=(target: OfficeRecord,apply: () => Promise<void>)=>deferSwipeAction(target,label,id==='read'?true:id==='unread'?false:undefined,apply);
+        if(id==='move')await quickMoveMail(mailFolderEnv(),row.id,defer);
+        else await itemMenus.run(id,[row.id],app,defer);
       }).finally(()=>{swipeActionRunning=false;});
     },
   };

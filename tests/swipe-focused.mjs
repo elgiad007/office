@@ -28,7 +28,7 @@ try {
   archive.meta={folder:'Inbox',read:true};
   let accounts=[{id:'test',type:'imap',label:'Test',folders:[{id:'Project',name:'Project'}]}];
   let records=[makeRecord('a'),makeRecord('b'),makeRecord('c'),archive,makeRecord('t','tasks'),...Array.from({length:25},(_,i)=>makeRecord(`z${i}`))];
-  let prefs={mailView:{group:'none'},taskView:{group:'none'}},trashed;
+  let prefs={mailView:{group:'none'},taskView:{group:'none'}},trashed,rejectId;
   const mutations=[];
   await page.route(url=>url.pathname.endsWith('/api.php'),async route=>{
     const query=new URL(route.request().url()).searchParams;
@@ -44,9 +44,13 @@ try {
     if(action==='mail-action'){
       const row=records.find(row=>row.id===input.id);
       mutations.push(input);
+      if(row.id===rejectId)return route.fulfill({status:503,json:{error:'Test provider failure'}});
       if(input.action==='trash')trashed=structuredClone(row);
-      row.meta.folder=input.action==='trash'?'Trash':'Custom folder';
-      row.meta.serverFolder=input.folder||'Trash';
+      if(input.action==='unread')row.meta.read=false;
+      else {
+        row.meta.folder=input.action==='trash'?'Trash':input.action==='archive'?'Archive':'Custom folder';
+        row.meta.serverFolder=input.folder||row.meta.folder;
+      }
       row.revision++;
       json={record:row,undoToken:input.undoable?'undo-swipe':undefined};
     }
@@ -65,6 +69,7 @@ try {
   const url='http://127.0.0.1:'+server.address().port+'/';
   const item=id=>page.locator(`#items .item[data-id="${id}"]`);
   const preview=page.locator('.swipe-preview');
+  const undo=id=>page.locator('#swipe-undo').getByRole('button',{name:new RegExp(`for Swipe ${id}$`)});
   async function swipe(id,dx,dy=0,{cancel=false,label}={}){
     const {x,y}=await item(id).evaluate(row=>{
       row.scrollIntoView({block:'nearest'});
@@ -95,6 +100,16 @@ try {
   assert.equal(await page.locator('.multi-selected').count(),2);
   await swipe('a',-115,0,{label:'Move to Trash'});
   await item('a').waitFor({state:'detached'});
+  await swipe('c',-115,0,{label:'Move to Trash'});
+  await undo('c').waitFor();
+  assert.equal(await undo('a').isVisible(),true,'each swipe has its own Undo button');
+  assert.equal(mutations.length,0,'no provider writes while undo is available');
+  await undo('a').click();
+  await item('a').waitFor();
+  assert.equal(await undo('c').isVisible(),true,'undoing one swipe leaves the other pending');
+  await undo('c').click();
+  await item('c').waitFor();
+  await swipe('a',-115,0,{label:'Move to Trash'});
   await page.locator('#notice').filter({hasText:'1 item updated.'}).waitFor();
   assert.deepEqual(mutations.map(({id,action,undoable})=>({id,action,undoable})),[{id:'a',action:'trash',undoable:true}]);
   await page.locator('#main').focus();
@@ -121,6 +136,13 @@ try {
   await folder.fill('Project');
   await folder.press('Enter');
   await folder.waitFor({state:'hidden'});
+  await undo('a').click();
+  await item('a').waitFor();
+  assert.equal(mutations.length,1,'undo cancels a chosen folder move');
+  await swipe('a',115,0,{label:'Move to folder'});
+  await folder.fill('Project');
+  await folder.press('Enter');
+  await page.locator('#notice').filter({hasText:'Moved 1 message(s)'}).waitFor();
   assert.deepEqual(mutations.slice(1).map(({id,action,folder})=>({id,action,folder})),[{id:'a',action:'move',folder:'Project'}]);
 
   await swipe('b',-6,-170);
@@ -136,6 +158,13 @@ try {
   await swipe('t',-115,0,{label:'Delete'});
   await page.locator('#confirm').click();
   await item('t').waitFor({state:'detached'});
+  await undo('t').click();
+  await item('t').waitFor();
+  assert.equal(mutations.length,2,'undo cancels a confirmed permanent deletion');
+  await swipe('t',-115,0,{label:'Delete'});
+  await page.locator('#confirm').click();
+  await openApp('Mail');
+  await page.locator('#notice').filter({hasText:'1 item updated.'}).waitFor();
   assert.deepEqual(mutations.slice(2).map(({id})=>id),['t']);
 
   await page.setViewportSize({width:390,height:844});
@@ -144,8 +173,27 @@ try {
   await item('c').waitFor();
   await swipe('c',-115,0,{label:'Move to Trash'});
   await item('c').waitFor({state:'detached'});
-  await page.locator('#notice').filter({hasText:'1 item updated.'}).waitFor();
+  await undo('c').tap();
+  await item('c').waitFor();
+  assert.equal(mutations.length,3,'tapping Undo on a phone cancels the write');
+  rejectId='c';
+  await swipe('c',-115,0,{label:'Move to Trash'});
+  await page.locator('#notice').filter({hasText:'Test provider failure'}).waitFor();
+  await item('c').waitFor();
   assert.equal(mutations.at(-1).id,'c');
+
+  prefs.swipe.mail={left:'unread',right:'archive'};
+  await page.goto(url+'?swipes-status#mail');
+  await item('c').waitFor();
+  await swipe('c',-115,0,{label:'Mark as unread'});
+  assert.match(await item('c').getAttribute('class'),/mail-unread/);
+  await undo('c').tap();
+  assert.match(await item('c').getAttribute('class'),/mail-read/);
+  await swipe('c',115,0,{label:'Archive'});
+  await item('c').waitFor({state:'detached'});
+  await undo('c').tap();
+  await item('c').waitFor();
+  assert.equal(mutations.length,4,'undo cancels archive and read status writes');
   assert.deepEqual(errors,[]);
-  console.log('PASS swipe actions: desktop and phone layouts, touch scroll, cancel, undo, isolated targets, saved folder move and item delete.');
+  console.log('PASS swipe actions: independent undo buttons, delayed writes, folder moves, failed-write recovery, status and archive previews, phone taps and touch scrolling.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

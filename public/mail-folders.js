@@ -332,7 +332,7 @@ export async function fileMail(env) {
 export function canQuickMoveMail(rows) {
     return rows.length > 0 && rows.every(r => r.meta.remote && !['Drafts', 'Sending', 'Delivery uncertain', 'Recovery copies', 'Not in Inbox'].includes(r.meta.folder || ''));
 }
-export async function quickMoveMail(env, rowId) {
+export async function quickMoveMail(env, rowId, defer) {
     const reload = env.mailDeletionReload?.();
     await env.commit();
     const { state, e } = env;
@@ -364,14 +364,8 @@ export async function quickMoveMail(env, rowId) {
         submit.disabled = moving || discovering || !matches.length;
         list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
     };
-    const move = async () => {
-        const target = matches[index];
-        if (moving || discovering || !target)
-            return;
-        moving = true;
-        input.disabled = true;
-        closeButton.disabled = true;
-        render();
+    const applyMove = async (target) => {
+        const refresh = defer && state.app === 'mail' ? env.mailDeletionReload?.() : reload;
         let count = completed.size;
         try {
             await busy(env, async () => {
@@ -383,32 +377,56 @@ export async function quickMoveMail(env, rowId) {
                         const result = await env.api('mail-action', { id: row.id, revision: row.revision, action: 'move', folder: target.folder.id, destinationAccount: target.account.id });
                         for (const id of result.removedIds || [])
                             removed.add(id);
+                        if (defer && state.app === 'mail' && (state.dirty || state.savePromise)) {
+                            // Keep an editor opened during the grace period intact.
+                            state.rows = state.rows.filter(item => item.id !== row.id && item.id !== result.record?.id && !removed.has(item.id));
+                            if (result.record)
+                                state.rows.push(result.record);
+                        }
                     }
                     count++;
                     completed.add(row.id);
                 }
             });
-            env.dialog.close();
+            if (!defer)
+                env.dialog.close();
             env.notice(`Moved ${count} message(s) to ${target.account.label} / ${target.folder.name}.`);
         }
         catch (cause) {
             throw Error(`${count} of ${rows.length} messages moved. ${asError(cause).message}`);
         }
         finally {
-            moving = false;
-            input.disabled = false;
-            closeButton.disabled = false;
+            if (!defer) {
+                moving = false;
+                input.disabled = false;
+                closeButton.disabled = false;
+            }
             if (state.app === 'mail' && !state.dirty && !state.savePromise) {
-                if (reload)
-                    await reload([...completed]);
+                if (refresh)
+                    await refresh([...completed]);
                 else
                     await reloadMail(env);
             }
-            if (env.dialog.open && form.isConnected) {
+            if (!defer && env.dialog.open && form.isConnected) {
                 render();
                 input.focus();
             }
         }
+    };
+    const move = async () => {
+        const target = matches[index];
+        if (moving || discovering || !target)
+            return;
+        if (defer) {
+            env.dialog.close();
+            defer(rows[0], () => applyMove(target));
+            return;
+        }
+        moving = true;
+        input.disabled = true;
+        closeButton.disabled = true;
+        render();
+        await applyMove(target);
     };
     input.oninput = () => { index = 0; render(); };
     input.onkeydown = event => {
