@@ -18,6 +18,7 @@ import {mailBody, mailDisplayControls, bindMailReader} from './mail-reader.js';
 import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
 import {attachmentSection, bindAttachments, waitForAttachments} from './mail-attachments.js';
 import {installItemMenus} from './item-menus.js';
+import {installRowSwipes,itemSwipeActions,mailSwipeActions,swipePreferences,type SwipePreferences} from './swipe.js';
 import {compareMail} from './mail-sort.js';
 import {mailView,mailViewPreferences,revealMailGroup} from './mail-view.js';
 import {taskView,taskViewPreferences,taskPriority,taskDue} from './task-view.js';
@@ -2118,7 +2119,7 @@ function renderJunkSettings() {
   select.onchange=()=>void render();
   void render();
 }
-const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['accounts','Accounts'],['activity-log','Activity Log'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups']] as const;
+const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['accounts','Accounts'],['activity-log','Activity Log'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups'],['swipe','Swipe Actions']] as const;
 const settingsPageKey='office-settings-page';
 let settingsPage='appearance';
 try {
@@ -2143,6 +2144,11 @@ function renderSettings(entryVersion?: number) {
   if(state.app!=='settings'||(appEntryVisible()&&entryVersion!==appEntryVersion))return;
   renderAppHeader();
   const p=state.prefs;
+  const swipe=swipePreferences(p.swipe);
+  const swipeSelect=(scope: keyof SwipePreferences,direction: 'left' | 'right')=>{
+    const options=scope==='mail'?mailSwipeActions:itemSwipeActions;
+    return `<label>Swipe ${direction}<select name="${scope}-${direction}">${Object.entries(options).map(([action,label])=>`<option value="${action}"${swipe[scope][direction]===action?' selected':''}>${label}</option>`).join('')}</select></label>`;
+  };
   const linkLimit=p.linkAutocomplete?.limit??20;
   const linkSortOptions={
     'modified-desc':'Date modified · newest first',
@@ -2214,6 +2220,15 @@ function renderSettings(entryVersion?: number) {
     <section class="settings-grid" id="settings-backups" data-settings-page="backups"${settingsPage==='backups'?'':' hidden'}>
       <section class="card"><h2>Backups</h2><p>SQLite backups include local records, cached messages, saved attachments, revisions, connections and preferences. Account credentials and your password are excluded.</p><button id="backup">Prepare backup</button> <button id="backup-download" hidden>↓ Download SQLite backup</button><div><progress id="backup-progress" aria-label="Backup progress" hidden></progress><div id="backup-status" role="status"></div></div><p>Restore a SQLite or JSON backup into an empty installation. Synced copies become local archives. Reconnect provider accounts after restoring.</p><button id="restore">↑ Restore backup</button></section>
     </section>
+    <section class="settings-grid" id="settings-swipe" data-settings-page="swipe"${settingsPage==='swipe'?'':' hidden'}>
+      <section class="card"><h2>Swipe actions</h2><p>Swipe across a row on a touchscreen or with a pen. Move to folder opens the folder picker for synced mail.</p>
+        <form id="swipe-preferences">
+          <fieldset><legend>Mail</legend>${swipeSelect('mail','left')}${swipeSelect('mail','right')}</fieldset>
+          <fieldset><legend>Other items</legend>${swipeSelect('items','left')}${swipeSelect('items','right')}</fieldset>
+          <button class="primary">Save swipe actions</button>
+        </form>
+      </section>
+    </section>
   </div>`;
   const categories=main.querySelectorAll<HTMLButtonElement>('[data-settings-category]');
   const pages=main.querySelectorAll<HTMLElement>('[data-settings-page]');
@@ -2245,6 +2260,17 @@ function renderSettings(entryVersion?: number) {
   bindMailListSettings(document.querySelector<HTMLElement>('#mail-list-settings')!,p.mailList,async layout=>{await attempt(async()=>{const preferences={...state.prefs,mailList:layout};await api('preferences',{preferences});state.prefs=preferences;notice('List appearance saved.');});});
   void renderGoogleSettings(document.querySelector<HTMLElement>('#google-integration')!,api);
   document.querySelector<HTMLFormElement>('#preferences')!.onsubmit=ev=>{ev.preventDefault();void attempt(async()=>{const form=ev.target as HTMLFormElement,preferences={...state.prefs,...Object.fromEntries(new FormData(form)),showElapsedTime:(form.elements.namedItem('showElapsedTime') as HTMLInputElement).checked};await api('preferences',{preferences});state.prefs=preferences;applyTheme();notice('Preferences saved.');});};
+  document.querySelector<HTMLFormElement>('#swipe-preferences')!.onsubmit=event=>{
+    event.preventDefault();
+    const form=new FormData(event.currentTarget as HTMLFormElement);
+    const preferences={...state.prefs,swipe:swipePreferences({
+      mail:{left:form.get('mail-left'),right:form.get('mail-right')},
+      items:{left:form.get('items-left'),right:form.get('items-right')},
+    })};
+    void attempt(async()=>{
+      await api('preferences',{preferences});state.prefs=preferences;notice('Swipe actions saved.');
+    });
+  };
   document.querySelector<HTMLFormElement>('#activity-log-preferences')!.onsubmit=event=>{
     event.preventDefault();
     const level=document.querySelector<HTMLSelectElement>('#activity-log-level')!.value;
@@ -2300,6 +2326,31 @@ function accountDialog() {
   }});
 }
 const itemMenus=installItemMenus({confirmDeletion:connections.confirmDeletion,state,e,commit:leaveEditor,renderList,selectRecord,enterEdit,api,load,mailDeletionReload,deleteMailImmediately,notice,confirmation,attempt,exportRecords,setMailRead,waitForMailRead:id=>pendingMailReads.get(id),capturePane:()=>{const pane=activePane();return ()=>restorePane(pane);},mouseSelection:()=>{keyboardSelection=false;},fileMail:()=>fileMail(mailFolderEnv())});
+let swipeActionRunning=false;
+installRowSwipes((button,direction)=>{
+  if(swipeActionRunning||dialog.open)return;
+  const {app}=state;
+  const row=state.rows.find(record=>record.id===button.dataset.id);
+  if(!row||isPendingSend(row.id)||pendingMailDeletes.has(row.id))return;
+  const prefs=swipePreferences(state.prefs.swipe);
+  const action=prefs[app==='mail'?'mail':'items'][direction];
+  if(action==='off')return;
+  const id=action==='delete'&&app==='mail'&&row.meta.remote?'trash':action;
+  if(id==='move'?!canQuickMoveMail([row]):!itemMenus.actions([row]).some(option=>option.id===id))return;
+  if(id==='archive'&&protectedMail(row))return;
+  return {
+    label:id==='trash'?'Move to Trash':id==='delete'&&row.meta.folder==='Drafts'?'Discard Draft':mailSwipeActions[action],
+    danger:action==='delete',
+    run:()=>{
+      if(state.app!==app||swipeActionRunning||dialog.open)return;
+      swipeActionRunning=true;
+      void attempt(async()=>{
+        if(id==='move')await quickMoveMail(mailFolderEnv(),row.id);
+        else await itemMenus.run(id,[row.id],app);
+      }).finally(()=>{swipeActionRunning=false;});
+    },
+  };
+});
 function contentEntry() {
   const panel=document.querySelector<HTMLElement>('#detail');
   if(state.app==='lists'&&panel)return checklistEntry(panel)||panel;

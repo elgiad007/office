@@ -192,6 +192,13 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
 /* Keep the current item identifiable when focus moves into its content. */
 .items .item.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+#items:not(.calendar-board) .item[data-id], #items :is(.calendar-agenda,.calendar-undated) .item[data-id] { touch-action: pan-y pinch-zoom; }
+#items .row-swiping { transform: translateX(var(--swipe-offset)); clip-path: inset(var(--swipe-clip)); }
+.swipe-preview { position: fixed; z-index: 5; pointer-events: none; display: grid; place-items: center; overflow: hidden; white-space: nowrap; border-radius: 5px; background: var(--wash); color: var(--accent); font-size: 12px; font-weight: 650; }
+.swipe-preview.danger { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger); }
+.swipe-preview.armed { background: var(--accent); color: var(--surface); }
+.swipe-preview.danger.armed { background: var(--danger); color: var(--surface); }
+#swipe-preferences fieldset { display: grid; gap: 10px; min-width: 0; border: 1px solid var(--line); border-radius: 5px; }
 .checklist-add { display:flex; align-items:center; gap:8px; }
 .checklist-title label, .checklist-add input { flex:1; min-width:0; }
 .checklist { margin-top:16px; }

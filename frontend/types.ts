@@ -70,6 +70,7 @@ export interface Account {
   folders?: MailFolder[]; last_sync?: string | null; error?: string | null;
 }
 export interface Preferences {
+  swipe?: import('./swipe.js').SwipePreferences;
   showElapsedTime?: boolean;
   activityLogLevel?: 'summary' | 'warnings' | 'detailed';
   mailList?: MailListLayout;

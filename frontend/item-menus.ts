@@ -50,6 +50,7 @@ export function installItemMenus(env: MenuEnvironment) {
   async function run(id: string,ids: string[],app: AppName) {
     if(state.app!==app)throw Error('The application changed. Open the menu again.');
     await env.commit();
+    if(state.app!==app)throw Error('The application changed. Open the menu again.');
     const rows=ids.map(id=>state.rows.find(r=>r.id===id)!);
     if(rows.some(r=>!r)||!actions(rows).some(a=>a.id===id))throw Error('The selected items changed. Open the menu again.');
     if(['open','edit','reply','history','eml'].includes(id)){
@@ -97,7 +98,7 @@ export function installItemMenus(env: MenuEnvironment) {
       finally{await reload(removed);}
       env.notice(`${count} ${count===1?'item':'items'} updated.`);
     };
-    if(['delete','discard','trash'].includes(id))await env.confirmDeletion(rows,id==='trash'?'Move to Trash':id==='delete'?(app==='mail'&&rows.length===1&&rows[0].meta.folder==='Drafts'?'Discard Draft':'Delete selected items'):'Discard copies',id==='trash'?`Move ${rows.length} selected message(s) to Trash?`:id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply,id==='trash');
+    if(['delete','discard','trash'].includes(id))await env.confirmDeletion(rows,id==='trash'?'Move to Trash':id==='delete'?(app==='mail'&&rows.length===1&&rows[0].meta.folder==='Drafts'?'Discard Draft':rows.length===1?'Delete item':'Delete selected items'):'Discard copies',id==='trash'?`Move ${rows.length} selected message(s) to Trash? Undo is available for fifteen minutes.`:id==='delete'?(app==='mail'?`Delete ${rows.length} selected message(s)? Undo is available for fifteen minutes.`:`Delete ${rows.length} selected item(s) and their revision history? This cannot be undone.`):`Discard ${rows.length} recovery copy/copies from Office? Your server mailbox is unaffected.`,apply,id==='trash');
     else if(id==='block-sender'||id==='block-domain'){
       const label=id==='block-sender'?'Sender':'Domain';
       env.confirmation('Block '+label,`Block ${blockTarget(rows[0],id)} for this account and move this message to Junk?`,apply);
@@ -153,5 +154,5 @@ export function installItemMenus(env: MenuEnvironment) {
   document.addEventListener('scroll',event=>{if(menu&&!menu.contains((event.target as HTMLElement)))close();},true);
   window.addEventListener('resize',()=>close());
   window.addEventListener('blur',()=>close());
-  return {close,run};
+  return {close,run,actions};
 }

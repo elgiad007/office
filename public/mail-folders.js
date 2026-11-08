@@ -332,13 +332,13 @@ export async function fileMail(env) {
 export function canQuickMoveMail(rows) {
     return rows.length > 0 && rows.every(r => r.meta.remote && !['Drafts', 'Sending', 'Delivery uncertain', 'Recovery copies', 'Not in Inbox'].includes(r.meta.folder || ''));
 }
-export async function quickMoveMail(env) {
+export async function quickMoveMail(env, rowId) {
     const reload = env.mailDeletionReload?.();
     await env.commit();
     const { state, e } = env;
     if (state.app !== 'mail')
         return;
-    const rows = state.selected.size ? state.rows.filter(r => state.selected.has(r.id)) : [state.current].filter(isPresent);
+    const rows = rowId !== undefined ? state.rows.filter(r => r.id === rowId) : state.selected.size ? state.rows.filter(r => state.selected.has(r.id)) : [state.current].filter(isPresent);
     if (!canQuickMoveMail(rows))
         throw Error('Select synchronized messages to move.');
     const accounts = state.accounts.filter(a => ['imap', 'google'].includes(a.type));
