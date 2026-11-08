@@ -15,6 +15,7 @@ export async function testMobileLayout(browser, url) {
     row('wiki','page','phone:page'),
     row('sheets','sheet','Phone workbook',{workbook:{sheets:[{name:'Sheet 1',cells:{A1:'2'}}]}}),
     row('lists','list','Phone list',{checklist:[]}),
+    row('lists','empty-list','Empty checklist',{checklist:[]}),
   ];
   const reads=[],saves=[];
   await page.route('**/api.php?*',async route=>{
@@ -50,6 +51,18 @@ export async function testMobileLayout(browser, url) {
     return control;
   };
   const detail=page.locator('#detail');
+  const listTitle=detail.getByRole('textbox',{name:'List name',exact:true});
+  const listTitleSize=()=>listTitle.evaluate(node=>parseFloat(getComputedStyle(node).fontSize));
+  const assertListTitleAlignment=async()=>{
+    const [input,header,rename]=await Promise.all([
+      listTitle.boundingBox(),
+      detail.locator('.checklist-title').boundingBox(),
+      button('Rename list').boundingBox(),
+    ]);
+    assert.ok(Math.abs(input.x-header.x)<1,'List title starts at the left edge of its header');
+    assert.ok(Math.abs(input.y-header.y)<1&&Math.abs(rename.y-header.y)<1,'List title and rename button align with the top of the header');
+    assert.ok(header.height<65,'List title header does not grow to fill the pane');
+  };
   const go=async name=>{await button('Menu').tap();await button(name).tap();await page.locator('#crumb').getByText(name,{exact:true}).waitFor();};
   const back=()=>button('Back to list').tap();
   const fit=()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1);
@@ -149,6 +162,9 @@ export async function testMobileLayout(browser, url) {
       }
       if(app==='Lists'){
         await iconButton('Rename list');
+        await assertListTitleAlignment();
+        const emptySize=await listTitleSize();
+        assert.ok(emptySize>27,`An empty list has room for a larger title (got ${emptySize}px)`);
         const add=await iconButton('Add item');
         await detail.getByRole('textbox',{name:'New checklist item'}).fill('Budget review');
         await add.tap();
@@ -158,6 +174,20 @@ export async function testMobileLayout(browser, url) {
         const dialog=page.getByRole('dialog',{name:'Remove checklist item',exact:true});
         await dialog.getByRole('button',{name:'Remove item',exact:true}).tap();
         assert.equal(await remove.count(),0);
+        const entry=detail.getByRole('textbox',{name:'New checklist item'});
+        const pasteItems=count=>entry.evaluate((input,count)=>{
+          const clipboardData=new DataTransfer();
+          clipboardData.setData('text/plain',Array.from({length:count},(_,index)=>`Item ${index+1}`).join('\n'));
+          input.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData}));
+        },count);
+        await pasteItems(4);
+        const shortSize=await listTitleSize();
+        assert.ok(shortSize<emptySize);
+        await pasteItems(8);
+        const longSize=await listTitleSize();
+        assert.ok(longSize<shortSize&&longSize>=22);
+        await assertListTitleAlignment();
+        assert.ok(await fit(),'Long lists fit the phone width');
       }
       await back();
       assert.equal(await detail.isVisible(),false);
@@ -184,6 +214,17 @@ export async function testMobileLayout(browser, url) {
       assert.ok(await fit(),JSON.stringify(viewport));
     }
 
+    await page.setViewportSize({width:1440,height:1000});
+    await button('Lists').click();
+    await page.locator('#items [data-id="empty-list"]').click();
+    await assertListTitleAlignment();
+    const desktopEmptySize=await listTitleSize();
+    await page.locator('#items [data-id="list"]').click();
+    const desktopLongSize=await listTitleSize();
+    assert.ok(desktopLongSize<desktopEmptySize&&desktopLongSize>=22);
+    await assertListTitleAlignment();
+    await page.setViewportSize({width:1440,height:500});
+    assert.ok(await listTitleSize()<desktopLongSize,'A shorter detail pane reduces title size');
     await page.setViewportSize({width:1440,height:1000});
     await button('Tasks').click();
     await page.locator('#items [data-id="task"]').click();

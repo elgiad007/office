@@ -192,7 +192,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .folder-account summary > .folder-link { display: inline-flex; width: calc(100% - 22px); justify-content: flex-start; }
 /* Keep the current item identifiable when focus moves into its content. */
 .items .item.selected { outline: 2px solid var(--accent); outline-offset: -2px; }
-.checklist-title, .checklist-add { display:flex; align-items:center; gap:8px; }
+.checklist-add { display:flex; align-items:center; gap:8px; }
 .checklist-title label, .checklist-add input { flex:1; min-width:0; }
 .checklist { margin-top:16px; }
 .checklist-rows { list-style:none; padding:0; margin:0; }
@@ -675,6 +675,20 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
      editor below the toolbar and fields. Real content may still overflow. */
   .detail .detail-form { display: flex; flex-direction: column; flex: 1 0 auto; width: 100%; gap: min(20px, 2vh); }
   .compact .detail .detail-form { gap: min(10px, 2vh); }
+  .detail:has(> .checklist-title) { container-type: size; }
+  .detail .checklist-title {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  #main .checklist-title .title-input {
+    font-size: clamp(22px, calc(20px + 1.8cqh - var(--checklist-title-reduction, 0px)), 34px);
+    line-height: 1.2;
+  }
+  .detail:has(.checklist-rows > :nth-child(4)) .checklist-title { --checklist-title-reduction: 3px; }
+  .detail:has(.checklist-rows > :nth-child(8)) .checklist-title { --checklist-title-reduction: 6px; }
+  .detail:has(.checklist-rows > :nth-child(12)) .checklist-title { --checklist-title-reduction: 10px; }
   .detail-form > label:has(> .body-editor) { display: flex; flex-direction: column; flex: 1 0 auto; }
   .detail .body-editor { flex: 1 0 auto; min-height: 3lh; }
   .detail .document-content { display: flex; flex-direction: column; flex: 1 0 auto; }

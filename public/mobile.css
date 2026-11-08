@@ -170,7 +170,6 @@
   #main .detail { padding: 0 12px 12px; }
   #main .detail.mail-reader { padding-top: 10px; }
   #main .detail .fields { grid-template-columns: minmax(0, 1fr); }
-  #main .detail .checklist-title { flex-direction: row; }
   #main .detail :is(label, .detail-form, .rich-editor, .formula-bar, .sheet-wrap) { min-width: 0; }
   #main .detail-toolbar {
     position: sticky;
