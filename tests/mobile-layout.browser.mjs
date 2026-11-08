@@ -70,6 +70,35 @@ export async function testMobileLayout(browser, url) {
     await page.goto(url+'#mail');
     await page.locator('#items .item').first().waitFor();
     for(const name of ['Menu','Compose','More','Folders'])await iconButton(name);
+    const shortcuts=button('Keyboard shortcuts');
+    const shortcutsHeading=page.getByRole('heading',{name:'Keyboard shortcuts and commands',exact:true});
+    for(const viewport of [{width:320,height:568},{width:844,height:390}]){
+      await page.setViewportSize(viewport);
+      const landscape=viewport.width>viewport.height;
+      await button(landscape?'Folders':'Menu').tap();
+      if(landscape)await page.locator('#mail-folder').waitFor();
+      await shortcuts.scrollIntoViewIfNeeded();
+      const drawer=await shortcuts.evaluate(node=>{
+        const sidebar=node.closest('#app-sidebar');
+        const {top,bottom}=sidebar.getBoundingClientRect();
+        const row=node.getBoundingClientRect();
+        return {
+          scrolled:sidebar.scrollTop>0,
+          rowVisible:row.top>=top&&row.bottom<=bottom,
+          outline:getComputedStyle(sidebar).outlineStyle,
+          scrollableOutline:getComputedStyle(sidebar,'::after').content,
+        };
+      });
+      assert.deepEqual(drawer,{scrolled:true,rowVisible:true,outline:'solid',scrollableOutline:'none'});
+      if(landscape){
+        await shortcuts.focus();
+        await page.keyboard.press('Enter');
+      }else await shortcuts.tap();
+      await shortcutsHeading.waitFor();
+      await page.keyboard.press('Escape');
+      await shortcutsHeading.waitFor({state:'hidden'});
+    }
+    await page.setViewportSize({width:390,height:844});
     const listView=page.locator('#mail-list-view > summary[aria-label="List view"]');
     assert.equal(await listView.locator('svg').isVisible(),true);
     assert.equal((await listView.innerText()).trim(),'');
@@ -215,6 +244,8 @@ export async function testMobileLayout(browser, url) {
     }
 
     await page.setViewportSize({width:1440,height:1000});
+    await button('Lists').focus();
+    assert.equal(await page.locator('#app-sidebar').evaluate(node=>getComputedStyle(node,'::after').borderTopStyle),'solid');
     await button('Lists').click();
     await page.locator('#items [data-id="empty-list"]').click();
     await assertListTitleAlignment();

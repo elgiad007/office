@@ -45,6 +45,11 @@
     box-shadow: var(--shadow);
   }
   .shell .sidebar.mobile-expanded { display: block; }
+  .shell .sidebar:focus-within {
+    outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+    outline-offset: -3px;
+  }
+  .shell .sidebar:focus-within::after { content: none; }
   .sidebar.mobile-expanded + .mobile-menu-backdrop {
     display: block;
     position: absolute;
