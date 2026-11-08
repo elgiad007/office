@@ -79,23 +79,9 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), op
         selectEntry(rows.some(entry => entry.id === selectedId) ? selectedId : rows[0]?.id, document.activeElement === list);
         dialog.querySelector('#activity-count').textContent = `${rows.length} of ${entries.length} recent entries · latest 500 retained`;
     }
-    function receive(newEntries) {
-        const byId = new Map(entries.map(entry => [entry.id, entry]));
-        for (const entry of newEntries)
-            byId.set(entry.id, entry);
-        entries = [...byId.values()].sort((a, b) => a.id - b.id).slice(-500);
-        cursor = entries.at(-1)?.id || cursor;
-        if (localErrorHeld) {
-            renderStatus();
-            renderEntries();
+    function updateStatus(latest) {
+        if (localErrorHeld || !latest)
             return;
-        }
-        const latest = entries.filter(entry => entry.phase !== 'diagnostic').at(-1);
-        if (!latest) {
-            renderStatus();
-            renderEntries();
-            return;
-        }
         lastMessage = (latest.account ? latest.account + ': ' : '') + latest.message;
         lastError = latest.level === 'error';
         if (['progress', 'sync-progress'].includes(latest.phase) && tasks.size) {
@@ -105,6 +91,14 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), op
                 task.syncProgress = latest.phase === 'sync-progress';
             }
         }
+    }
+    function receive(newEntries) {
+        const byId = new Map(entries.map(entry => [entry.id, entry]));
+        for (const entry of newEntries)
+            byId.set(entry.id, entry);
+        entries = [...byId.values()].sort((a, b) => a.id - b.id).slice(-500);
+        cursor = entries.at(-1)?.id || cursor;
+        updateStatus(entries.filter(entry => entry.phase !== 'diagnostic').at(-1));
         renderStatus();
         renderEntries();
     }
@@ -144,7 +138,7 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), op
         keySequence = '';
         dialog.returnValue = '';
         dialog.innerHTML = `<div class="dialog-head"><h2 id="activity-title">Recent activity</h2><button type="button" id="activity-close" aria-label="Close activity">✕</button></div>
-      <p>Connection progress and recent Office activity. Passwords, tokens, mail contents and raw commands are excluded.</p>
+      <p>Recent Office activity. Choose what gets saved in Activity Log settings. Passwords, tokens, mail contents and raw commands are excluded.</p>
       <div class="activity-tools"><label>Level<select id="activity-level" aria-label="Level"><option value="">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="success">Success</option><option value="info">Information</option></select></label><label>Account<select id="activity-account" aria-label="Account"><option value="">All accounts</option></select></label><button type="button" id="activity-copy">Copy visible log</button><button type="button" id="activity-clear">Clear log</button></div>
       <p id="activity-count"></p><p id="activity-feedback" role="status"></p><ol id="activity-entries" tabindex="0" role="listbox" aria-label="Recent activity entries"></ol>`;
         dialog.querySelector('#activity-level').value = level;
@@ -258,6 +252,10 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), op
         open,
         receive(entry) { if (enabled)
             receive([entry]); },
+        progress(entry) { if (enabled) {
+            updateStatus(entry);
+            renderStatus();
+        } },
         configure(value) { enabled = value; button.disabled = !value; if (!value) {
             generation++;
             entries = [];

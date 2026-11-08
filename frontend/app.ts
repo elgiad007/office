@@ -3,7 +3,7 @@ import {createKeyboardScroller, vimScrollDirection, type ScrollDirection} from '
 import {CommandError,resolveCommand} from './commands.js';
 import {createConnections} from './connections.js';
 import {asError,isPresent} from './utils.js';
-import type {ActivityEntry, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, ConnectionDeletionChoices, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences, RecordList} from './types.js';
+import type {ActivityEntry, ActivityProgress, ApiData, ApiResponse, ApiRoute, AppName, AppState, Cells, ConnectionDeletionChoices, DeleteMail, ItemInput, ItemKind, ItemMeta, MailScope, MutationResult, OfficeRecord, Status, Preferences, RecordList} from './types.js';
 
 interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; removedIds?: string[]; error?: string; code?: string; connectionCounts?: Record<string,number>}
 interface RequestPayload {id?: string; revision?: number; action?: string; account?: string; summary?: boolean}
@@ -342,9 +342,10 @@ async function requestApi(route: ApiRoute, data?: ApiData, signal?: AbortSignal)
     const reader=response.body!.getReader(),decoder=new TextDecoder();let buffer='',finished=false;
     const consume=(line: string)=>{
       if(!line.trim())return;
-      const event=JSON.parse(line) as {type: 'activity'; entry: ActivityEntry} | {type: 'result'; body: WireResult; status: number};
-      if(event.type==='activity'){
-        activity.receive(event.entry);
+      const event=JSON.parse(line) as {type: 'activity'; entry: ActivityEntry} | {type: 'activity-progress'; entry: ActivityProgress} | {type: 'result'; body: WireResult; status: number};
+      if(event.type==='activity'||event.type==='activity-progress'){
+        if(event.type==='activity')activity.receive(event.entry);
+        else activity.progress(event.entry);
         if(route==='sync' && event.entry.phase==='mail-cache-ready' && state.app==='mail' && !state.dirty && !document.hidden){
           cacheRefresh??=load(undefined,{preserveSelection:true,selectFirst:false}).catch(cause=>notice(asError(cause).message,true));
         }
@@ -2079,7 +2080,7 @@ function renderJunkSettings() {
   select.onchange=()=>void render();
   void render();
 }
-const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['accounts','Accounts'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups']] as const;
+const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['accounts','Accounts'],['activity-log','Activity Log'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups']] as const;
 const settingsPageKey='office-settings-page';
 let settingsPage='appearance';
 try {
@@ -2157,6 +2158,21 @@ function renderSettings(entryVersion?: number) {
     <section class="settings-grid" id="settings-keyboard" data-settings-page="keyboard"${settingsPage==='keyboard'?'':' hidden'}>
       <section class="card"><h2>Keyboard bindings</h2><p>Home-row navigation is on by default. Remap single-character actions below. Full Vim text operators and visual selections inside document editors are future work.</p><form id="key-form"><div class="fields">${Object.entries(defaultKeys).map(([action,key])=>field(action,'key_'+action,keys()[action],'text','required maxlength="1"')).join('')}</div><button class="primary">Save bindings</button></form></section>
     </section>
+    <section class="settings-grid" id="settings-activity-log" data-settings-page="activity-log"${settingsPage==='activity-log'?'':' hidden'}>
+      <section class="card"><h2>Activity Log</h2><form id="activity-log-preferences">
+        <label>Logging level<select id="activity-log-level" name="activityLogLevel" aria-label="Logging level" aria-describedby="activity-log-level-help">
+          <option value="summary">Summary (default)</option>
+          <option value="warnings" ${p.activityLogLevel==='warnings'?'selected':''}>Warnings and errors</option>
+          <option value="detailed" ${p.activityLogLevel==='detailed'?'selected':''}>Detailed</option>
+        </select></label>
+        <div id="activity-log-level-help">
+          <p><strong>Summary</strong> saves operation outcomes and distinct warnings and errors. Completed item actions keep their links.</p>
+          <p><strong>Warnings and errors</strong> saves only warnings and errors. <strong>Detailed</strong> also saves folder checks, batch progress and connection diagnostics.</p>
+          <p>Changes apply to new operations. Live progress appears in the status bar at every level.</p>
+        </div>
+        <button class="primary">Save logging level</button>
+      </form></section>
+    </section>
     <section class="settings-grid" id="settings-backups" data-settings-page="backups"${settingsPage==='backups'?'':' hidden'}>
       <section class="card"><h2>Backups</h2><p>SQLite backups include local records, cached messages, saved attachments, revisions, connections and preferences. Account credentials and your password are excluded.</p><button id="backup">Prepare backup</button> <button id="backup-download" hidden>↓ Download SQLite backup</button><div><progress id="backup-progress" aria-label="Backup progress" hidden></progress><div id="backup-status" role="status"></div></div><p>Restore a SQLite or JSON backup into an empty installation. Synced copies become local archives. Reconnect provider accounts after restoring.</p><button id="restore">↑ Restore backup</button></section>
     </section>
@@ -2191,6 +2207,15 @@ function renderSettings(entryVersion?: number) {
   bindMailListSettings(document.querySelector<HTMLElement>('#mail-list-settings')!,p.mailList,async layout=>{await attempt(async()=>{const preferences={...state.prefs,mailList:layout};await api('preferences',{preferences});state.prefs=preferences;notice('List appearance saved.');});});
   void renderGoogleSettings(document.querySelector<HTMLElement>('#google-integration')!,api);
   document.querySelector<HTMLFormElement>('#preferences')!.onsubmit=ev=>{ev.preventDefault();void attempt(async()=>{const form=ev.target as HTMLFormElement,preferences={...state.prefs,...Object.fromEntries(new FormData(form)),showElapsedTime:(form.elements.namedItem('showElapsedTime') as HTMLInputElement).checked};await api('preferences',{preferences});state.prefs=preferences;applyTheme();notice('Preferences saved.');});};
+  document.querySelector<HTMLFormElement>('#activity-log-preferences')!.onsubmit=event=>{
+    event.preventDefault();
+    const level=document.querySelector<HTMLSelectElement>('#activity-log-level')!.value;
+    const activityLogLevel=level==='warnings'||level==='detailed'?level:'summary';
+    void attempt(async()=>{
+      const preferences: Preferences={...state.prefs,activityLogLevel};
+      await api('preferences',{preferences});state.prefs=preferences;notice('Logging level saved.');
+    });
+  };
   renderJunkSettings();
   document.querySelector<HTMLFormElement>('#link-preferences')!.onsubmit=event=>{
     event.preventDefault();

@@ -17,20 +17,42 @@ function activity_db(): PDO {
     return $db=$store;
 }
 function activity_event(string $message,string $level='info',string $phase='progress',?int $duration=null): void {
-    $context=$GLOBALS['office_activity']??[];
     try {
-        $db=activity_db();$db->beginTransaction();
+        $loggingLevel=$GLOBALS['office_activity']['logging_level']??null;
+        if($loggingLevel===null){
+            $preferences=setting('preferences',[]);
+            $loggingLevel=$preferences['activityLogLevel']??'summary';
+            if(!in_array($loggingLevel,['summary','warnings','detailed'],true))$loggingLevel='summary';
+            if(isset($GLOBALS['office_activity']))$GLOBALS['office_activity']['logging_level']=$loggingLevel;
+        }
+        $alert=in_array($level,['warning','error'],true);
+        $save=$loggingLevel==='detailed'||$alert||($loggingLevel==='summary'&&$phase==='complete');
+        $stream=!empty($GLOBALS['office_activity_stream']);
+        $live=$stream&&in_array($phase,['start','sync-progress','mail-cache-ready','complete','error'],true);
+        if(!$save&&!$live)return;
+
+        $message=substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000);
+        $alertKey=null;
+        if($alert&&$loggingLevel!=='detailed'&&$phase!=='error'&&isset($GLOBALS['office_activity'])){
+            $alertKey=$level.':'.$message;
+            if(isset($GLOBALS['office_activity']['seen_alerts'][$alertKey]))return;
+        }
+        $context=$GLOBALS['office_activity']??[];
         $entry=['time'=>gmdate('Y-m-d\TH:i:s\Z'),'level'=>$level,'account'=>substr($context['account']??'',0,200),
-            'operation'=>$context['operation']??'Office','message'=>substr(preg_replace('/[\x00-\x1f\x7f]/',' ',$message),0,1000),
+            'operation'=>$context['operation']??'Office','message'=>$message,
             'duration_ms'=>$duration,'run'=>$context['run']??'','phase'=>$phase,'record_id'=>$context['record_id']??null];
-        $db->prepare('INSERT INTO activity(time,level,account,operation,message,duration_ms,run,phase,record_id) VALUES(?,?,?,?,?,?,?,?,?)')->execute(array_values($entry));
-        $id=(int)$db->lastInsertId();
-        // Prune once per group and at operation boundaries, rather than on every
-        // transport event. Readers still expose exactly the newest 500 entries.
-        if($id%50===0 || in_array($phase,['complete','error'],true))$db->exec('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT 500)');
-        $db->commit();
-        if(!empty($GLOBALS['office_activity_stream'])) {
-            echo json_encode(['type'=>'activity','entry'=>['id'=>$id]+$entry],JSON_INVALID_UTF8_SUBSTITUTE)."\n";
+        unset($context);
+        if($save){
+            $db=activity_db();$db->beginTransaction();
+            $db->prepare('INSERT INTO activity(time,level,account,operation,message,duration_ms,run,phase,record_id) VALUES(?,?,?,?,?,?,?,?,?)')->execute(array_values($entry));
+            $id=(int)$db->lastInsertId();
+            // Prune once per group and at operation boundaries.
+            if($id%50===0 || in_array($phase,['complete','error'],true))$db->exec('DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT 500)');
+            $db->commit();
+            if($alertKey!==null)$GLOBALS['office_activity']['seen_alerts'][$alertKey]=true;
+        }
+        if($stream) {
+            echo json_encode($save?['type'=>'activity','entry'=>['id'=>$id]+$entry]:['type'=>'activity-progress','entry'=>$entry],JSON_INVALID_UTF8_SUBSTITUTE)."\n";
             if(ob_get_level())@ob_flush();flush();
         }
     } catch (Throwable) { if(isset($db)&&$db->inTransaction())$db->rollBack(); /* Logging must not interrupt mail. */ }
@@ -50,7 +72,7 @@ function activity_set_record(string $recordId): void {
 function activity_step(string $message,string $level='info',?int $duration=null): void {
     if(isset($GLOBALS['office_activity']))activity_event($message,$level,'progress',$duration);
 }
-/** Keep useful folder/batch progress visible while transport details fill the log. */
+/** Publish folder and batch progress for the live status bar. */
 function activity_sync_progress(string $message): void {
     if(isset($GLOBALS['office_activity']))activity_event($message,'info','sync-progress');
 }

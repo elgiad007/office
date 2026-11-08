@@ -1,5 +1,5 @@
 import {asError,isPresent} from './utils.js';
-import type {ActivityEntry} from './types.js';
+import type {ActivityEntry,ActivityProgress} from './types.js';
 import {escapeHtml as e} from './formats.js';
 import {timestampLabel, timestampText} from './time-labels.js';
 
@@ -68,11 +68,8 @@ export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem}: {cs
     selectEntry(rows.some(entry=>entry.id===selectedId)?selectedId:rows[0]?.id,document.activeElement===list);
     dialog.querySelector<HTMLElement>('#activity-count')!.textContent=`${rows.length} of ${entries.length} recent entries · latest 500 retained`;
   }
-  function receive(newEntries: ActivityEntry[]) {
-    const byId=new Map(entries.map(entry=>[entry.id,entry]));for(const entry of newEntries)byId.set(entry.id,entry);
-    entries=[...byId.values()].sort((a,b)=>a.id-b.id).slice(-500);cursor=entries.at(-1)?.id||cursor;
-    if(localErrorHeld){renderStatus();renderEntries();return;}
-    const latest=entries.filter(entry=>entry.phase!=='diagnostic').at(-1);if(!latest){renderStatus();renderEntries();return;}
+  function updateStatus(latest?: ActivityProgress) {
+    if(localErrorHeld||!latest)return;
     lastMessage=(latest.account?latest.account+': ':'')+latest.message;lastError=latest.level==='error';
     if(['progress','sync-progress'].includes(latest.phase)&&tasks.size){
       const active=[...tasks.values()].filter(task=>task.active),task=active.find(task=>latest.account&&task.message.startsWith(latest.account+': '))||(!latest.account?active.at(-1):undefined);
@@ -80,6 +77,11 @@ export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem}: {cs
         task.message=lastMessage;task.syncProgress=latest.phase==='sync-progress';
       }
     }
+  }
+  function receive(newEntries: ActivityEntry[]) {
+    const byId=new Map(entries.map(entry=>[entry.id,entry]));for(const entry of newEntries)byId.set(entry.id,entry);
+    entries=[...byId.values()].sort((a,b)=>a.id-b.id).slice(-500);cursor=entries.at(-1)?.id||cursor;
+    updateStatus(entries.filter(entry=>entry.phase!=='diagnostic').at(-1));
     renderStatus();renderEntries();
   }
   async function poll() {
@@ -98,7 +100,7 @@ export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem}: {cs
     selectedId=undefined;keySequence='';
     dialog.returnValue='';
     dialog.innerHTML=`<div class="dialog-head"><h2 id="activity-title">Recent activity</h2><button type="button" id="activity-close" aria-label="Close activity">✕</button></div>
-      <p>Connection progress and recent Office activity. Passwords, tokens, mail contents and raw commands are excluded.</p>
+      <p>Recent Office activity. Choose what gets saved in Activity Log settings. Passwords, tokens, mail contents and raw commands are excluded.</p>
       <div class="activity-tools"><label>Level<select id="activity-level" aria-label="Level"><option value="">All levels</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="success">Success</option><option value="info">Information</option></select></label><label>Account<select id="activity-account" aria-label="Account"><option value="">All accounts</option></select></label><button type="button" id="activity-copy">Copy visible log</button><button type="button" id="activity-clear">Clear log</button></div>
       <p id="activity-count"></p><p id="activity-feedback" role="status"></p><ol id="activity-entries" tabindex="0" role="listbox" aria-label="Recent activity entries"></ol>`;
     dialog.querySelector<HTMLSelectElement>('#activity-level')!.value=level;
@@ -168,6 +170,7 @@ export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem}: {cs
   return {
     open,
     receive(entry: ActivityEntry): void{if(enabled)receive([entry]);},
+    progress(entry: ActivityProgress): void{if(enabled){updateStatus(entry);renderStatus();}},
     configure(value: boolean){enabled=value;button.disabled=!value;if(!value){generation++;entries=[];cursor=0;tasks.clear();clearTimeout(idleTimer);idle=true;localErrorHeld=false;commandErrorHeld=false;lastMessage='Ready.';lastError=false;if(dialog.open)dialog.close();renderStatus();}else void poll();},
     clearCommandError(){if(!commandErrorHeld)return;clearTimeout(idleTimer);localErrorHeld=false;commandErrorHeld=false;lastError=false;lastMessage='Ready.';idle=!tasks.size;renderStatus();},
     notice(message: string,error=false,{log=true}: {log?: boolean}={}){lastMessage=message;lastError=error;markBusy();localErrorHeld=error;commandErrorHeld=error&&!log;settle();renderStatus();if(enabled&&log)void request({action:'notice',message:String(message).slice(0,1000),error}).then(()=>poll()).catch(()=>{});},

@@ -115,6 +115,9 @@ test('valid commands dismiss only command errors and preserve activity and repla
   const queued=activity.queued('Waiting…'),running=activity.queued('Loading…');activity.running(running);
   activity.notice('Unknown command',true,{log:false});activity.clearCommandError();
   assert.equal(status.textContent,'Loading… · 1 queued');assert.equal(bar.dataset.level,'busy');
+  activity.progress({phase:'sync-progress',level:'info',message:'Downloading folder batches'});
+  assert.equal(status.textContent,'Downloading folder batches · 1 queued');
+  assert.equal(button.innerHTML,badge,'Live progress does not enter the saved log');
   activity.done(running);
   activity.notice('Unknown command',true,{log:false});activity.clearCommandError();
   assert.equal(status.textContent,'1 operation(s) queued…');

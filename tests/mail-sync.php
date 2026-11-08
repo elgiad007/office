@@ -241,7 +241,7 @@ try {
     check(mail_cache_rows($g2['id'])===$before,'Gmail label scan failure keeps previous snapshot');
     // Default headers-first sync must catch a burst larger than its batch and
     // resume older history even when more arrivals appear between passes.
-    set_setting('preferences',[]);$busy=make_account('busy-headers');
+    set_setting('preferences',['activityLogLevel'=>'detailed']);$busy=make_account('busy-headers');
     $runHeaders=function(array $all,array $fresh,array $existing,int $limit=100)use($busy){
         $steps=[...sync_preflight(),examine_step('INBOX'),search_step('ALL',$all),examine_step('Saved'),search_step('ALL',[]),examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX')];
         foreach(array_chunk($fresh,25) as $chunk){
@@ -323,6 +323,7 @@ try {
     // An Inbox batch can be exposed without classifying absent mail in other
     // folders. A later folder failure leaves those originals and flags intact.
     $staged=make_account('staged-inbox');
+    set_setting('preferences',['activityLogLevel'=>'detailed']);
     $archiveSource=mail_source('Saved','100','9');
     $archiveRow=save_record(mail_download($staged,$archiveSource,"Subject: Archive original\r\n\r\nKeep",['folder'=>'Archive','serverFolder'=>'Saved','uidValidity'=>'100','providerId'=>'9','read'=>true]),true);
     activity_begin('Synchronize account','Fixture');
@@ -331,6 +332,7 @@ try {
     check(count(mail_cache_rows($staged['id']))===3,'validated new Inbox headers survive a later folder failure');
     check(get_record($archiveRow['id'])['meta']['folder']==='Archive' && get_record($archiveRow['id'])['meta']['read']===true,'early Inbox publication never reconciles absent Archive originals');
     check((bool)array_filter(activity_rows(),fn($entry)=>$entry['phase']==='mail-cache-ready'),'early Inbox publication emits a cache-ready event');
+    set_setting('preferences',[]);
     $junk=make_account('junk-fixture','google');
     update_mail_block($junk['id'],'domain','Example.COM');
     $rule=array_values(mail_block_rules($junk['id']))[0];

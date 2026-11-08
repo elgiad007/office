@@ -71,6 +71,7 @@ export interface Account {
 }
 export interface Preferences {
   showElapsedTime?: boolean;
+  activityLogLevel?: 'summary' | 'warnings' | 'detailed';
   mailList?: MailListLayout;
   mailView?: MailViewPreferences;
   taskView?: TaskViewPreferences;
@@ -100,11 +101,12 @@ export interface AppState {
   savePromise: Promise<void> | null; mailFolder: string; mailScope: MailScope | null;
   folderOpen: Set<string>;
 }
-export interface ActivityEntry {
-  id: number; time: string; level: string; account: string;
+export interface ActivityProgress {
+  time: string; level: string; account: string;
   operation: string; message: string; duration_ms: number | null; phase: string;
   run?: string; record_id?: string | null;
 }
+export interface ActivityEntry extends ActivityProgress {id: number}
 export interface ConnectionCheck { label: string; status: string; message: string }
 export interface CheckResult { status: string; checks: ConnectionCheck[] }
 export interface GoogleSettings {

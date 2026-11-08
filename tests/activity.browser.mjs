@@ -22,8 +22,17 @@ export async function testActivityKeyboard(page,url) {
     }
     if(action==='connections')return route.fulfill({json:{links:[],items:[]}});
     if(action==='accounts')return route.fulfill({json:{accounts:[]}});
+    if(action==='google-settings')return route.fulfill({json:{configured:false}});
+    if(action==='mail-junk-settings')return route.fulfill({json:{rules:[],folder:''}});
+    if(action==='preferences'){
+      preferences=route.request().postDataJSON().preferences;
+      return route.fulfill({json:{ok:true}});
+    }
     if(action==='activity'){
-      if(route.request().method()==='POST'){entries=[];return route.fulfill({json:{ok:true}});}
+      if(route.request().method()==='POST'){
+        if(route.request().postDataJSON().action==='clear')entries=[];
+        return route.fulfill({json:{ok:true}});
+      }
       return route.fulfill({json:{entries:entries.filter(entry=>entry.id>Number(new URL(route.request().url()).searchParams.get('after')||0))}});
     }
     throw Error('Unexpected activity keyboard route '+action);
@@ -91,6 +100,17 @@ export async function testActivityKeyboard(page,url) {
     assert.equal(await list.getAttribute('aria-activedescendant'),null);
     await page.keyboard.press('Escape');await page.getByRole('button',{name:'View activity',exact:true}).click();assert.equal(await focused(),true);
     await page.keyboard.press('Escape');
+    await page.goto(url+'?activity-settings#settings');
+    await page.getByRole('button',{name:'Activity Log settings',exact:true}).click();
+    const level=page.getByLabel('Logging level',{exact:true});
+    assert.equal(await level.inputValue(),'summary');
+    await level.selectOption('warnings');
+    await page.getByRole('button',{name:'Save logging level'}).click();
+    await page.locator('#notice').filter({hasText:'Logging level saved.'}).waitFor();
+    assert.deepEqual(preferences,{keys:{down:'z',up:'q'},activityLogLevel:'warnings'});
+    await page.reload();await level.waitFor();
+    assert.equal(await level.inputValue(),'warnings');
+    assert.equal(await level.locator('option[value="detailed"]').textContent(),'Detailed');
     console.log('PASS activity keyboard selection, filters, focus, Enter navigation and unavailable items.');
   } finally {await page.unroute(routes);}
 }
@@ -111,7 +131,7 @@ export async function testActivity(page,url) {
     if(action==='records')return route.fulfill({json:{records:[]}});
     if(action==='accounts')return route.fulfill({json:{accounts:streamingAccount?[{id:'stream-account',label:'Stream account',type:'imap'}]:[]}});
     if(action==='sync'){if(syncHold)await syncHold;return route.fulfill({contentType:'application/x-ndjson',body:[
-      {type:'activity',entry:{id:6,time:new Date().toISOString(),level:'info',account:'Stream account',operation:'Synchronize account',message:'IMAP: reconnecting once.',duration_ms:null,phase:'progress'}},
+      {type:'activity-progress',entry:{time:new Date().toISOString(),level:'info',account:'Stream account',operation:'Synchronize account',message:'Checking the Inbox batch.',duration_ms:null,phase:'sync-progress'}},
       {type:'activity',entry:{id:7,time:new Date().toISOString(),level:'error',account:'Stream account',operation:'Synchronize account',message:'IMAP: connection closed while opening folder.',duration_ms:20,phase:'error'}},
       {type:'result',status:503,body:{error:'Fixture: streamed connection failure'}},
     ].map(event=>JSON.stringify(event)).join('\n')+'\n'});}
@@ -163,7 +183,9 @@ export async function testActivity(page,url) {
     releaseSync();syncHold=null;await page.locator('#notice').filter({hasText:'connection closed while opening folder'}).waitFor();
     await page.locator('#sync-status').filter({hasText:'Sync needs attention'}).waitFor({state:'attached'});streamingAccount=false;
     await page.locator('#activity-status[data-busy=false]').waitFor();await page.locator('#notice').filter({hasText:'Ready.'}).waitFor();assert.equal((await sweep()).animation,'none');
-    await page.getByRole('button',{name:/View activity/}).click();await modal.getByText('IMAP: connection closed while opening folder.',{exact:true}).waitFor();await modal.getByRole('button',{name:'Clear log',exact:true}).click();
+    await page.getByRole('button',{name:/View activity/}).click();await modal.getByText('IMAP: connection closed while opening folder.',{exact:true}).waitFor();
+    assert.equal(await modal.getByText('Checking the Inbox batch.',{exact:true}).count(),0);
+    await modal.getByRole('button',{name:'Clear log',exact:true}).click();
     await modal.getByText('No recent activity matches these filters.',{exact:true}).waitFor();await page.keyboard.press('Escape');
     assert.equal(await activityButton.getAttribute('data-attention'),'');
     assert.equal(await activityButton.locator('svg').count(),0,'Clearing the log removes the indicator');
