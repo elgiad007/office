@@ -68,7 +68,13 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), op
         const rows = filtered().slice().reverse();
         const targets = runTargets();
         const list = dialog.querySelector('#activity-entries'), scrollTop = list.scrollTop;
-        list.innerHTML = rows.length ? rows.map(entry => `<li id="activity-entry-${entry.id}" data-entry-id="${entry.id}" role="option" data-level="${e(entry.level)}"><div><time datetime="${e(entry.time)}">${timestampLabel(entry.time, new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account ? ' · ' + e(entry.account) : ''}${entry.duration_ms !== null ? ' · ' + e(entry.duration_ms) + ' ms' : ''}${openItem && (entry.record_id || targets.has(entry.run || '')) ? ' · Enter to open item' : ''}</div><strong>${e(entry.operation)}</strong><p>${e(entry.message)}</p></li>`).join('') : '<li role="presentation">No recent activity matches these filters.</li>';
+        list.innerHTML = rows.length ? rows.map(entry => {
+            const linked = openItem && (entry.record_id || targets.has(entry.run || ''));
+            return `<li id="activity-entry-${entry.id}" data-entry-id="${entry.id}" role="option" data-level="${e(entry.level)}">
+        <div><time datetime="${e(entry.time)}">${timestampLabel(entry.time, new Date(entry.time).toLocaleString())}</time> · ${e(entry.level)}${entry.account ? ' · ' + e(entry.account) : ''}${entry.duration_ms !== null ? ' · ' + e(entry.duration_ms) + ' ms' : ''}</div>
+        <span class="activity-event-heading"><strong>${e(entry.operation)}</strong>${linked ? `<span class="activity-linked-badge"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 13a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-2 2 M14 11a4 4 0 0 0-6 0l-4 4a4 4 0 0 0 6 6l2-2"/></svg>Linked item</span><span class="activity-open-hint">Enter to open item</span>` : ''}</span>
+        <p>${e(entry.message)}</p></li>`;
+        }).join('') : '<li role="presentation">No recent activity matches these filters.</li>';
         list.scrollTop = scrollTop;
         selectEntry(rows.some(entry => entry.id === selectedId) ? selectedId : rows[0]?.id, document.activeElement === list);
         dialog.querySelector('#activity-count').textContent = `${rows.length} of ${entries.length} recent entries · latest 500 retained`;

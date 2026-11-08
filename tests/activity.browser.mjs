@@ -35,6 +35,12 @@ export async function testActivityKeyboard(page,url) {
     await page.goto(url+'?activity-keyboard#mail');
     await page.getByRole('button',{name:/View activity \(/}).click();
     assert.equal(await focused(),true);await expectSelected(40);
+    const unselectedLink=list.locator('[data-entry-id="39"]'),unlinked=list.locator('[data-entry-id="36"]');
+    assert.equal(await unselectedLink.getByText('Linked item',{exact:true}).isVisible(),true);
+    assert.equal(await unselectedLink.locator('.activity-linked-badge svg').count(),1);
+    assert.equal(await unselectedLink.getByText('Enter to open item',{exact:true}).isVisible(),false);
+    assert.equal(await selected.getByText('Enter to open item',{exact:true}).isVisible(),true);
+    assert.equal(await unlinked.getByText('Linked item',{exact:true}).count(),0);
     for(const [key,id] of [['ArrowDown',39],['ArrowRight',38],['ArrowLeft',39],['ArrowUp',40],['j',39],['k',40],['n',39],['N',40],['G',1],['Home',40],['End',1]]){
       await page.keyboard.press(key);await expectSelected(id);
     }
@@ -61,7 +67,7 @@ export async function testActivityKeyboard(page,url) {
     const modal=page.locator('#activity-dialog');
     await page.keyboard.press('Enter');await expectSelected(41);
     await page.keyboard.press('z');
-    assert.match(await selected.textContent(),/Enter to open item/);
+    assert.equal(await selected.getByText('Enter to open item',{exact:true}).isVisible(),true);
     await page.keyboard.press('Enter');
     await modal.getByText('This item is no longer available.',{exact:true}).waitFor();
     await expectSelected(40);assert.equal(await focused(),true);
