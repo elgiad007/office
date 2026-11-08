@@ -113,4 +113,5 @@ export function installRowSwipes(actionFor) {
     window.addEventListener('scroll', cancel, true);
     window.addEventListener('resize', cancel);
     window.addEventListener('blur', cancel);
+    return () => { suppressClick = true; };
 }

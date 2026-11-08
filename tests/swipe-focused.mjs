@@ -213,8 +213,33 @@ try {
     };
   });
   assert.deepEqual(geometry,{panelFits:true,buttonFits:true,subjectTruncates:true});
-  await longUndo.tap();
+  const rowBounds=await item('c').boundingBox();
+  await page.locator('#swipe-undo').evaluate((panel,center)=>{
+    // Guarantee a row under the button regardless of the fixture's list height.
+    panel.style.top=`${center-panel.getBoundingClientRect().height/2}px`;
+    panel.style.bottom='auto';
+  },rowBounds.y+rowBounds.height/2);
+  const undoBounds=await longUndo.boundingBox();
+  const point={x:undoBounds.x+undoBounds.width/2,y:undoBounds.y+undoBounds.height/2};
+  const pointer={pointerType:'touch',pointerId:99,isPrimary:true,clientX:point.x,clientY:point.y};
+  await longUndo.dispatchEvent('pointerdown',pointer);
+  await longUndo.dispatchEvent('pointerup',pointer);
   assert.match(await item('c').getAttribute('class'),/mail-read/);
+  const followUp=await page.evaluate(({x,y})=>{
+    const target=document.elementFromPoint(x,y);
+    const row=target?.closest('#items .item[data-id]');
+    // Emulate a browser retargeting the tap's click after the Undo button disappears.
+    const canceled=target&&!target.dispatchEvent(new MouseEvent('click',{
+      bubbles:true,cancelable:true,detail:1,clientX:x,clientY:y,
+    }));
+    return {id:row?.dataset.id,canceled};
+  },point);
+  assert.ok(followUp.id,'the Undo button covered a mail row');
+  assert.equal(followUp.canceled,true,'the tap’s follow-up click is swallowed');
+  assert.equal(await page.locator('.shell.mobile-item-open').count(),0);
+  await page.mouse.click(point.x,point.y);
+  await page.locator('.shell.mobile-item-open').waitFor();
+  assert.equal(await page.locator('#selected-item').getAttribute('data-id'),followUp.id);
   assert.deepEqual(errors,[]);
-  console.log('PASS swipe actions: independent undo buttons, delayed writes, folder moves, failed-write recovery, status and archive previews, narrow-screen truncation, phone taps and touch scrolling.');
+  console.log('PASS swipe actions: independent undo buttons, delayed writes, folder moves, failed-write recovery, status and archive previews, narrow-screen truncation, phone taps without click-through and touch scrolling.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}

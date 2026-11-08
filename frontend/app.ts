@@ -2395,7 +2395,10 @@ function deferSwipeAction(row: OfficeRecord,label: string,read: boolean | undefi
     if(!tap||event.pointerId!==tap.pointer)return;
     const distance=Math.hypot(event.clientX-tap.x,event.clientY-tap.y);
     tap=undefined;
-    if(distance<10&&button.contains(document.elementFromPoint(event.clientX,event.clientY)))undo();
+    if(distance<10&&button.contains(document.elementFromPoint(event.clientX,event.clientY))){
+      suppressSwipeClick();
+      undo();
+    }
   };
   pending.timer=window.setTimeout(()=>{
     pending.timer=undefined;
@@ -2420,7 +2423,7 @@ window.addEventListener('pageshow',event=>{
   if(event.persisted&&document.querySelector('#items')&&!appEntryVisible())renderList();
 });
 let swipeActionRunning=false;
-installRowSwipes((button,direction)=>{
+const suppressSwipeClick=installRowSwipes((button,direction)=>{
   if(swipeActionRunning||dialog.open)return;
   const {app}=state;
   const row=state.rows.find(record=>record.id===button.dataset.id);

@@ -118,4 +118,5 @@ export function installRowSwipes(actionFor: (row: HTMLElement, direction: SwipeD
   window.addEventListener('scroll',cancel,true);
   window.addEventListener('resize',cancel);
   window.addEventListener('blur',cancel);
+  return () => {suppressClick=true;};
 }

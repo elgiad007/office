@@ -3656,8 +3656,10 @@ function deferSwipeAction(row, label, read, apply) {
             return;
         const distance = Math.hypot(event.clientX - tap.x, event.clientY - tap.y);
         tap = undefined;
-        if (distance < 10 && button.contains(document.elementFromPoint(event.clientX, event.clientY)))
+        if (distance < 10 && button.contains(document.elementFromPoint(event.clientX, event.clientY))) {
+            suppressSwipeClick();
             undo();
+        }
     };
     pending.timer = window.setTimeout(() => {
         pending.timer = undefined;
@@ -3687,7 +3689,7 @@ window.addEventListener('pageshow', event => {
         renderList();
 });
 let swipeActionRunning = false;
-installRowSwipes((button, direction) => {
+const suppressSwipeClick = installRowSwipes((button, direction) => {
     if (swipeActionRunning || dialog.open)
         return;
     const { app } = state;
