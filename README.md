@@ -241,7 +241,9 @@ The packaging script copies only release sources and an empty data directory. It
 
 ### Prepare a GitHub release
 
-Set the release version in [`app/VERSION`](app/VERSION). Office shows it beneath the heading in **Keyboard shortcuts** (`?`). Place an official PHP x64 NTS ZIP at `.runtime/php.zip` and use its published SHA-256 when running the release command:
+Set the release version in [`app/VERSION`](app/VERSION). Office shows it beneath the heading in **Keyboard shortcuts** (`?`). Place an official PHP x64 NTS ZIP at `.runtime/php.zip`, double-click **Build Office Release.bat** in the repository root, and paste the ZIP's published SHA-256 when prompted.
+
+You can also run the release builder from PowerShell:
 
 ```powershell
 ./scripts/release.ps1 -ExpectedSha256 '<official PHP SHA-256>'
