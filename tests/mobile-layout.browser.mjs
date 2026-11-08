@@ -124,6 +124,27 @@ export async function testMobileLayout(browser, url) {
     assert.equal(await detail.isVisible(),false);
     assert.deepEqual(reads,[]);
     const more=button('More');
+    const agenda=page.locator('#top-agenda');
+    const agendaTrigger=agenda.locator('summary');
+    const agendaPanel=agenda.getByRole('region',{name:'Upcoming agenda'});
+    for(const viewport of [{width:320,height:568},{width:390,height:844},{width:844,height:390}]){
+      await page.setViewportSize(viewport);
+      assert.equal(await more.getAttribute('aria-expanded'),'false');
+      assert.equal(await agendaTrigger.locator('svg').isVisible(),true);
+      assert.equal(await agendaTrigger.locator('time').isVisible(),false);
+      const triggerBounds=await agendaTrigger.boundingBox();
+      assert.ok(triggerBounds.width>=44&&triggerBounds.height>=44,'Agenda has a full-size touch target');
+      await agendaTrigger.tap();
+      await agendaPanel.getByRole('button',{name:/Phone event/}).waitFor();
+      const clock=agendaPanel.locator('time');
+      assert.equal(await clock.isVisible(),true);
+      assert.ok(Math.abs(Date.now()-Date.parse(await clock.getAttribute('datetime')))<60000,'Agenda shows the current date and time');
+      const panelBounds=await agendaPanel.boundingBox();
+      assert.ok(panelBounds.x>=0&&panelBounds.x+panelBounds.width<=viewport.width);
+      assert.equal(await more.getAttribute('aria-expanded'),'false');
+      await agendaTrigger.tap();
+      await agendaPanel.waitFor({state:'hidden'});
+    }
     for(const width of [320,390]){
       await page.setViewportSize({width,height:844});
       const sync=await iconButton('Sync now');
@@ -320,6 +341,13 @@ export async function testMobileLayout(browser, url) {
     }
 
     await page.setViewportSize({width:1440,height:1000});
+    assert.equal(await agendaTrigger.locator('svg').isVisible(),false);
+    assert.equal(await agendaTrigger.locator('time').isVisible(),true);
+    await agendaTrigger.click();
+    await agendaPanel.getByRole('button',{name:/Edited Calendar/}).waitFor();
+    assert.equal(await agendaPanel.locator('time').isVisible(),false);
+    await agendaTrigger.press('Escape');
+    await agendaPanel.waitFor({state:'hidden'});
     await button('Lists').focus();
     assert.equal(await page.locator('#app-sidebar').evaluate(node=>getComputedStyle(node,'::after').borderTopStyle),'solid');
     await button('Lists').click();

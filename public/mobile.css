@@ -102,6 +102,14 @@
   .topbar-controls :is(.header-action, .avatar, summary, button) { min-height: 44px; }
   .topbar-controls :is(.header-action, .avatar) { min-width: 44px; }
   .topbar-controls #mode { display: none; }
+  .top-agenda summary {
+    display: flex;
+    align-items: center;
+    list-style: none;
+  }
+  .top-agenda summary::-webkit-details-marker { display: none; }
+  .top-agenda summary > time { display: none; }
+  .top-agenda-clock { margin-bottom: 8px; color: var(--muted); font-size: 12px; }
   .topbar-controls .header-action .header-action-label { display: none; }
   .topbar-controls .header-action svg { width: 16px; height: 16px; }
   .topbar-controls .header-action[data-action="new"] svg { width: 20px; height: 20px; }
