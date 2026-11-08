@@ -194,6 +194,27 @@ try {
   await undo('c').tap();
   await item('c').waitFor();
   assert.equal(mutations.length,4,'undo cancels archive and read status writes');
+
+  records.find(row=>row.id==='c').title=`Long subject ${'W'.repeat(200)}`;
+  await page.setViewportSize({width:280,height:740});
+  await page.goto(url+'?swipes-narrow#mail');
+  await item('c').waitFor();
+  await swipe('c',-110,0,{label:'Mark as unread'});
+  const longUndo=page.locator('#swipe-undo').getByRole('button',{name:/Undo mark as unread for Long subject/});
+  await longUndo.waitFor();
+  const geometry=await longUndo.evaluate(button=>{
+    const panel=button.closest('#swipe-undo');
+    const subject=button.previousElementSibling;
+    const panelBounds=panel.getBoundingClientRect(),buttonBounds=button.getBoundingClientRect();
+    return {
+      panelFits:panelBounds.left>=12&&panelBounds.right<=innerWidth-12&&panelBounds.width<=300,
+      buttonFits:buttonBounds.left>=panelBounds.left&&buttonBounds.right<=panelBounds.right&&buttonBounds.height>=44,
+      subjectTruncates:subject.scrollWidth>subject.clientWidth&&getComputedStyle(subject).textOverflow==='ellipsis',
+    };
+  });
+  assert.deepEqual(geometry,{panelFits:true,buttonFits:true,subjectTruncates:true});
+  await longUndo.tap();
+  assert.match(await item('c').getAttribute('class'),/mail-read/);
   assert.deepEqual(errors,[]);
-  console.log('PASS swipe actions: independent undo buttons, delayed writes, folder moves, failed-write recovery, status and archive previews, phone taps and touch scrolling.');
+  console.log('PASS swipe actions: independent undo buttons, delayed writes, folder moves, failed-write recovery, status and archive previews, narrow-screen truncation, phone taps and touch scrolling.');
 } finally {await browser?.close();await new Promise(resolve=>server.close(resolve));}
