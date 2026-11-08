@@ -97,6 +97,8 @@ export async function testAccountFolders(page,url) {
     assert.equal(await syncTip.isVisible(),false);
     await folderActions.click();
     assert.equal(await refresh.isVisible(),true);
+    assert.equal(await refresh.locator('svg').isVisible(),true);
+    assert.equal(await refresh.locator('.mobile-icon-label').isVisible(),false);
     assert.equal(await syncTip.isVisible(),true);
     const beforeBatch=await folderActions.elementHandle();
     await nextBatch.click();
@@ -126,6 +128,8 @@ export async function testAccountFolders(page,url) {
     await page.setViewportSize({width:1440,height:1000});await open('imap-a','Orders');await page.screenshot({path:'test-results/account-folders.png',fullPage:true});
     holdNext=true;await page.locator('#folder-refresh').click();
     assert.equal(await folderActions.isVisible(),false);
+    assert.equal(await refresh.locator('svg').isVisible(),false);
+    assert.equal(await refresh.locator('.mobile-icon-label').isVisible(),true);
     await page.waitForFunction(()=>document.querySelector('#folder-refresh').disabled);
     await page.getByRole('button',{name:'Compose',exact:true}).click();
     await page.locator('[name="body"]').fill('Keep typing while a folder request finishes.');

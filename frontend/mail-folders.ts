@@ -1,6 +1,6 @@
 import {asError} from './utils.js';
 import {isPresent} from './utils.js';
-import {mobileDisclosure, setDisclosure} from './mobile-layout.js';
+import {mobileDisclosure, mobileIcon, setDisclosure} from './mobile-layout.js';
 import type {Account, FolderEnvironment, MailFolder, MailScope, OfficeRecord} from './types.js';
 export function matchesMailScope(row: OfficeRecord,scope: MailScope,accounts: Account[]) {
   if (!row.meta.remote || row.meta.account!==scope.account || ['Recovery copies','Not in Inbox'].includes(row.meta.folder||'')) return false;
@@ -99,7 +99,7 @@ export function renderMailFolders(env: FolderEnvironment, previousActions=captur
       <strong class="folder-current-heading">${label}</strong>
       ${mobileDisclosure('folder-actions',`<span>${label}</span>`)}
       <div id="folder-actions" class="mobile-collapsible">
-        <div class="folder-tools"><button id="folder-refresh">Refresh mail</button><button id="folder-more">Load next batch</button>${folder&&!folder.protected?`<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>`:''}</div>
+        <div class="folder-tools"><button id="folder-refresh" class="mobile-icon-button" aria-label="Refresh mail" title="Refresh mail">${mobileIcon('refresh')}<span class="mobile-icon-label">Refresh mail</span></button><button id="folder-more">Load next batch</button>${folder&&!folder.protected?`<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>`:''}</div>
         <small>Headers sync in batches of 100. Open a message to download its contents.</small>
       </div>
     </div>`);

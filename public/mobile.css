@@ -1,4 +1,4 @@
-.mobile-only { display: none; }
+.mobile-only, .mobile-control-icon { display: none; }
 .item-secondary-actions { display: contents; }
 
 @media screen and (max-width: 800px),
@@ -21,6 +21,16 @@
   .mobile-collapsible:not(.mobile-expanded) { display: none; }
   .mobile-disclosure::after { content: "▾" / ""; }
   .mobile-disclosure[aria-expanded="true"]::after { content: "▴" / ""; }
+  .mobile-icon-button {
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding-inline: 6px;
+  }
+  .mobile-control-icon { display: inline-block; width: 20px; height: 20px; }
+  .mobile-icon-label { display: none; }
+  .mobile-icon-button:is(.mobile-disclosure, summary)::after { content: none; }
+  .mobile-icon-button[aria-expanded="true"] { background: var(--wash); }
 
   .shell .sidebar {
     display: none;
@@ -81,7 +91,7 @@
   .topbar-controls :is(.header-action, .avatar, summary, button) { min-height: 44px; }
   .topbar-controls :is(.header-action, .avatar) { min-width: 44px; }
   .topbar-controls #mode { display: none; }
-  .topbar-controls .header-action:has(.header-action-label) { width: auto; padding-inline: 8px; }
+  .topbar-controls .header-action:has(.header-action-label):not([data-action="new"]) { width: auto; padding-inline: 8px; }
   .topbar-controls .header-action-label {
     display: inline;
     position: static;
@@ -94,6 +104,8 @@
     white-space: normal;
   }
   .topbar-controls .header-action svg { width: 16px; height: 16px; }
+  .topbar-controls .header-action[data-action="new"] .header-action-label { display: none; }
+  .topbar-controls .header-action[data-action="new"] svg { width: 20px; height: 20px; }
   .topbar-controls #search { flex: 1 1 100%; }
   .topbar-controls #sync-button span { position: static; clip-path: none; }
   .mail-export-status:empty { display: none; }
@@ -138,7 +150,15 @@
   }
   #folder-actions-toggle span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .list-pane { border: 0; }
-  .list-summary :is(#mail-list-view, #task-list-view) summary { min-height: 44px; align-content: center; }
+  .list-summary :is(#mail-list-view, #task-list-view) summary,
+  .mail-reader-header summary.mobile-icon-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    list-style: none;
+  }
+  .list-summary summary.mobile-icon-button::-webkit-details-marker { display: none; }
+  .list-summary details[open] > summary.mobile-icon-button { background: var(--wash); }
   #items .item { min-height: 44px; }
   #main :is(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select, [contenteditable="true"]),
   dialog :is(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select),

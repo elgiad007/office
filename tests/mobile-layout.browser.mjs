@@ -39,11 +39,24 @@ export async function testMobileLayout(browser, url) {
   const button=name=>page.getByRole('button',{name,exact:true});
   const detail=page.locator('#detail');
   const go=async name=>{await button('Menu').tap();await button(name).tap();await page.locator('#crumb').getByText(name,{exact:true}).waitFor();};
-  const back=()=>button('← Back to list').tap();
+  const back=()=>button('Back to list').tap();
   const fit=()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1);
   try{
     await page.goto(url+'#mail');
     await page.locator('#items .item').first().waitFor();
+    for(const name of ['Menu','Compose','More','Folders']){
+      const control=button(name);
+      assert.equal(await control.locator('svg[aria-hidden="true"]').isVisible(),true);
+      assert.equal((await control.innerText()).trim(),'');
+      const bounds=await control.boundingBox();
+      assert.ok(bounds.width>=44&&bounds.height>=44,name+' has a full-size touch target');
+    }
+    const listView=page.locator('#mail-list-view > summary[aria-label="List view"]');
+    assert.equal(await listView.locator('svg').isVisible(),true);
+    assert.equal((await listView.innerText()).trim(),'');
+    await listView.tap();
+    await page.getByLabel('Sort mail by').waitFor();
+    await listView.tap();
     assert.equal(await detail.isVisible(),false);
     assert.deepEqual(reads,[]);
     assert.equal(await button('Import').isVisible(),false);
@@ -62,6 +75,7 @@ export async function testMobileLayout(browser, url) {
     assert.ok(top>0);
     await mail.tap();
     await detail.getByRole('heading',{name:'Phone mail 20'}).waitFor();
+    assert.equal(await button('Back to list').locator('svg').isVisible(),true);
     await page.waitForFunction(()=>document.querySelector('#items [data-id="mail-20"]')?.classList.contains('mail-read'));
     assert.deepEqual(reads,['mail-20']);
     assert.equal(await page.locator('#items').isVisible(),false);
