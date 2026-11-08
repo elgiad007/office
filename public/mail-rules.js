@@ -1,4 +1,5 @@
 // Generated from frontend/mail-rules.ts by pnpm build. Do not edit.
+import { mobileActionLabel } from './mobile-layout.js';
 const fields = {
     sender: 'Sender address', domain: 'Sender domain', recipient: 'To header', subject: 'Subject', body: 'Body',
     date: 'Receipt date', time: 'Receipt time',
@@ -46,13 +47,13 @@ export async function renderMailRules(container, { request, accounts, escape: e,
       <ol class="mail-rule-list">${settings.rules.map((rule, i) => `<li>
         <strong>${e(rule.name)}</strong> · ${e(accounts.find(a => a.id === rule.account)?.label ?? (rule.account ? 'Disconnected account' : 'All accounts'))} · ${rule.enabled ? 'Enabled' : 'Disabled'}
         <div class="actions">
-          <button data-rule-action="edit" data-index="${i}" aria-label="Edit ${e(rule.name)}">Edit</button>
+          <button data-rule-action="edit" data-index="${i}" class="mobile-icon-button" aria-label="Edit ${e(rule.name)}">${mobileActionLabel('edit', 'Edit')}</button>
           <button data-rule-action="toggle" data-index="${i}" aria-label="${rule.enabled ? 'Disable' : 'Enable'} ${e(rule.name)}">${rule.enabled ? 'Disable' : 'Enable'}</button>
           <button data-rule-action="up" data-index="${i}" aria-label="Move ${e(rule.name)} up" ${i === 0 ? 'disabled' : ''}>↑</button>
           <button data-rule-action="down" data-index="${i}" aria-label="Move ${e(rule.name)} down" ${i === settings.rules.length - 1 ? 'disabled' : ''}>↓</button>
           <button data-rule-action="preview" data-index="${i}" aria-label="Preview ${e(rule.name)}">Preview existing mail</button>
         </div></li>`).join('')}</ol>
-      <button data-new-rule>New rule</button><button data-reload-rules>Reload rules</button><div data-rule-panel></div>`;
+      <button data-new-rule class="mobile-icon-button" aria-label="New rule">${mobileActionLabel('add', 'New rule')}</button><button data-reload-rules>Reload rules</button><div data-rule-panel></div>`;
         container.querySelector('[data-reload-rules]').onclick = () => void run(async () => {
             settings = await request('mail-rules');
             draw();
@@ -93,10 +94,10 @@ export async function renderMailRules(container, { request, accounts, escape: e,
       <label>Match<select name="mode" aria-label="Match">${options([['all', 'All conditions'], ['any', 'Any condition']], rule.mode)}</select></label>
       <label>Receipt time zone<input name="zone" maxlength="100" required value="${e(rule.zone)}"></label>
       <p>Use a time zone name such as America/New_York or UTC. Time conditions repeat each day.</p>
-      <div data-conditions></div><button type="button" data-add-condition>Add condition</button>
+      <div data-conditions></div><button type="button" class="mobile-icon-button" data-add-condition aria-label="Add condition">${mobileActionLabel('add', 'Add condition')}</button>
       <label class="check-label"><input type="checkbox" name="enabled" ${rule.enabled ? 'checked' : ''}> Enabled</label>
       <div class="actions"><button class="primary">Save rule</button><button type="button" data-cancel>Cancel</button>
-      ${existing ? '<button type="button" class="danger" data-remove-rule>Delete rule</button>' : ''}</div>
+      ${existing ? `<button type="button" class="danger mobile-icon-button" data-remove-rule aria-label="Delete rule">${mobileActionLabel('trash', 'Delete rule')}</button>` : ''}</div>
     </form>`;
         const form = target.querySelector('form');
         const account = form.querySelector('[name="account"]');
@@ -140,7 +141,9 @@ export async function renderMailRules(container, { request, accounts, escape: e,
             const rows = [...conditions.querySelectorAll('fieldset')];
             rows.forEach((row, index) => {
                 row.querySelector('legend').textContent = `Condition ${index + 1}`;
-                row.querySelector('button').disabled = rows.length === 1;
+                const remove = row.querySelector('button');
+                remove.setAttribute('aria-label', `Remove condition ${index + 1}`);
+                remove.disabled = rows.length === 1;
             });
             add.disabled = rows.length >= 20;
         };
@@ -149,7 +152,7 @@ export async function renderMailRules(container, { request, accounts, escape: e,
             row.className = 'mail-rule-condition';
             row.innerHTML = `<legend></legend><label>Field<select name="field" aria-label="Field">${options(Object.entries(fields), condition.field)}</select></label>
         <label>Comparison<select name="operator" aria-label="Comparison"></select></label>
-        <label>Value<input name="value" maxlength="500" required></label><button type="button">Remove condition</button>`;
+        <label>Value<input name="value" maxlength="500" required></label><button type="button" class="mobile-icon-button">${mobileActionLabel('close', 'Remove condition')}</button>`;
             const field = row.querySelector('[name="field"]');
             const operator = row.querySelector('[name="operator"]');
             const value = row.querySelector('input');
@@ -175,6 +178,7 @@ export async function renderMailRules(container, { request, accounts, escape: e,
         if (remove)
             remove.onclick = () => {
                 remove.textContent = 'Confirm delete';
+                remove.removeAttribute('aria-label');
                 remove.onclick = () => void run(() => save(settings.rules.filter(item => item.id !== rule.id)));
             };
         form.onsubmit = event => {

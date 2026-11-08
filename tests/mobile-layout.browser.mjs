@@ -32,11 +32,23 @@ export async function testMobileLayout(browser, url) {
       status:{authenticated:true,csrf:'fixture',preferences:{}},
       accounts:{accounts:[]},
       records:{records:rows.filter(item=>item.kind===query.get('kind'))},
+      connections:query.get('id')==='document'
+        ?{items:rows.filter(item=>item.id==='contact'),links:[{}]}
+        :{items:[],links:[]},
     };
     await route.fulfill({json:responses[action]||{entries:[],count:0}});
   });
 
   const button=name=>page.getByRole('button',{name,exact:true});
+  const iconButton=async name=>{
+    const control=button(name);
+    await control.waitFor();
+    assert.equal(await control.locator('svg[aria-hidden="true"]').isVisible(),true);
+    assert.equal((await control.innerText()).trim(),'');
+    const bounds=await control.boundingBox();
+    assert.ok(bounds.width>=44&&bounds.height>=44,name+' has a full-size touch target');
+    return control;
+  };
   const detail=page.locator('#detail');
   const go=async name=>{await button('Menu').tap();await button(name).tap();await page.locator('#crumb').getByText(name,{exact:true}).waitFor();};
   const back=()=>button('Back to list').tap();
@@ -44,13 +56,7 @@ export async function testMobileLayout(browser, url) {
   try{
     await page.goto(url+'#mail');
     await page.locator('#items .item').first().waitFor();
-    for(const name of ['Menu','Compose','More','Folders']){
-      const control=button(name);
-      assert.equal(await control.locator('svg[aria-hidden="true"]').isVisible(),true);
-      assert.equal((await control.innerText()).trim(),'');
-      const bounds=await control.boundingBox();
-      assert.ok(bounds.width>=44&&bounds.height>=44,name+' has a full-size touch target');
-    }
+    for(const name of ['Menu','Compose','More','Folders'])await iconButton(name);
     const listView=page.locator('#mail-list-view > summary[aria-label="List view"]');
     assert.equal(await listView.locator('svg').isVisible(),true);
     assert.equal((await listView.innerText()).trim(),'');
@@ -85,6 +91,7 @@ export async function testMobileLayout(browser, url) {
     assert.equal(await mail.evaluate(node=>node===document.activeElement),true);
 
     await button('Compose').tap();
+    await iconButton('Add files');
     await page.getByRole('textbox',{name:'Title',exact:true}).fill('Mobile draft');
     await detail.getByLabel('Message',{exact:true}).fill('Unsaved content');
     await page.setViewportSize({width:390,height:410});
@@ -116,6 +123,8 @@ export async function testMobileLayout(browser, url) {
         await detail.getByRole('textbox',{name:'Document content'}).fill('Edited on a phone');
       }
       if(app==='Sheets'){
+        await iconButton('Add sheet');
+        await iconButton('Rename sheet');
         await page.locator('[data-cell="B1"]').tap();
         await page.locator('#formula').fill('=A1*3');
         assert.equal(await page.locator('[data-cell="B1"]').textContent(),'6');
@@ -124,6 +133,32 @@ export async function testMobileLayout(browser, url) {
       await detail.getByRole('button',{name:'Save',exact:true}).tap();
       await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
       assert.equal(saves.at(-1).title,'Edited '+app);
+      await button('More actions').tap();
+      const deleteItem=await iconButton('Delete');
+      if(app==='Tasks'){
+        await deleteItem.tap();
+        const dialog=page.getByRole('dialog',{name:'Delete item',exact:true});
+        await dialog.getByRole('button',{name:'Delete item',exact:true}).waitFor();
+        await dialog.getByRole('button',{name:'Cancel',exact:true}).tap();
+      }
+      if(app==='Documents'){
+        await iconButton('Link item');
+        await page.locator('#connection-count').tap();
+        await iconButton('Remove connection to Edited Contacts');
+        await page.keyboard.press('Escape');
+      }
+      if(app==='Lists'){
+        await iconButton('Rename list');
+        const add=await iconButton('Add item');
+        await detail.getByRole('textbox',{name:'New checklist item'}).fill('Budget review');
+        await add.tap();
+        await iconButton('Edit Budget review');
+        const remove=await iconButton('Remove Budget review');
+        await remove.tap();
+        const dialog=page.getByRole('dialog',{name:'Remove checklist item',exact:true});
+        await dialog.getByRole('button',{name:'Remove item',exact:true}).tap();
+        assert.equal(await remove.count(),0);
+      }
       await back();
       assert.equal(await detail.isVisible(),false);
     }
@@ -140,6 +175,9 @@ export async function testMobileLayout(browser, url) {
     await page.getByRole('button',{name:/Settings categories/}).tap();
     await button('Mail settings').tap();
     assert.equal(await button('Mail settings').isVisible(),false);
+    await page.getByRole('button',{name:/Settings categories/}).tap();
+    await button('Accounts settings').tap();
+    await iconButton('Add account');
     for(const viewport of [{width:320,height:568},{width:844,height:390},{width:768,height:1024}]){
       await page.setViewportSize(viewport);
       await button('Menu').waitFor();
@@ -152,6 +190,9 @@ export async function testMobileLayout(browser, url) {
     await detail.waitFor();
     assert.equal(await page.locator('#items').isVisible(),true);
     assert.equal(await button('Menu').isVisible(),false);
+    const desktopDelete=detail.getByRole('button',{name:'Delete',exact:true});
+    assert.equal(await desktopDelete.locator('.mobile-icon-label').isVisible(),true);
+    assert.equal(await desktopDelete.locator('svg').isVisible(),false);
     await page.locator('#selected-item').focus();
     await page.keyboard.press('l');
     assert.equal(await detail.evaluate(node=>node===document.activeElement),true);

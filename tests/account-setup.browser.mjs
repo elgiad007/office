@@ -5,7 +5,7 @@ export async function testAccountSetup(page, url) {
   const selectProvider = value => modal.getByLabel('Connection type', {exact:true}).selectOption(value);
   const next = () => modal.getByRole('button', {name:'Next',exact:true}).click();
   const back = () => modal.getByRole('button', {name:'Back',exact:true}).click();
-  const open = () => page.getByRole('button', {name:'+ Add account',exact:true}).click();
+  const open = () => page.getByRole('button', {name:'Add account',exact:true}).click();
   const done = async () => { await modal.getByRole('button', {name:'Done',exact:true}).click(); await modal.waitFor({state:'hidden'}); };
   const testPredicate = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r') === 'account-test';
   const authPredicate = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r') === 'google-connect';
@@ -140,7 +140,7 @@ export async function testAccountSetup(page, url) {
       assert.equal(response.status(),200);
     }
     await page.setViewportSize({width:1440,height:1000});
-    await page.reload(); await page.getByRole('button',{name:'+ Add account',exact:true}).waitFor();
+    await page.reload(); await page.getByRole('button',{name:'Add account',exact:true}).waitFor();
     console.log('PASS account setup: guided/manual paths, required fields, drafts across provider/mode/back changes, Google connection with optional Calendar and no premature save, masked review, connection results/invalidation, save/error recovery, cleared secrets, keyboard and mobile.');
   } finally {
     await page.unroute(testPredicate);

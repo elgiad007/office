@@ -1,5 +1,6 @@
 import type {Attachment, OfficeRecord, RequestApi} from './types.js';
 import {escapeHtml as e} from './formats.js';
+import {mobileActionLabel} from './mobile-layout.js';
 
 interface AttachmentEnvironment {
   api: RequestApi; commit: () => Promise<void>;
@@ -13,7 +14,7 @@ export async function waitForAttachments(){const active=pending;await active;if(
 export function attachmentSection(record: OfficeRecord) {
   const draft=record.meta.folder==='Drafts';
   if(!draft&&record.meta.hasAttachments===false&&!record.meta.attachments?.length)return '';
-  const contents=`<div class="head-actions">${draft?'<strong>Attachments</strong><button type="button" data-attach>Add files</button><input class="file-input" type="file" multiple data-attach-input aria-label="Attach files">':'<button type="button" data-file-list>Check attachments</button>'}<button type="button" data-save-files hidden>Save all</button></div><div data-file-rows></div><p class="muted" data-file-status role="status">${draft?'Choose files or drop them into this message. Up to 10 MB per file, 20 MB total.':'Files download when you choose Preview, Download, or Save all.'}</p>`;
+  const contents=`<div class="head-actions">${draft?`<strong>Attachments</strong><button type="button" data-attach class="mobile-icon-button" aria-label="Add files">${mobileActionLabel('attach','Add files')}</button><input class="file-input" type="file" multiple data-attach-input aria-label="Attach files">`:'<button type="button" data-file-list>Check attachments</button>'}<button type="button" data-save-files hidden>Save all</button></div><div data-file-rows></div><p class="muted" data-file-status role="status">${draft?'Choose files or drop them into this message. Up to 10 MB per file, 20 MB total.':'Files download when you choose Preview, Download, or Save all.'}</p>`;
   return draft?`<section class="mail-attachments" aria-label="Attachments" data-mail-files>${contents}</section>`:`<details class="mail-files-disclosure" data-mail-disclosure="files" data-mail-files><summary>Attachments${record.meta.attachments?.length?' ('+record.meta.attachments.length+')':''}</summary><section class="mail-reader-popover mail-files-popover" aria-label="Attachments">${contents}</section></details>`;
 }
 const fileUrl=(id: string,part?: string)=>`mail-file.php?id=${encodeURIComponent(id)}${part===undefined?'&all=1':'&part='+encodeURIComponent(part)}`;
@@ -27,7 +28,7 @@ export function bindAttachments(panel: HTMLElement,record: OfficeRecord,env: Att
   let files=record.meta.attachments||[],busy=false;
   const draft=record.meta.folder==='Drafts';
   const render=()=>{
-    rows.innerHTML=files.map((a,i)=>`<div class="mail-attachment"><span class="mail-attachment-name" title="${e(a.name)}">${e(a.name)}</span><small>${e(a.type)} · ${size(a.size)}${a.encodedSize?' encoded':''} · ${a.available?'Available offline':'Download on demand'}</small><div>${!draft&&['application/pdf','image/png','image/jpeg','image/gif','image/webp'].includes(a.type)?`<button type="button" data-preview-file="${i}">Preview</button>`:''}<button type="button" data-download-file="${i}">Download</button>${draft?`<button type="button" data-remove-file="${i}" aria-label="Remove ${e(a.name)}">Remove</button>`:''}</div></div>`).join('');
+    rows.innerHTML=files.map((a,i)=>`<div class="mail-attachment"><span class="mail-attachment-name" title="${e(a.name)}">${e(a.name)}</span><small>${e(a.type)} · ${size(a.size)}${a.encodedSize?' encoded':''} · ${a.available?'Available offline':'Download on demand'}</small><div>${!draft&&['application/pdf','image/png','image/jpeg','image/gif','image/webp'].includes(a.type)?`<button type="button" data-preview-file="${i}">Preview</button>`:''}<button type="button" data-download-file="${i}">Download</button>${draft?`<button type="button" class="mobile-icon-button" data-remove-file="${i}" aria-label="Remove ${e(a.name)}">${mobileActionLabel('close','Remove')}</button>`:''}</div></div>`).join('');
     saveAll.hidden=!files.length;
   };
   const run=(message: string,operation:()=>Promise<void>)=>{

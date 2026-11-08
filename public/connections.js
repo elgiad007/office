@@ -3,6 +3,7 @@ import { openConnectionExplorer } from './connection-explorer.js';
 import { connectionQuery, accountCommandQuery, commandRegistry, commandNameSuggestions, CommandError } from './commands.js';
 import { itemTypes } from './item-types.js';
 import { escapeHtml as e } from './formats.js';
+import { mobileActionLabel, mobileIcon } from './mobile-layout.js';
 const label = (kind) => itemTypes[kind]?.label || kind;
 const detail = (item) => Object.entries(item.meta).filter(([key]) => itemTypes[item.kind]?.fields.some(field => field === key)).map(([, value]) => value).join(' · ');
 export function createConnections(env) {
@@ -248,11 +249,11 @@ export function createConnections(env) {
         const mailHeader = header.classList.contains('mail-header-badges');
         const countLabel = mailHeader
             ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10 6-4M9 14l6 4"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="5" r="3"/><circle cx="18" cy="19" r="3"/></svg><span class="file-input">Connections · </span>'
-            : 'Connections · ';
-        const linkLabel = mailHeader
+            : `${mobileIcon('connections')}<span class="mobile-icon-label">Connections · </span><span class="mobile-only file-input">Connections · </span>`;
+        const linkLabel = mobileActionLabel('link', mailHeader
             ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-2 2M14 11a4 4 0 0 0-6 0l-4 4a4 4 0 0 0 6 6l2-2"/></svg> Link'
-            : '+ Link';
-        target.innerHTML = `<button type="button" class="connection-count" id="connection-count" popovertarget="item-connection-popover" aria-expanded="false" ${draft ? 'disabled title="Save this draft to manage connections"' : mailHeader ? 'title="Connections"' : ''}>${countLabel}<span data-connection-total>${draft ? '—' : '…'}</span></button><button type="button" class="connection-add" data-connections-add aria-label="Link item" title="Link an existing item (:link)" ${draft ? 'disabled' : ''}>${linkLabel}</button><div id="item-connection-popover" class="connection-popover" popover="auto" role="region" aria-label="Item connections"><div class="connection-popover-heading"><strong>Connections</strong><button type="button" data-connections-view>View map</button></div><div data-connection-items><p class="muted" role="status">Loading connections…</p></div></div>`;
+            : '+ Link');
+        target.innerHTML = `<button type="button" class="connection-count" id="connection-count" popovertarget="item-connection-popover" aria-expanded="false" ${draft ? 'disabled title="Save this draft to manage connections"' : mailHeader ? 'title="Connections"' : ''}>${countLabel}<span data-connection-total>${draft ? '—' : '…'}</span></button><button type="button" class="connection-add mobile-icon-button" data-connections-add aria-label="Link item" title="Link an existing item (:link)" ${draft ? 'disabled' : ''}>${linkLabel}</button><div id="item-connection-popover" class="connection-popover" popover="auto" role="region" aria-label="Item connections"><div class="connection-popover-heading"><strong>Connections</strong><button type="button" data-connections-view>View map</button></div><div data-connection-items><p class="muted" role="status">Loading connections…</p></div></div>`;
         const toggle = target.querySelector('.connection-count'), popover = target.querySelector('[popover]'), itemsHost = target.querySelector('[data-connection-items]');
         const total = toggle.querySelector('[data-connection-total]');
         function position() {
@@ -303,7 +304,7 @@ export function createConnections(env) {
                 return;
             const items = result.items.filter(item => item.id !== id);
             total.textContent = `${result.links.length}${result.more ? '+' : ''}`;
-            itemsHost.innerHTML = items.length ? items.map(item => `<div class="connection-popover-item"><button type="button" class="wiki-link" data-connection-open="${e(item.id)}">${e(label(item.kind))} · ${e(item.title)}</button><button type="button" class="quiet" data-connection-remove="${e(item.id)}" aria-label="Remove connection to ${e(item.title)}">Unlink</button></div>`).join('') : '<p class="muted">No connections yet.</p>';
+            itemsHost.innerHTML = items.length ? items.map(item => `<div class="connection-popover-item"><button type="button" class="wiki-link" data-connection-open="${e(item.id)}">${e(label(item.kind))} · ${e(item.title)}</button><button type="button" class="quiet mobile-icon-button" data-connection-remove="${e(item.id)}" aria-label="Remove connection to ${e(item.title)}">${mobileActionLabel('unlink', 'Unlink')}</button></div>`).join('') : '<p class="muted">No connections yet.</p>';
             if (result.more)
                 itemsHost.insertAdjacentHTML('beforeend', '<p class="muted">Showing the first 100 connections. View map to browse all.</p>');
             target.querySelectorAll('[data-connection-open]').forEach(button => button.onclick = () => { close(); void env.open(button.dataset.connectionOpen).catch(error => env.notice(error.message, true)); });

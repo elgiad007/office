@@ -1,5 +1,6 @@
 // Generated from frontend/checklist.ts by pnpm build. Do not edit.
 import { escapeHtml as e } from './formats.js';
+import { mobileActionLabel } from './mobile-layout.js';
 export function checklistProgress(items) {
     return `${items.filter(item => item.done).length} of ${items.length} checked`;
 }
@@ -7,18 +8,18 @@ function checklistRow(item, first) {
     const text = e(item.text);
     return `<li data-checklist-row="${e(item.id)}">
     <label class="checklist-label"><input type="checkbox" ${item.done ? 'checked' : ''} tabindex="${first ? 0 : -1}"><span>${text}</span></label>
-    <button type="button" class="quiet" data-checklist-edit aria-label="Edit ${text}">Edit</button>
-    <button type="button" class="quiet danger" data-checklist-delete aria-label="Remove ${text}">Remove</button>
+    <button type="button" class="quiet mobile-icon-button" data-checklist-edit aria-label="Edit ${text}">${mobileActionLabel('edit', 'Edit')}</button>
+    <button type="button" class="quiet danger mobile-icon-button" data-checklist-delete aria-label="Remove ${text}">${mobileActionLabel('close', 'Remove')}</button>
   </li>`;
 }
 export function checklistContent(record) {
     const items = record.meta.checklist ?? [];
     return `<form id="record-form" class="detail-form checklist-title">
     <label><span class="file-input">List name</span><input class="title-input" name="title" value="${e(record.title)}" required aria-label="List name"></label>
-    <button type="button" class="quiet" data-checklist-rename>Rename</button>
+    <button type="button" class="quiet mobile-icon-button" data-checklist-rename aria-label="Rename list">${mobileActionLabel('edit', 'Rename')}</button>
   </form>
   <section class="checklist" aria-label="Checklist">
-    <form class="checklist-add"><input type="text" aria-label="New checklist item" placeholder="Add an item…" autocomplete="off"><button type="submit">Add item</button></form>
+    <form class="checklist-add"><input type="text" aria-label="New checklist item" placeholder="Add an item…" autocomplete="off"><button type="submit" class="mobile-icon-button" aria-label="Add item">${mobileActionLabel('add', 'Add item')}</button></form>
     <p class="muted" data-checklist-progress role="status">${checklistProgress(items)}</p>
     <ul class="checklist-rows" aria-label="Checklist items">${items.map((item, index) => checklistRow(item, index === 0)).join('')}</ul>
   </section>`;
