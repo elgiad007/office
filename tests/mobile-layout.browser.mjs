@@ -123,10 +123,23 @@ export async function testMobileLayout(browser, url) {
     await listView.tap();
     assert.equal(await detail.isVisible(),false);
     assert.deepEqual(reads,[]);
-    assert.equal(await button('Import').isVisible(),false);
-    await button('More').tap();
-    assert.equal(await button('Import').isVisible(),true);
-    await button('More').tap();
+    const more=button('More');
+    for(const width of [320,390]){
+      await page.setViewportSize({width,height:844});
+      const sync=await iconButton('Sync now');
+      assert.equal(await button('Import').isVisible(),false);
+      await more.tap();
+      const importButton=await iconButton('Import');
+      assert.equal(await sync.isVisible(),true);
+      assert.ok(await fit(),'Expanded Mail controls fit at '+width+' px');
+      if(width===390)await Promise.all([page.waitForEvent('filechooser'),importButton.tap()]);
+      else await more.tap();
+      assert.equal(await more.getAttribute('aria-expanded'),'false');
+    }
+    await button('Sync now').tap();
+    await page.locator('#crumb').getByText('Settings',{exact:true}).waitFor();
+    await go('Mail');
+    await page.locator('#items .item').first().waitFor();
     await button('Folders').tap();
     await page.locator('#mail-folder').selectOption('Inbox');
     await button('Menu').waitFor();

@@ -321,6 +321,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 }
 .compact .topbar-controls { padding-block: 5px; }
 .topbar-controls > .top-actions { margin-inline-start: auto; max-width: 100%; }
+.top-actions-overflow { display: contents; }
 .app-toolbar, .header-action-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .app-toolbar[hidden], .header-action-group[hidden] { display: none; }
 .app-toolbar input { width: 210px; min-width: 0; max-width: 100%; }
@@ -449,9 +450,6 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .top-agenda-events strong { font-size: 13px; }
 .top-agenda-events :is(strong, small) { overflow-wrap: anywhere; min-width: 0; }
 @media (max-width: 480px) {
-  .topbar .top-actions { flex-wrap: wrap; justify-content: flex-end; }
-  .topbar #sync-button { padding-inline: 5px; }
-  .topbar #sync-button span { position: absolute; clip-path: inset(50%); }
   .top-agenda summary { font-size: 11px; padding-inline: 4px; }
 }
 .detail-toolbar .mail-detail-heading { flex-wrap: wrap; min-width: 0; max-width: 100%; }

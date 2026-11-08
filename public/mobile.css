@@ -89,31 +89,23 @@
   .topbar .breadcrumb { min-height: 54px; gap: 6px; padding: 5px 4px 5px 8px; border: 0; background: none; }
   .breadcrumb h1 { min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .shell .topbar-controls { justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; }
-  .topbar-controls .top-actions { flex-wrap: wrap; justify-content: flex-end; flex-basis: 100%; }
-  #mobile-header-more { order: 1; }
-  .topbar-controls .top-actions { order: 2; }
-  .topbar-controls:not(.mobile-expanded) :is(.top-actions, #search, [data-action="import"], [data-action="export-all"], #mail-export-menu) { display: none; }
+  .topbar-controls .top-actions { display: contents; }
+  .topbar-controls .top-actions-overflow {
+    display: flex;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: inherit;
+  }
+  .topbar-controls:not(.mobile-expanded) :is(.top-actions-overflow, #search, [data-action="import"], [data-action="export-all"], #mail-export-menu) { display: none; }
   .topbar-controls .header-action-group { justify-content: flex-end; gap: 4px; }
   .topbar-controls :is(.header-action, .avatar, summary, button) { min-height: 44px; }
   .topbar-controls :is(.header-action, .avatar) { min-width: 44px; }
   .topbar-controls #mode { display: none; }
-  .topbar-controls .header-action:has(.header-action-label):not([data-action="new"]) { width: auto; padding-inline: 8px; }
-  .topbar-controls .header-action-label {
-    display: inline;
-    position: static;
-    transform: none;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    box-shadow: none;
-    white-space: normal;
-  }
+  .topbar-controls .header-action .header-action-label { display: none; }
   .topbar-controls .header-action svg { width: 16px; height: 16px; }
-  .topbar-controls .header-action[data-action="new"] .header-action-label { display: none; }
   .topbar-controls .header-action[data-action="new"] svg { width: 20px; height: 20px; }
   .topbar-controls #search { flex: 1 1 100%; }
-  .topbar-controls #sync-button span { position: static; clip-path: none; }
   .mail-export-status:empty { display: none; }
   .mail-export-options { max-width: min(260px, calc(100vw - 24px)); }
 
