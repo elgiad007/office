@@ -7,7 +7,7 @@ import { asError, isPresent } from './utils.js';
 import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
 import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
-import { renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder } from './mail-folders.js';
+import { captureFolderActions, renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder } from './mail-folders.js';
 import { renderMailRules } from './mail-rules.js';
 import { mailBody, mailDisplayControls, bindMailReader } from './mail-reader.js';
 import { messageHeaders, setupHeaderViewer } from './mail-headers.js';
@@ -1159,7 +1159,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     const reuseWorkspace = preserveSelection && state.app === 'mail' && !!readerSnapshot && !!document.querySelector('#detail.mail-reader');
     const restoreSidebar = captureSidebarFocus();
     if (reuseWorkspace) {
-        document.querySelectorAll('#mail-folder-navigation .account-folders,.search-wrap .folder-current').forEach(node => node.remove());
+        document.querySelector('#mail-folder-navigation .account-folders')?.remove();
         renderMailFolders(mailFolderEnv());
         renderList();
         renderDetail(readerSnapshot);
@@ -1285,6 +1285,7 @@ function toggleItemFullScreen() {
 }
 function renderWorkspace(readerSnapshot) {
     renderAppHeader();
+    const previousFolderActions = captureFolderActions();
     const a = apps[state.app];
     if (state.app === 'calendar') {
         document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${exitFullScreenButton}${mobileBackButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
@@ -1337,7 +1338,7 @@ function renderWorkspace(readerSnapshot) {
             select.insertAdjacentHTML('afterbegin', '<option value="account-folder">Selected account folder</option>');
             select.value = 'account-folder';
         }
-        renderMailFolders(mailFolderEnv());
+        renderMailFolders(mailFolderEnv(), previousFolderActions);
     }
     renderList();
     renderDetail(readerSnapshot);

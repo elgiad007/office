@@ -1,5 +1,6 @@
 import {asError} from './utils.js';
 import {isPresent} from './utils.js';
+import {mobileDisclosure, setDisclosure} from './mobile-layout.js';
 import type {Account, FolderEnvironment, MailFolder, MailScope, OfficeRecord} from './types.js';
 export function matchesMailScope(row: OfficeRecord,scope: MailScope,accounts: Account[]) {
   if (!row.meta.remote || row.meta.account!==scope.account || ['Recovery copies','Not in Inbox'].includes(row.meta.folder||'')) return false;
@@ -69,7 +70,15 @@ function tree(folders: MailFolder[],e: (value: unknown) => string,account: strin
     return n.children.length?`<details open data-folder-path="${e(n.key)}" data-folder-account="${e(account)}"><summary>${button}</summary><div class="folder-children">${tree(n.children,e,account,n.key,depth+1)}</div></details>`:button;
   }).join('');
 }
-export function renderMailFolders(env: FolderEnvironment) {
+export function captureFolderActions() {
+  const toggle=document.querySelector<HTMLElement>('#folder-actions-toggle');
+  return {
+    scope:toggle?.closest<HTMLElement>('.folder-current')?.dataset.scope,
+    open:toggle?.getAttribute('aria-expanded')==='true',
+    focused:toggle===document.activeElement,
+  };
+}
+export function renderMailFolders(env: FolderEnvironment, previousActions=captureFolderActions()) {
   const {state,e}=env, navigation=document.querySelector<HTMLElement>('#mail-folder-navigation')!, controls=document.querySelector<HTMLElement>('.search-wrap')!, host=document.querySelector<HTMLElement>('.shell')!;
   const scope=state.mailScope, account=state.accounts.find(a=>a.id===scope?.account), folder=account?.folders?.find(f=>f.id===scope!.folder);
   navigation.insertAdjacentHTML('beforeend',`<div class="account-folders" aria-label="Account folders">${state.accounts.filter(a=>['imap','google'].includes(a.type)).map(a=>`<details class="folder-account" ${state.folderOpen.has(a.id)?'open':''} data-account-tree="${e(a.id)}"><summary>${e(a.label)}${a.type==='google'?' · Labels':''}</summary><div class="folder-tools"><button data-refresh-folders="${e(a.id)}">Refresh folders</button><button data-manage-folder="create" data-folder-account="${e(a.id)}">New ${a.type==='google'?'label':'folder'}</button></div>${tree(a.folders||[],e,a.id)||'<p class="muted">Refresh folders to discover this account’s folders.</p>'}</details>`).join('')}</div>`);
@@ -82,7 +91,24 @@ export function renderMailFolders(env: FolderEnvironment) {
     select.dispatchEvent(new Event('change'));
   };
   bindEmptyJunk(env,localButton);
-  controls.insertAdjacentHTML('beforeend',scope?`<div class="folder-current"><strong>${e(account?.label||'Account')} / ${e(folder?.name||scope.folder)}</strong><div class="folder-tools"><button id="folder-refresh">Refresh mail</button><button id="folder-more" ${''}>Load next batch</button>${folder&&!folder.protected?`<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>`:''}</div><small>Headers sync in batches of 100. Open a message to download its contents.</small></div>`:'');
+  controls.querySelector('.folder-current')?.remove();
+  if(scope){
+    const key=JSON.stringify([scope.account,scope.folder]);
+    const label=e(account?.label||'Account')+' / '+e(folder?.name||scope.folder);
+    controls.insertAdjacentHTML('beforeend',`<div class="folder-current" data-scope="${e(key)}">
+      <strong class="folder-current-heading">${label}</strong>
+      ${mobileDisclosure('folder-actions',`<span>${label}</span>`)}
+      <div id="folder-actions" class="mobile-collapsible">
+        <div class="folder-tools"><button id="folder-refresh">Refresh mail</button><button id="folder-more">Load next batch</button>${folder&&!folder.protected?`<button data-manage-folder="rename" data-folder-account="${e(scope.account)}">Rename</button><button data-manage-folder="delete" data-folder-account="${e(scope.account)}">Delete</button>`:''}</div>
+        <small>Headers sync in batches of 100. Open a message to download its contents.</small>
+      </div>
+    </div>`);
+    if(previousActions.scope===key){
+      const toggle=controls.querySelector<HTMLElement>('#folder-actions-toggle');
+      setDisclosure(toggle,previousActions.open);
+      if(previousActions.focused)toggle?.focus({preventScroll:true});
+    }
+  }
   host.querySelectorAll<HTMLDetailsElement>('[data-account-tree]').forEach(d=>d.ontoggle=()=>{if(d.open)state.folderOpen.add(d.dataset.accountTree!);else state.folderOpen.delete(d.dataset.accountTree!);});
   host.querySelectorAll<HTMLButtonElement>('[data-refresh-folders]').forEach(b=>b.onclick=()=>env.attempt(async()=>{
     await env.commit();b.disabled=true;

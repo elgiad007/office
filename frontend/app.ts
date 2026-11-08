@@ -12,7 +12,7 @@ type MailSnapshot = Pick<OfficeRecord, 'id' | 'kind' | 'contentHash' | 'meta'>;
 import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
-import {renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
+import {captureFolderActions, renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
 import {renderMailRules} from './mail-rules.js';
 import {mailBody, mailDisplayControls, bindMailReader} from './mail-reader.js';
 import {messageHeaders,setupHeaderViewer} from './mail-headers.js';
@@ -817,7 +817,7 @@ async function load(preferId?: string,{selectFirst=true,preserveSelection=false,
   }
   const reuseWorkspace=preserveSelection&&state.app==='mail'&&!!readerSnapshot&&!!document.querySelector('#detail.mail-reader');
   const restoreSidebar=captureSidebarFocus();
-  if(reuseWorkspace){document.querySelectorAll('#mail-folder-navigation .account-folders,.search-wrap .folder-current').forEach(node=>node.remove());renderMailFolders(mailFolderEnv());renderList();renderDetail(readerSnapshot);}else renderWorkspace(readerSnapshot);
+  if(reuseWorkspace){document.querySelector('#mail-folder-navigation .account-folders')?.remove();renderMailFolders(mailFolderEnv());renderList();renderDetail(readerSnapshot);}else renderWorkspace(readerSnapshot);
   restoreSidebar();
   if(focusedId)document.querySelector<HTMLElement>(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({preventScroll:true});
   restoreMailListViewport(listViewport);
@@ -924,6 +924,7 @@ function toggleItemFullScreen() {
 
 function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
   renderAppHeader();
+  const previousFolderActions=captureFolderActions();
   const a=apps[state.app];
   if(state.app==='calendar'){
     document.querySelector<HTMLElement>('#main')!.innerHTML=`<div class="calendar-workspace">${exitFullScreenButton}${mobileBackButton}<section id="calendar-surface"></section><section class="detail calendar-detail" id="detail" aria-label="Selected event"></section></div>`;
@@ -954,7 +955,7 @@ function renderWorkspace(readerSnapshot?: MailReaderSnapshot) {
       } finally { select.value=state.mailFolder; select.disabled=false; restoreSidebar(); }
     });
     if(state.mailScope){const select=document.querySelector<HTMLSelectElement>('#mail-folder')!;select.insertAdjacentHTML('afterbegin','<option value="account-folder">Selected account folder</option>');select.value='account-folder';}
-    renderMailFolders(mailFolderEnv());
+    renderMailFolders(mailFolderEnv(),previousFolderActions);
   }
   renderList(); renderDetail(readerSnapshot);
 }

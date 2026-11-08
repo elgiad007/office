@@ -127,7 +127,16 @@
   #main :is(.search-wrap, .list-summary) { padding: 6px 10px; }
   .search-wrap:has([data-action="mobile-folders"]) { display: flex; gap: 6px; flex-wrap: wrap; }
   .search-wrap label { flex: 1 1 140px; min-width: 0; }
-  .search-wrap .folder-current { flex-basis: 100%; }
+  .search-wrap .folder-current { flex: 1 0 100%; min-width: 0; margin-top: 0; }
+  .folder-current-heading { display: none; }
+  #folder-actions-toggle {
+    justify-content: space-between;
+    width: 100%;
+    padding-block: 4px;
+    font-size: 12px;
+    text-align: start;
+  }
+  #folder-actions-toggle span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .list-pane { border: 0; }
   .list-summary :is(#mail-list-view, #task-list-view) summary { min-height: 44px; align-content: center; }
   #items .item { min-height: 44px; }
