@@ -39,7 +39,7 @@ const apps: Record<string, {name: string; singular: string; empty: string; hint:
   sheets:{name:'Sheets',singular:'workbook',empty:'No workbooks yet.',hint:'Create a workbook or import a CSV file.',icon:'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18'},
   lists:{name:'Lists',singular:'list',empty:'No lists yet.',hint:'Create a named list and add items to check off.',icon:'M2 3h7v7H2z M3 6l2 2 4-5 M2 14h7v7H2z M13 6h9 M13 17h9'},
 };
-const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L',addChecklistItem:'o'};
+const defaultKeys: Record<string, string> = {down:'j',up:'k',left:'h',right:'l',pageDown:'d',pageUp:'u',edit:'i',new:'c',search:'/',help:'?',select:'v',save:'s',archive:'a',reply:'r',move:'m',delete:'D',undoDelete:'U',completeTask:'x',connections:'L',addChecklistItem:'o',fullScreen:'z'};
 const state: AppState = {app:'mail',rows:[],current:null,csrf:'',accounts:[],prefs:{},search:'',mode:'normal',dirty:false,selected:new Set(),sheet:0,cell:'A1',wikiEditing:false,lastActivity:Date.now(),syncing:false,savePromise:null,mailFolder:'Inbox',mailScope:null,folderOpen:new Set()};
 const sqliteBackupType='application/vnd.sqlite3';
 let backupRequest: AbortController | undefined;
@@ -926,7 +926,9 @@ function toggleItemFullScreen() {
   const expanded=!fullScreenItemId;
   const focused=document.activeElement;
   setItemFullScreen(expanded);
-  if(focused===document.body)document.querySelector<HTMLElement>('[data-action="item-fullscreen"]')?.focus({preventScroll:true});
+  if(focused===document.body||(expanded&&!focused?.closest('.item-pane'))){
+    document.querySelector<HTMLElement>('[data-action="item-fullscreen"]')?.focus({preventScroll:true});
+  }
   if(!editable(document.activeElement))setMode('normal');
 }
 
@@ -2508,6 +2510,7 @@ document.addEventListener('keydown',event=>{
     return;
   }
   if(state.app==='settings')return;
+  if(action==='fullScreen'&&state.current&&!phoneLayout.matches){event.preventDefault();toggleItemFullScreen();return;}
   if(state.app==='lists'&&action==='addChecklistItem'&&activePane()==='content'){
     event.preventDefault();document.querySelector<HTMLInputElement>('.checklist-add input')?.focus();return;
   }

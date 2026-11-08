@@ -22,6 +22,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   add('g 1 … g 8','Switch application','Normal mode','1 Mail; 2 Calendar; 3 Tasks; 4 Contacts; 5 Documents; 6 Wiki; 7 Sheets; 8 Lists. Sequence timeout: 900 ms.');
   add(k.search,'Search current application');add('n / N','Next / previous item in search results','Normal mode','Keeps focus in the current pane, including mail bodies.');
   add(k.connections||'L','Open selected item connections','Normal mode','Remappable in Settings. Also available as :links or :l; add all for the workspace overview.');
+  add(k.fullScreen||'z','Toggle selected item full screen','Normal mode, desktop layout','Remappable in Settings. Escape also exits full screen.');
   add(k.new,'Create an item / compose');add(k.edit,'Enter edit mode');add(k.select,'Toggle current item selection');add(k.save,'Save changes');
   add('Ctrl+S / Cmd+S','Save changes','Normal or insert mode, outside dialogs');
   add('Escape','Leave edit mode; clear selection otherwise','Outside dialogs','Saves existing items. New drafts stay unsaved until Save. In formula input, return focus to selected cell.');

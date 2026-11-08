@@ -23,6 +23,7 @@ export function helpEntries(k) {
     add(k.search, 'Search current application');
     add('n / N', 'Next / previous item in search results', 'Normal mode', 'Keeps focus in the current pane, including mail bodies.');
     add(k.connections || 'L', 'Open selected item connections', 'Normal mode', 'Remappable in Settings. Also available as :links or :l; add all for the workspace overview.');
+    add(k.fullScreen || 'z', 'Toggle selected item full screen', 'Normal mode, desktop layout', 'Remappable in Settings. Escape also exits full screen.');
     add(k.new, 'Create an item / compose');
     add(k.edit, 'Enter edit mode');
     add(k.select, 'Toggle current item selection');
