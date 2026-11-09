@@ -2,6 +2,8 @@
 
 Start with [Getting started](getting-started.md) to set up your workspace, create your first item, and find your way around Office.
 
+If you need to set up the software first, see [Install Office](installation.md) for Windows, Linux, and cPanel.
+
 ## Apps
 
 | App | What you can do |
@@ -29,4 +31,10 @@ Start with [Getting started](getting-started.md) to set up your workspace, creat
 | [Backups and moving Office](backups.md) | Download and restore a workspace or move a portable installation. |
 | [Updates](updates.md) | Check for a release, install it, and recover an interrupted update. |
 
-For development and packaging, see the [repository README](../README.md#development-and-packaging).
+## Developer and maintainer guides
+
+- [Develop and test Office](development.md)
+- [Set up the portable Windows development server](development-server.md)
+- [Package and release Office](releases.md)
+- [Mail database indexing](mail-database-indexing.md)
+- [Initial implementation plan](implementation-plan.md) and [delivery status](implementation-status.md)

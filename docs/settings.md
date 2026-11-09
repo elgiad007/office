@@ -19,6 +19,8 @@ Choose **Settings** in the sidebar or enter `:settings`. Select a category to op
 
 Use the category's **Save** button where provided.
 
+Elapsed-time labels are on by default and refresh once a minute while the page is visible. They appear beside the original date, for example, “Nov 4, 10:30 AM (5 minutes ago).”
+
 ## Arrange the workspace
 
 On desktop, drag the dividers to resize the application sidebar and item list. You can also focus a divider and use Left and Right. Narrow the sidebar to collapse it to icons, or widen it to show labels. The layout can collapse automatically in a smaller window. In the collapsed sidebar, open the Mail folder panel to browse accounts and folders.

@@ -5,7 +5,7 @@
 ## Download a workspace backup
 
 1. Open **Settings → Backups** or enter `:backup`.
-2. Choose **Prepare backup**. Verify your owner password if prompted.
+2. Choose **Prepare backup**. Verify your owner password if prompted. Office requires password verification within the previous five minutes.
 3. When the status says the backup is ready, choose **Download SQLite backup** and save the file privately.
 
 The backup includes local records, cached mail and events, downloaded attachments, revisions, preferences, and connections. The owner password, provider credentials, OAuth tokens, activity log, and local process state are excluded. Content and attachments that were never downloaded are unavailable in the backup.

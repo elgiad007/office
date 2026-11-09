@@ -15,6 +15,10 @@ Open **Settings → Accounts → Add account**. Choose guided setup for step-by-
 
 Connections require public hostnames and valid TLS certificates. For Gmail app-password availability and help creating one, see [Google Account Help](https://support.google.com/accounts/answer/185833).
 
+For Gmail app-password setup, paste the app password into Office. Spaces between its groups are removed automatically. Office supplies `imap.gmail.com` and `smtp.gmail.com` and discovers the account's system folders.
+
+With IMAP, **Test connection** checks read-only Inbox access, archive and MOVE support, and SMTP login. With CalDAV, it checks the collection properties. Changing the settings clears the previous result.
+
 ## Set up Google sign-in
 
 1. Open **Settings → Accounts → Google integration** and copy the callback URL displayed there.
@@ -23,6 +27,8 @@ Connections require public hostnames and valid TLS certificates. For Gmail app-p
 4. Sign in as the account you intend to connect. If access expires, choose **Authorize** for that account and sign in with the original address.
 
 Each installation needs its own setup and account authorization. A new hostname or port can require an updated callback registration.
+
+A blank client secret keeps the saved secret when the client ID stays the same. Changing the integration credentials applies to future connections. Existing Google accounts keep the client settings and callback used for their authorization.
 
 ## Sync and check progress
 

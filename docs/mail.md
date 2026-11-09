@@ -12,6 +12,8 @@ Search in the current view by subject, correspondent, or downloaded body text. O
 
 Choose **List appearance** in Mail settings to customize the three lines, their left and right fields, text sizes, and sender name or address display. By default, the lines show sender and date, subject and attachment indicator, then a body preview.
 
+The envelope is replaced by a checkmark when you select a row. A question mark in the attachment field means the attachment status is unknown. If an administrator enables remote sender icons with `OFFICE_REMOTE_SENDER_ICONS=1`, a lookup can reveal to the sender's website that the mail row was displayed, along with the Office server's IP address.
+
 ## Read messages and download attachments
 
 - Use **More → HTML** or **Text only** to change how a message is displayed. Set a default in **Settings → Mail**. In dark mode, **Original colors** restores the message's own colors for the session.
@@ -29,6 +31,8 @@ Choose **List appearance** in Mail settings to customize the three lines, their 
 
 Saved drafts stay in **Drafts** until you send or discard them. Office retains a local Sent copy. If Office reports **Delivery uncertain**, check your provider or the recipient before sending a replacement. Office does not resend automatically.
 
+Sending through generic SMTP keeps the Office Sent copy without appending it to the IMAP Sent folder. Sending or discarding a draft returns you to the previous mail folder and restores its search.
+
 ## File messages and manage folders
 
 Use **Archive**, **Move to Trash**, or **More → Move / Labels** on a message. Use **More** or the right-click menu to mark it read or unread. For multiple messages, select them first and open the selection's item menu. Folder filing requires the selected messages to belong to the same account.
@@ -36,6 +40,8 @@ Use **Archive**, **Move to Trash**, or **More → Move / Labels** on a message. 
 Press `m` for **Quick Move**, type a folder or label name, choose a match with Up or Down, then press Enter. Account names distinguish matching folders. A cross-account move copies and verifies the complete original before moving the source to Trash. It requires an original no larger than 1.4 MB and UIDPLUS on an IMAP destination. If verification is uncertain, check the destination and sync before trying again.
 
 The Gmail label picker also offers **Add label** and **Remove label**. **Move here** applies the chosen label and removes Inbox or Trash membership while retaining other labels. A message can appear in several Gmail views.
+
+With the Gmail app-password connection, Archive uses Gmail's All Mail and can overlap Inbox. Archive and Trash use the account's system folders, including when a custom label has the same name. After upgrading an older Gmail app-password installation, use **Refresh folders** and **Repair / resync** to refresh cached folder locations.
 
 Use **New folder** or **New label** in an account to create one. For nested folders, enter the full path using your server's separator. Gmail uses `/`. Custom folders can be renamed or deleted. IMAP folders must be empty and have no subfolders before deletion. Gmail label deletion removes the label from messages. Office protects system folders.
 

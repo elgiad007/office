@@ -16,6 +16,8 @@ Open **Settings → Activity Log** and choose **Save logging level** after selec
 
 The log shows up to 500 recent events and survives page refreshes. It records summaries and excludes passwords, tokens, and message bodies. Full workspace backups exclude the activity log.
 
+The activity indicator uses a steady highlight when reduced motion is enabled. IMAP progress can appear as it happens when the host supports streaming.
+
 ## Investigate a problem
 
 | Symptom | What to check |

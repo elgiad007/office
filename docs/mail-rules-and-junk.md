@@ -19,6 +19,6 @@ Use the up and down buttons to set the rule order. You can edit, disable, enable
 
 ## Empty Junk or Spam
 
-Right-click the account's Junk or Spam folder, or **Local Junk**, and choose **Empty Junk Folder…** or **Empty Spam Folder…**. Review the count before confirming permanent deletion. Account folders can include messages Office has yet to download. Office may ask you to verify your password again. This operation cannot be undone.
+Right-click the account's Junk or Spam folder, or **Local Junk**, and choose **Empty Junk Folder…** or **Empty Spam Folder…**. Review the count before confirming permanent deletion. Account folders can include messages Office has yet to download. Office requires password verification within the previous five minutes. This operation cannot be undone.
 
 For Gmail, including the app-password connection, first configure **Settings → Accounts → Google integration**. Use **Continue to Google** when prompted to grant the one-time permission for that account. Back in Office, open the folder action again to review the count and confirm. Other IMAP providers must support deleting the targeted messages without expunging unrelated mail.
