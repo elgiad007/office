@@ -2373,6 +2373,16 @@ async function createRecord(initial = {}, { keepMailList = false, focusBody = fa
         throw error;
     }
 }
+async function viewWikiPage() {
+    const record = state.current;
+    await commit();
+    if (state.app !== 'wiki' || state.current !== record || !state.wikiEditing)
+        return;
+    state.wikiEditing = false;
+    setMode('normal');
+    renderDetail();
+    focusContent();
+}
 function enterEdit(preferTitle = false) {
     if (state.current?.meta.remote) {
         notice('This synced copy is read-only.');
@@ -3093,13 +3103,12 @@ async function handleClick(event) {
             download(state.current.title + '.txt', doc.body.textContent);
         }
         if (action === 'wiki-mode') {
-            await commit();
-            state.wikiEditing = !state.wikiEditing;
-            renderDetail();
             if (state.wikiEditing)
+                await viewWikiPage();
+            else {
+                await commit();
                 enterEdit();
-            else
-                setMode('normal');
+            }
         }
         if (action === 'history')
             await history();
@@ -4304,6 +4313,14 @@ document.addEventListener('keydown', event => {
         setMode('normal');
         focusContent();
         void attempt(commit);
+        return;
+    }
+    if (event.key === 'Escape' && state.app === 'wiki' && state.wikiEditing && state.current && (!editable(target) || target.closest('#detail'))) {
+        if (event.isComposing)
+            return;
+        event.preventDefault();
+        if (!event.repeat)
+            void attempt(viewWikiPage);
         return;
     }
     if (event.key === 'Escape' && fullScreenItemId && !editable(target) && !event.isComposing) {

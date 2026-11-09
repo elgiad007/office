@@ -63,10 +63,18 @@ try{
     assert.equal(writes.length,before,app+' does not save on creation, typing, timeout or Escape');
     assert.equal(await page.locator('#detail [data-action="delete"]').textContent(),'Discard Draft');
     if(app==='wiki'){
-      await page.locator('[name="body"]').fill('# Preview stays in memory');
+      await page.getByRole('heading',{name:'Manual wiki',exact:true}).waitFor();
+      await page.keyboard.press('i');
+      const source=page.locator('#detail [name="body"]');
+      assert.equal(await source.evaluate(node=>node===document.activeElement),true);
+      await source.fill('# Preview stays in memory');
+      await page.keyboard.press('Escape');
+      await page.locator('.article').getByRole('heading',{name:'Preview stays in memory',exact:true}).waitFor();
+      await page.keyboard.press('i');
+      assert.equal(await source.inputValue(),'# Preview stays in memory');
       await page.locator('[data-action="wiki-mode"]').click();
       assert.equal(writes.length,before);await page.locator('[data-action="wiki-mode"]').click();
-      assert.equal(await page.locator('[name="body"]').inputValue(),'# Preview stays in memory');
+      assert.equal(await source.inputValue(),'# Preview stays in memory');
     }
     if(app==='sheets'){
       await page.locator('#formula').fill('42');await page.locator('[data-action="add-sheet"]').click();
@@ -98,6 +106,27 @@ try{
     await checkSaveButton(true);
     assert.equal(writes.length,before+2,app+' autosaves after manual first save');
     assert.equal(writes.at(-1).id,stored.id);
+    if(app==='wiki'){
+      await page.getByRole('button',{name:'Full Screen',exact:true}).click();
+      const exitFullScreen=page.getByRole('button',{name:'Exit Full Screen',exact:true});
+      const source=page.locator('#detail [name="body"]');
+      await source.fill('# Saved wiki preview');
+      reject=true;
+      await page.keyboard.press('Escape');
+      await page.locator('#save-status').filter({hasText:'Save failed'}).waitFor();
+      assert.equal(await source.inputValue(),'# Saved wiki preview');
+      reject=false;
+      await page.keyboard.press('Escape');
+      await page.locator('.article').getByRole('heading',{name:'Saved wiki preview',exact:true}).waitFor();
+      assert.equal(writes.at(-1).body,'# Saved wiki preview');
+      assert.equal(await exitFullScreen.isVisible(),true);
+      await page.keyboard.press('i');
+      assert.equal(await source.inputValue(),'# Saved wiki preview');
+      await page.keyboard.press('Escape');
+      await page.locator('.article').waitFor();
+      await page.keyboard.press('Escape');
+      await exitFullScreen.waitFor({state:'hidden'});
+    }
   }
   await page.goto(url+'#documents');await page.reload();await page.locator('[data-action="new"]:visible').first().waitFor();
   await checkSaveButton(true);

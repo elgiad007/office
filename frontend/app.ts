@@ -1632,6 +1632,15 @@ async function createRecord(initial: Partial<ItemInput>={}, {keepMailList=false,
   }
   catch(cause) { const error=asError(cause); state.current=previous;renderDetail();throw error; }
 }
+async function viewWikiPage() {
+  const record=state.current;
+  await commit();
+  if(state.app!=='wiki'||state.current!==record||!state.wikiEditing)return;
+  state.wikiEditing=false;
+  setMode('normal');
+  renderDetail();
+  focusContent();
+}
 function enterEdit(preferTitle=false) {
   if (state.current?.meta.remote) {notice('This synced copy is read-only.');return;}
   if(phoneLayout.matches&&state.current&&!mobileItemOpen){openMobileItem(state.current.id);renderDetail();}
@@ -2058,7 +2067,10 @@ async function handleClick(event: MouseEvent) {
     if(action==='image')insertImage();
     if(action==='link')insertLink();
     if(action==='text'){await commit();const html=safeDocument(state.current!.body).replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)>/gi,'\n').replace(/<br\s*\/?\s*>/gi,'\n');const doc=new DOMParser().parseFromString(html,'text/html');download(state.current!.title+'.txt',doc.body.textContent);}
-    if(action==='wiki-mode'){await commit();state.wikiEditing=!state.wikiEditing;renderDetail();if(state.wikiEditing)enterEdit();else setMode('normal');}
+    if(action==='wiki-mode'){
+      if(state.wikiEditing)await viewWikiPage();
+      else {await commit();enterEdit();}
+    }
     if(action==='history')await history();
     if(action==='delete'){
       if(state.savePromise)await state.savePromise;
@@ -2878,6 +2890,12 @@ document.addEventListener('keydown',event=>{
   }
   if(state.app==='lists'&&event.key==='Escape'&&target.matches('.checklist-add input,.checklist-title input')&&!event.isComposing){
     event.preventDefault();setMode('normal');focusContent();void attempt(commit);return;
+  }
+  if(event.key==='Escape'&&state.app==='wiki'&&state.wikiEditing&&state.current&&(!editable(target)||target.closest('#detail'))){
+    if(event.isComposing)return;
+    event.preventDefault();
+    if(!event.repeat)void attempt(viewWikiPage);
+    return;
   }
   if(event.key==='Escape'&&fullScreenItemId&&!editable(target)&&!event.isComposing){if(!event.repeat)toggleItemFullScreen();event.preventDefault();return;}
   if(event.key==='Escape'){setMode('normal');if(editable((event.target as HTMLElement))){(event.target as HTMLElement).blur();setMode('normal');event.preventDefault();void attempt(commit);if((event.target as HTMLElement).id==='formula')selectCell(state.cell,true);}else{const pane=activePane();state.selected.clear();if(state.app!=='settings'){renderList();restorePane(pane);}}return;}
