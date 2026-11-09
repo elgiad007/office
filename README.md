@@ -1,6 +1,8 @@
 # Portable Office
 
-A personal office suite for a folder on your own computer or a PHP shared-hosting account. Mail, calendar, tasks, contacts, documents, wiki and simple spreadsheets share one keyboard-oriented interface. This is an initial implementation, with the limitations below.
+A personal office suite for a folder on your own computer or a PHP shared-hosting account. Mail, calendar, tasks, contacts, documents, wiki, spreadsheets, and checklists share one keyboard-oriented interface. This is an initial implementation, with the limitations below.
+
+See the [Office user guides](docs/README.md) for each app and for shared features such as keyboard navigation, backups, and updates.
 
 ## License
 
