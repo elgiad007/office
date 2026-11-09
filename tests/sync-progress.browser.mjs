@@ -14,7 +14,9 @@ export async function testSyncProgress(page,url){
     else if(action==='mail-export')return route.fulfill({json:{records:[]},headers:{'X-Office-Mail-Count':'0','X-Office-Mail-Header-Only':'0'}});
     else if(action==='activity')json={entries:[]};
     else if(action==='sync'){
-      calls++;batchCounts.push(route.request().postDataJSON().batches);if(calls===1)await first;if(calls===2)await second;json={count:100,more:true};
+      calls++;batchCounts.push(route.request().postDataJSON().batches);if(calls===1)await first;if(calls===2)await second;
+      if(calls===3)return route.fulfill({contentType:'application/x-ndjson',body:JSON.stringify({type:'activity-progress',entry:{operation:'Synchronize account',phase:'sync-progress',message:'Checking mail'}})+'\n'});
+      json={count:100,more:true};
     }else throw Error('Unexpected sync progress route '+action);
     await route.fulfill({json});
   });
@@ -53,6 +55,9 @@ export async function testSyncProgress(page,url){
     await exportMenu.click();
     await toolbar.getByRole('button',{name:'Export cached mail',exact:true}).click();
     await page.getByText('There is nothing to export yet.',{exact:true}).waitFor();
+    await page.locator('#sync-button').click();
+    await page.locator('#sync-status').filter({hasText:'Sync needs attention'}).waitFor();
+    await page.locator('#notice').filter({hasText:'Mail sync ended before Office received a result.'}).waitFor();
     await page.locator('[data-app="wiki"]').click();
     assert.equal(await page.locator('#mail-toolbar').isVisible(),false,'Mail actions are hidden in other apps');
     assert.equal(await page.locator('.topbar h1').textContent(),'Wiki');

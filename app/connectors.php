@@ -266,7 +266,7 @@ function imap_is_gmail(array $a): bool {
 function imap_gmail_move_copies(array $a,mixed $s,array $r,string $path,string $uid,?string &$identity=null): array {
     $identity=imap_gmail_message_id(imap_command($s,'UID FETCH '.$uid.' (UID X-GM-MSGID)'),$uid);
     $ids=[];
-    foreach (mail_cache_rows($a['id']) as $copy) {
+    foreach (mail_cached_records($a['id']) as $copy) {
         $m=$copy['meta'];
         if ($copy['id']===$r['id']) continue;
         if (($m['gmailMessageId']??null)===$identity) { $ids[]=$copy['id']; continue; }

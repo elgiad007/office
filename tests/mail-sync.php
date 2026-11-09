@@ -333,6 +333,31 @@ try {
     check(get_record($archiveRow['id'])['meta']['folder']==='Archive' && get_record($archiveRow['id'])['meta']['read']===true,'early Inbox publication never reconciles absent Archive originals');
     check((bool)array_filter(activity_rows(),fn($entry)=>$entry['phase']==='mail-cache-ready'),'early Inbox publication emits a cache-ready event');
     set_setting('preferences',[]);
+
+    // A warm cache whose encoded originals would exceed PHP's 256 MiB cap
+    // when loaded and decoded together must still be safe to refresh.
+    $largeCache=make_account('large-cached-originals');
+    $largeIds=array_map('strval',range(1,96));
+    $largeOriginal=base64_encode("Subject: Cached large message\r\n\r\n".str_repeat('x',1300000));
+    $largeFlags='';
+    foreach ($largeIds as $uid) {
+        cache_remote($largeCache,mail_source('INBOX','100',$uid),'mail','Cached large message','Cached body',[
+            'folder'=>'Inbox','serverFolder'=>'INBOX','uidValidity'=>'100','providerId'=>$uid,'read'=>true,'rawBase64'=>$largeOriginal,
+        ]);
+        $largeFlags.='* '.$uid.' FETCH (UID '.$uid.' FLAGS ('.($uid==='1'?'':'\\Seen')."))\r\n";
+    }
+    memory_reset_peak_usage();
+    $beforeSyncMemory=memory_get_usage();
+    fixture([...sync_preflight(),examine_step('INBOX'),search_step('ALL',$largeIds),examine_step('Saved'),search_step('ALL',[]),
+        examine_step('Deleted'),search_step('ALL',[]),examine_step('INBOX'),
+        ['UID FETCH '.imap_uid_set($largeIds).' (UID FLAGS)',$largeFlags."{tag} OK done\r\n"],examine_step('Saved'),examine_step('Deleted')],
+        function($s)use($largeCache){check(imap_sync_stream($largeCache,$s)===0,'large warm IMAP sync refreshes flags without downloading bodies');});
+    $syncMemory=memory_get_peak_usage()-$beforeSyncMemory;
+    $changed=mail_sync_record(remote_id($largeCache['id'],mail_source('INBOX','100','1')));
+    check($changed['meta']['read']===false && $changed['meta']['rawBase64']===$largeOriginal,'large-cache sync updates flags and preserves the original');
+    check($syncMemory<32*1024*1024,'large-cache sync uses less than 32 MiB of additional PHP memory ('.round($syncMemory/1048576,1).' MiB)');
+    unset($largeOriginal,$changed);
+
     $junk=make_account('junk-fixture','google');
     update_mail_block($junk['id'],'domain','Example.COM');
     $rule=array_values(mail_block_rules($junk['id']))[0];

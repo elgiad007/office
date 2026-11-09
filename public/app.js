@@ -462,8 +462,15 @@ async function requestApi(route, data, signal) {
                 finished = true;
             }
         };
+        const syncRequest = route === 'sync' || route === 'mail-folder-sync';
+        const syncInterrupted = 'Mail sync ended before Office received a result. Some messages may already be cached. Check the PHP error log for the cause, then retry sync.';
         while (true) {
-            const { value, done } = await reader.read();
+            const { value, done } = await reader.read().catch(cause => {
+                signal?.throwIfAborted();
+                if (syncRequest && !finished)
+                    throw Error(syncInterrupted, { cause });
+                throw cause;
+            });
             buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
             let newline;
             while ((newline = buffer.indexOf('\n')) !== -1) {
@@ -477,7 +484,7 @@ async function requestApi(route, data, signal) {
             }
         }
         if (!finished)
-            throw Error('The connection ended before the operation was confirmed. Check recent activity and sync before retrying.');
+            throw Error(syncRequest ? syncInterrupted : 'The connection ended before the operation was confirmed. Check recent activity and sync before retrying.');
     }
     else
         try {

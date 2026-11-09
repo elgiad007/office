@@ -152,12 +152,12 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
         if ($token!=='' && (isset($seen[$token]) || count($seen)>=100)) fail('Gmail folder pagination did not complete.');
         $seen[$token]=true;
     } while ($token!=='');
-    $cached=[]; foreach (mail_cache_rows($a['id']) as $r) $cached[$r['meta']['providerId']]=$r;
+    $cached=[]; foreach (mail_sync_cache($a['id']) as $r) $cached[$r['meta']['providerId']]=$r;
     $unknown=array_values(array_filter(array_unique($ids),fn($id)=>!isset($cached[$id])));
     $catalog=setting('mail-folders:'.$a['id'],[]);$folderName=$label;
     foreach($catalog as $f)if($f['id']===$label){$folderName=$f['name'];break;}
     activity_sync_progress('Checking mail · '.$folderName.' · '.(count(array_unique($ids))-count($unknown)).' of '.count(array_unique($ids)).' messages cached.');
-    $recent=array_slice($unknown,0,$limit); $updates=[];$pending=count($unknown)>$limit;
+    $recent=array_slice($unknown,0,$limit); $updates=new MailSyncDownloads();$pending=count($unknown)>$limit;
     $relevant=array_keys(array_filter($cached,fn($r)=>in_array($label,$r['meta']['labelIds']??[],true) || in_array($r['meta']['providerId'],$ids,true)));
     $bodyIds=mail_offline_download()?array_keys(array_filter($cached,fn($r)=>in_array($r['meta']['providerId'],$ids,true) && !empty($r['meta']['headerOnly']) && ($r['meta']['messageSize']??0)<=IMAP_BODY_LIMIT)):[];
     if(count($bodyIds)>$limit)$pending=true;
@@ -176,6 +176,7 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
         $full=mail_offline_download() && ($new || (!empty($cached[$id]['meta']['headerOnly']) && ($cached[$id]['meta']['messageSize']??0)<=IMAP_BODY_LIMIT));
         $msg=$request('/'.rawurlencode((string)$id).'?format='.($full?'raw':($new?'metadata':'minimal')));
         if (!is_array($msg['labelIds']??null)) fail('Invalid Gmail message labels.');
+        $old=isset($cached[$id])?get_record($cached[$id]['id']):null;
         $meta=['providerId'=>(string)$id,'folder'=>gmail_folder($msg['labelIds'])??'Custom folder','labelIds'=>$msg['labelIds'],'read'=>!in_array('UNREAD',$msg['labelIds'],true)];
         if ($full) {
             if (!is_string($msg['raw']??null)) fail('Invalid Gmail content.');
@@ -187,11 +188,11 @@ function sync_gmail_folder(array $a,string $label,int $limit,callable $request):
             }
             $r['id']=$cached[$id]['id']??remote_id($a['id'],'gmail:'.$id);
         } elseif ($new) { $r=gmail_header_download($a,(string)$id,$msg,$meta);$r['id']=remote_id($a['id'],'gmail:'.$id); }
-        elseif (isset($cached[$id])) { $r=$cached[$id]; $r['meta']=array_merge($r['meta'],$meta); unset($r['meta']['recoveryFrom']); }
+        elseif ($old) { $r=$old; $r['meta']=array_merge($r['meta'],$meta); unset($r['meta']['recoveryFrom']); }
         else continue;
-        mail_rule_sync_meta($r,$cached[$id]['meta']??null,$routing);
-        mail_junk_sync_meta($r['meta'],$cached[$id]['meta']??null,$rules);
-        $updates[]=$r;
+        mail_rule_sync_meta($r,$old['meta']??null,$routing);
+        mail_junk_sync_meta($r['meta'],$old['meta']??null,$rules);
+        $updates->add((string)$id,$r);
     }
     mail_deadline($deadline);
     return mail_sync_publish_guard($a['id'],function()use($updates,$recent,$a,$label,$pending,$cursor,$refresh){
