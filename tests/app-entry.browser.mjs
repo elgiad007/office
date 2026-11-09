@@ -22,6 +22,7 @@ export async function testAppEntry(page,url) {
     await page.locator(`#selected-item[data-id="${id}"]`).waitFor();
     await page.waitForFunction(()=>document.activeElement===document.querySelector('#selected-item'));
   };
+  const checkCalendarList=()=>page.waitForFunction(()=>document.activeElement?.id==='items'&&!document.querySelector('#selected-item'));
   const enter=async kind=>{
     await page.locator(`[data-app="${kind}"]`).click();
     await page.waitForFunction(kind=>document.querySelector('#crumb')?.textContent===kind,kind==='wiki'?'Wiki':kind[0].toUpperCase()+kind.slice(1));
@@ -31,16 +32,17 @@ export async function testAppEntry(page,url) {
     await check('entry-mail-0');
     for(const kind of kinds){
       if(kind!=='mail')await enter(kind);
+      if(kind==='calendar'){await checkCalendarList();await page.keyboard.press('j');}
       await check(`entry-${kind}-0`);
       await page.keyboard.press('j');
       await page.locator('#selected-item[data-id="entry-'+kind+'-1"]').waitFor();
     }
     for(const kind of kinds){
-      await enter(kind);await check(`entry-${kind}-1`);
+      await enter(kind);if(kind==='calendar')await checkCalendarList();else await check(`entry-${kind}-1`);
     }
     for(const kind of kinds){
       await enter('settings');removed.add(`entry-${kind}-1`);
-      await enter(kind);await check(`entry-${kind}-0`);
+      await enter(kind);if(kind==='calendar')await checkCalendarList();else await check(`entry-${kind}-0`);
       await enter('settings');empty.add(kind);
       await enter(kind);
       await page.waitForFunction(()=>document.activeElement?.id==='items'&&!document.querySelector('#selected-item'));

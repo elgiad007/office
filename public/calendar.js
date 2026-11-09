@@ -87,8 +87,15 @@ export function createCalendar(env) {
         let content = '';
         if (view === 'month')
             content = `<div class="calendar-month">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="calendar-weekday">${d}</div>`).join('')}${days.map(d => { const list = eventsOn(rows, d); return `<section class="calendar-day ${d.getMonth() !== anchor.getMonth() ? 'outside' : ''}">${dayButton(d)}${list.slice(0, 3).map(r => event(r)).join('')}${list.length > 3 ? `<button class="calendar-more" data-jump="${dayKey(d)}">+${list.length - 3} more</button>` : ''}</section>`; }).join('')}</div>`;
-        else if (view === 'agenda')
-            content = `<div class="calendar-agenda">${rows.filter(r => { const b = eventBounds(r); return !!env.query() || !b || (b.start < new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1) && b.end > first); }).map(r => `<div><span>${r.meta.start ? timestampLabel(r.meta.start, calendarDate(r.meta.start).toLocaleDateString()) : 'No date'}</span>${event(r)}</div>`).join('') || '<p>No matching cached events.</p>'}</div>`;
+        else if (view === 'agenda') {
+            const nextMonth = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1);
+            const entries = rows.map(record => ({ record, bounds: eventBounds(record) }))
+                .filter(({ bounds }) => env.query() || !bounds || (bounds.start < nextMonth && bounds.end > first));
+            const firstAtAnchor = entries.findIndex(({ bounds }) => bounds && bounds.end > anchor);
+            const dateMarker = env.query() ? '' : `<h3 data-agenda-date="${dayKey(anchor)}">${e(anchor.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }))}</h3>`;
+            const entriesHtml = entries.map(({ record }, index) => `${index === firstAtAnchor ? dateMarker : ''}<div><span>${record.meta.start ? timestampLabel(record.meta.start, calendarDate(record.meta.start).toLocaleDateString()) : 'No date'}</span>${event(record)}</div>`).join('');
+            content = `<div class="calendar-agenda">${entriesHtml}${firstAtAnchor < 0 ? dateMarker : ''}${entries.length ? '' : '<p>No matching cached events.</p>'}</div>`;
+        }
         else
             content = `<div class="calendar-time-scroll"><div class="calendar-time-grid" data-calendar-style="--day-count:${days.length}"><div class="calendar-time-label">All day</div>${days.map(d => `<section class="calendar-all-day"><strong>${e(d.toLocaleDateString(undefined, { weekday: 'short' }))}</strong>${dayButton(d)}${eventsOn(rows, d).filter(r => dateOnly(r.meta.start)).map(r => event(r)).join('')}</section>`).join('')}<div class="calendar-hours">${Array.from({ length: 24 }, (_, h) => `<span>${String(h).padStart(2, '0')}:00</span>`).join('')}</div>${days.map(d => `<div class="calendar-time-day">${Array.from({ length: 24 }, (_, h) => `<button class="calendar-slot" data-slot="${dayKey(d)}T${String(h).padStart(2, '0')}:00" aria-label="New event ${dayKey(d)} ${h}:00"></button>`).join('')}${timedLayout(rows, d).map(x => event(x.record, `position:absolute;top:${x.start / 60 * 48}px;height:${Math.max(20, (x.end - x.start) / 60 * 48)}px;left:${x.column / x.columns * 100}%;width:${100 / x.columns}%`)).join('')}</div>`).join('')}</div></div>`;
         const undated = rows.filter(r => !eventBounds(r));
@@ -97,7 +104,7 @@ export function createCalendar(env) {
         sourceMenu.ontoggle = () => { if (compact)
             compactSourcesOpen = sourceMenu.open; };
         host.querySelectorAll('[data-calendar-style]').forEach(node => { node.style.cssText = node.dataset.calendarStyle; node.removeAttribute('data-calendar-style'); });
-        host.querySelectorAll('[data-view]').forEach(b => b.onclick = () => env.error(async () => { await env.before(); chosenView = b.dataset.view; render(); }));
+        host.querySelectorAll('[data-view]').forEach(b => b.onclick = () => env.error(async () => { await env.before(); chosenView = b.dataset.view; render(); showAgendaDate(); }));
         host.querySelectorAll('[data-period]').forEach(b => b.onclick = () => env.error(async () => { await env.before(); if (b.dataset.period === 'today')
             anchor = calendarDate(dayKey(new Date()));
         else {
@@ -106,7 +113,8 @@ export function createCalendar(env) {
                 anchor = new Date(anchor.getFullYear(), anchor.getMonth() + n, 1);
             else
                 anchor = addDays(anchor, n * (view === 'week' ? 7 : 1));
-        } render(); }));
+        } render(); if (b.dataset.period === 'today')
+            showAgendaDate(); }));
         host.querySelectorAll('[data-source]').forEach(b => b.onchange = () => { if (b.checked)
             hidden.delete(b.dataset.source);
         else
@@ -116,6 +124,7 @@ export function createCalendar(env) {
         if (focusAttribute)
             host.querySelector(`[${focusAttribute.name}="${CSS.escape(focusAttribute.value)}"]`)?.focus({ preventScroll: true });
     }
+    function showAgendaDate() { document.querySelector('[data-agenda-date]')?.scrollIntoView({ block: 'nearest' }); }
     function ensureVisible(id, reveal = false) { if (reveal) {
         const item = env.allRows().find(r => r.id === id);
         if (item)
@@ -139,5 +148,5 @@ export function createCalendar(env) {
         hidden.clear();
         view.hidden.forEach(source => hidden.add(source));
     }
-    return { render, ensureVisible, isVisible, position, restorePosition };
+    return { render, showAgendaDate, ensureVisible, isVisible, position, restorePosition };
 }

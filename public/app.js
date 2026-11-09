@@ -1168,7 +1168,7 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
         if (!state.current && selectFirst)
             state.current = navigableRows()[0] || null;
     }
-    if (enteringApp) {
+    if (enteringApp && app !== 'calendar') {
         const rows = navigableRows();
         state.current = rows.find(r => r.id === (preferId || lastSelectedItems.get(app))) || rows[0] || null;
     }
@@ -1198,6 +1198,8 @@ async function load(preferId, { selectFirst = true, preserveSelection = false, e
     }
     else
         renderWorkspace(navigation?.mailReader ?? readerSnapshot, !!navigation);
+    if (enteringApp && app === 'calendar' && !state.current)
+        calendar.showAgendaDate();
     restoreSidebar();
     if (focusedId)
         document.querySelector(`#items [data-id="${CSS.escape(focusedId)}"]`)?.focus({ preventScroll: true });
@@ -1305,7 +1307,7 @@ async function navigateBack() {
 }
 function backFromMobileItem() {
     const entry = navigationHistory.at(-1);
-    return entry?.returnToOrigin && entry.id === mobileBackId ? navigateBack() : backToMobileList();
+    return entry?.returnToOrigin && entry.id === mobileBackId ? navigateBack() : returnToItemList();
 }
 function showMobileMenu(open, restoreFocus = false) {
     const trigger = document.querySelector('#mobile-menu');
@@ -1336,8 +1338,9 @@ function applyMobilePane() {
     if (back)
         back.title = label;
 }
-async function backToMobileList() {
+async function returnToItemList() {
     await waitForAttachments();
+    const calendarEventId = state.app === 'calendar' ? state.current?.id : undefined;
     await leaveEditor();
     const entry = navigationHistory.at(-1);
     if (entry && entry.id === mobileBackId && !entry.returnToOrigin)
@@ -1348,18 +1351,25 @@ async function backToMobileList() {
         state.current = null;
     setItemFullScreen(false);
     renderDetail();
+    if (state.app === 'calendar') {
+        const timeGrid = document.querySelector('.calendar-time-scroll');
+        const left = timeGrid?.scrollLeft ?? 0, top = timeGrid?.scrollTop ?? 0;
+        renderList();
+        document.querySelector('.calendar-time-scroll')?.scrollTo(left, top);
+    }
     setMode('normal');
     lastPane = 'list';
     const position = mobileListPosition;
     mobileListPosition = undefined;
     const list = mobileListScroller();
-    if (position?.context === mobileListContext() && list) {
+    const sameList = position?.context === mobileListContext();
+    if (sameList && list)
         list.scrollTop = position.top;
-        const row = position.id && list.querySelector(`[data-id="${CSS.escape(position.id)}"]`);
-        if (row) {
-            row.focus({ preventScroll: true });
-            return;
-        }
+    const rowId = calendarEventId ?? (sameList ? position.id : undefined);
+    const row = rowId && list?.querySelector(`[data-id="${CSS.escape(rowId)}"]`);
+    if (row) {
+        row.focus({ preventScroll: true });
+        return;
     }
     focusList();
 }
@@ -1804,7 +1814,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
         const close = document.createElement('button');
         close.textContent = 'Close event';
         close.className = 'calendar-close';
-        close.onclick = () => void attempt(async () => { await leaveEditor(); state.current = null; renderDetail(); renderList(); document.querySelector('#items button')?.focus(); });
+        close.onclick = () => void attempt(returnToItemList);
         panel.prepend(close);
         const allDay = form?.querySelector('[name="allDay"]');
         if (allDay)
@@ -2980,7 +2990,7 @@ async function handleClick(event) {
             const app = button.dataset.app;
             if (phoneLayout.matches && app === state.app && !appEntryVisible()) {
                 if (mobileItemOpen)
-                    await backToMobileList();
+                    await returnToItemList();
                 showMobileMenu(false, true);
             }
             else if (!phoneLayout.matches && app === 'mail' && state.app === app && !appEntryVisible() && button.closest('.sidebar-collapsed')) {
@@ -4392,6 +4402,12 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         return;
     }
+    if (event.key === 'Escape' && state.app === 'calendar' && state.current && !event.isComposing) {
+        event.preventDefault();
+        if (!event.repeat)
+            void attempt(returnToItemList);
+        return;
+    }
     const inSidebar = !!target.closest('.sidebar');
     if (inSidebar && event.key !== ':' && event.key !== 'g' && !appJump) {
         keySequence = '';
@@ -4627,7 +4643,7 @@ document.addEventListener('keydown', event => {
         event.preventDefault();
         void attempt(async () => {
             if (phoneLayout.matches && mobileItemOpen)
-                await backToMobileList();
+                await returnToItemList();
             setItemFullScreen(false);
             if (phoneLayout.matches && state.app === 'calendar')
                 setDisclosure(document.querySelector('#mobile-header-more'), true);
