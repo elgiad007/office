@@ -776,30 +776,20 @@ function setupTopAgenda() {
 }
 function setMailFolderPanel(open, restoreFocus = false) {
     const shell = root.querySelector('.shell');
-    const trigger = shell.querySelector('[data-app="mail"]');
+    const trigger = shell.querySelector('#desktop-mail-folders');
     const panel = shell.querySelector('#mail-folder-navigation');
-    if (phoneLayout.matches) {
-        shell.classList.remove('folders-open');
-        trigger.removeAttribute('aria-controls');
-        trigger.removeAttribute('aria-expanded');
-        return;
-    }
-    const collapsed = shell.classList.contains('sidebar-collapsed');
+    const available = trigger && !phoneLayout.matches && shell.classList.contains('sidebar-collapsed') && state.app === 'mail';
+    open = open && !!available;
     const wasOpen = shell.classList.contains('folders-open');
     shell.classList.toggle('folders-open', open);
-    if (collapsed) {
-        trigger.setAttribute('aria-controls', panel.id);
-        trigger.setAttribute('aria-expanded', String(open));
-    }
-    else {
-        trigger.removeAttribute('aria-controls');
-        trigger.removeAttribute('aria-expanded');
-    }
+    trigger?.setAttribute('aria-expanded', String(open));
     if (open) {
-        panel.style.setProperty('--folder-flyout-top', `${trigger.getBoundingClientRect().top}px`);
+        const bounds = trigger.getBoundingClientRect();
+        panel.style.setProperty('--folder-flyout-top', `${bounds.bottom + 4}px`);
+        panel.style.setProperty('--folder-flyout-left', `${bounds.left}px`);
         panel.querySelector('#mail-folder')?.focus({ preventScroll: true });
     }
-    else if (wasOpen && restoreFocus) {
+    else if (available && wasOpen && restoreFocus) {
         trigger.focus({ preventScroll: true });
     }
 }
@@ -1435,6 +1425,7 @@ function toggleItemFullScreen() {
 function renderWorkspace(readerSnapshot, restoringNavigation = false) {
     renderAppHeader();
     const previousFolderActions = captureFolderActions();
+    const restoreFolderButton = document.activeElement?.id === 'desktop-mail-folders';
     const a = apps[state.app];
     if (state.app === 'calendar') {
         document.querySelector('#main').innerHTML = `<div class="calendar-workspace">${mobileItemControls}<section id="calendar-surface"></section>${itemPane('Selected event', true)}</div>`;
@@ -1445,7 +1436,9 @@ function renderWorkspace(readerSnapshot, restoringNavigation = false) {
         renderDetail();
         return;
     }
-    document.querySelector('#main').innerHTML = `<div class="work-grid">${mobileItemControls}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${state.app === 'mail' ? `<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>` : ''}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected ' + a.singular)}</div>`;
+    const folderButtons = state.app === 'mail' ? `<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>
+    <button type="button" id="desktop-mail-folders" data-action="toggle-mail-folders" aria-label="Folders" title="Folders" aria-controls="mail-folder-navigation" aria-expanded="${!!root.querySelector('.folders-open')}">${mobileIcon('folder')}</button>` : '';
+    document.querySelector('#main').innerHTML = `<div class="work-grid">${mobileItemControls}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${folderButtons}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected ' + a.singular)}</div>`;
     panelSizing.bindList(document.querySelector('[data-resize-panel="list"]'));
     document.querySelector('#search').oninput = event => { state.search = event.target.value; mailListLimit = 100; renderList(); };
     if (state.app === 'tasks')
@@ -1491,6 +1484,8 @@ function renderWorkspace(readerSnapshot, restoringNavigation = false) {
     }
     renderList();
     renderDetail(readerSnapshot);
+    if (restoreFolderButton)
+        document.getElementById('desktop-mail-folders')?.focus({ preventScroll: true });
 }
 let mailListLimit = 100;
 let mailViewSave = Promise.resolve();
@@ -2988,11 +2983,8 @@ async function handleClick(event) {
                     await backToMobileList();
                 showMobileMenu(false, true);
             }
-            else if (!phoneLayout.matches && app === 'mail' && button.closest('.sidebar-collapsed')) {
-                if (state.app === app && !appEntryVisible())
-                    setMailFolderPanel(!button.closest('.folders-open'));
-                else if (await changeApp(app, true) && button.closest('.sidebar-collapsed'))
-                    setMailFolderPanel(true);
+            else if (!phoneLayout.matches && app === 'mail' && state.app === app && !appEntryVisible() && button.closest('.sidebar-collapsed')) {
+                setMailFolderPanel(false);
             }
             else
                 await changeApp(app, event.detail === 0 && document.activeElement === button);
@@ -3063,6 +3055,10 @@ async function handleClick(event) {
         }
         if (action === 'connections') {
             await connections.view(true);
+            return;
+        }
+        if (action === 'toggle-mail-folders') {
+            setMailFolderPanel(!button.closest('.folders-open'));
             return;
         }
         if (action === 'close-mail-folders')
@@ -4758,7 +4754,7 @@ document.addEventListener('pointerdown', event => {
     state.lastActivity = Date.now();
     if (event.target.closest('[data-mobile-menu-backdrop]'))
         showMobileMenu(false, true);
-    if (document.querySelector('.folders-open') && !event.target.closest('#mail-folder-navigation,[data-app="mail"]'))
+    if (document.querySelector('.folders-open') && !event.target.closest('#mail-folder-navigation,#desktop-mail-folders'))
         setMailFolderPanel(false);
 }, { passive: true });
 document.addEventListener('wheel', () => state.lastActivity = Date.now(), { passive: true });

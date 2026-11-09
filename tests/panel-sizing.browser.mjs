@@ -22,6 +22,7 @@ export async function testPanelSizing(page, url) {
   const sidebar = page.getByRole('separator', {name: 'Application sidebar width'});
   const list = page.getByRole('separator', {name: 'Item list width'});
   const mail = page.getByRole('button', {name: 'Mail', exact: true});
+  const folderButton = page.getByRole('button', {name: 'Folders', exact: true});
   const folders = page.locator('#mail-folder-navigation');
   const drag = async (splitter, delta) => {
     const {x, y, width, height} = await splitter.boundingBox();
@@ -106,26 +107,39 @@ export async function testPanelSizing(page, url) {
     assert.equal(await width('#item-list-pane'), 180);
 
     kind = 'mail';
-    await mail.press('Enter');
+    await mail.click();
+    await page.locator('#items [data-id$="false"]').waitFor();
+    assert.equal(await folders.isVisible(), false);
+    assert.equal(await mail.getAttribute('aria-expanded'), null);
+    assert.equal(await folderButton.getAttribute('aria-expanded'), 'false');
+    await mail.click();
+    assert.equal(await folders.isVisible(), false);
+    await folderButton.press('Enter');
     await folders.waitFor({state: 'visible'});
-    assert.equal(await mail.getAttribute('aria-expanded'), 'true');
+    assert.equal(await folderButton.getAttribute('aria-expanded'), 'true');
+    assert.ok((await folders.boundingBox()).y >= (await folderButton.boundingBox()).y + (await folderButton.boundingBox()).height);
     assert.equal(await page.locator('#mail-folder').evaluate(node => node === document.activeElement), true);
     await page.keyboard.press('Escape');
-    assert.equal(await mail.evaluate(node => node === document.activeElement), true);
+    assert.equal(await folderButton.evaluate(node => node === document.activeElement), true);
     assert.equal(await folders.isVisible(), false);
-    await mail.click();
+    await folderButton.click();
     await folders.waitFor({state: 'visible'});
     await page.locator('#mail-folder').selectOption('all');
     await folders.waitFor({state: 'hidden'});
-    assert.equal(await mail.getAttribute('aria-expanded'), 'false');
-    await mail.click();
+    assert.equal(await folderButton.getAttribute('aria-expanded'), 'false');
+    assert.equal(await folderButton.evaluate(node => node === document.activeElement), true);
+    await folderButton.click();
+    await folders.waitFor({state: 'visible'});
+    await folderButton.click();
+    assert.equal(await folders.isVisible(), false);
+    await folderButton.click();
     await folders.waitFor({state: 'visible'});
     await page.locator('#mode').click();
     assert.equal(await folders.isVisible(), false);
     await drag(sidebar, 165);
     assert.equal(await width('#app-sidebar'), 230);
     assert.equal(await folders.isVisible(), true);
-    assert.equal(await mail.getAttribute('aria-expanded'), null);
+    assert.equal(await folderButton.isVisible(), false);
 
     await page.getByRole('button', {name: 'Compose', exact: true}).click();
     const draft = page.locator('#detail [name="body"]');
@@ -159,11 +173,23 @@ export async function testPanelSizing(page, url) {
     await sidebar.press('Home');
     kind = 'mail';
     await mail.press('Enter');
+    await folderButton.waitFor();
+    assert.equal(await folders.isVisible(), false);
+    await folderButton.click();
     await folders.getByText('Test account', {exact: true}).click();
     await folders.getByRole('button', {name: 'Office', exact: true}).click();
     await folders.waitFor({state: 'hidden'});
-    await page.getByText('Test account / Projects/Office', {exact: true}).waitFor();
-    assert.equal(await mail.evaluate(node => node === document.activeElement), true);
+    await page.locator('.folder-current-heading').filter({hasText: 'Test account / Projects/Office'}).waitFor();
+    await page.waitForFunction(() => document.activeElement?.id === 'desktop-mail-folders');
+
+    await page.setViewportSize({width: 390, height: 844});
+    await page.locator('[data-action="mobile-folders"]').waitFor();
+    assert.equal(await page.locator('#desktop-mail-folders').isVisible(), false);
+    assert.equal(await folders.isVisible(), false);
+    await folderButton.click();
+    await folders.waitFor({state: 'visible'});
+    await page.keyboard.press('Escape');
+    await folders.waitFor({state: 'hidden'});
   } finally {
     await page.evaluate(() => {
       localStorage.removeItem('office-panel-width-sidebar');

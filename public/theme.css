@@ -519,18 +519,31 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .sidebar-collapsed.folders-open .sidebar { z-index: 3; }
 .sidebar-collapsed .sidebar :is(.brand, .nav-label, .privacy-note, .nav > button span, .nav > button kbd) { display: none; }
 .sidebar-collapsed .sidebar .nav > button { justify-content: center; padding-inline: 0; }
+#desktop-mail-folders { display: none; }
+@media screen and (min-width: 801px) and (not ((max-width: 950px) and (max-height: 550px) and (pointer: coarse))) {
+  .sidebar-collapsed .search-wrap:has(#desktop-mail-folders) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 8px;
+  }
+  .sidebar-collapsed #desktop-mail-folders { display: inline-flex; padding: 6px; }
+  #desktop-mail-folders svg { display: block; }
+  #desktop-mail-folders[aria-expanded="true"] { background: var(--wash); }
+  .sidebar-collapsed .search-wrap .folder-current { grid-column: 1 / -1; }
+}
 .sidebar-collapsed #mail-folder-navigation {
   display: none;
   position: fixed;
-  top: clamp(8px, var(--folder-flyout-top, 16px), 40vh);
-  left: 65px;
-  width: min(290px, calc(100vw - 77px));
-  max-height: calc(60vh - 12px);
+  top: var(--folder-flyout-top, 16px);
+  left: var(--folder-flyout-left, 65px);
+  width: min(290px, calc(100vw - var(--folder-flyout-left, 65px) - 12px));
+  max-height: min(60vh, calc(100dvh - var(--folder-flyout-top, 16px) - 12px));
   margin: 0;
   padding: 14px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
   background: var(--side);
   box-shadow: var(--shadow);
   z-index: 15;
