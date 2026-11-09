@@ -1,6 +1,7 @@
 /data/*
 !/data/.gitkeep
 /.runtime/
+/.office-update/
 /test-results/
 /node_modules/
 *.log

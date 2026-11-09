@@ -124,6 +124,8 @@ export interface MutationResult { record: OfficeRecord; removedIds?: string[] }
 export interface MailActionResult { record: OfficeRecord | null; removedIds?: string[]; undoToken?: string }
 export interface ApiError extends Error { status?: number; code?: string; record?: OfficeRecord }
 export interface ApiResponses {
+  'update-check': {installed: string;latest: string | null;available: boolean;canInstall: boolean;download: string | null;notes: string | null};
+  'update-install': {job: string};
   'connection': {ok: boolean;changed?:number};
   status: Status;
   accounts: { accounts: Account[] };

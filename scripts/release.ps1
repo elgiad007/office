@@ -3,7 +3,9 @@ param(
     [string]$WindowsRuntimeArchive,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedSha256,
     [string]$ApacheRuntimeArchive,
-    [string]$ApacheExpectedSha256
+    [string]$ApacheExpectedSha256,
+    [string]$ReleasePublicKeyFile,
+    [string]$SigningKeyFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,9 +14,11 @@ if (!$WindowsRuntimeArchive) { $WindowsRuntimeArchive = Join-Path $officeRoot '.
 if ([bool]$ApacheRuntimeArchive -ne [bool]$ApacheExpectedSha256) {
     throw 'Supply both the Apache archive and its publisher SHA-256 to include Apache.'
 }
+if ([bool]$ReleasePublicKeyFile -ne [bool]$SigningKeyFile) { throw 'Supply both release signing key files, or omit both for a manual release.' }
+if ($SigningKeyFile -and $PSVersionTable.PSVersion.Major -lt 7) { throw 'Signed release builds require PowerShell 7.' }
 
 $version = (Get-Content -LiteralPath (Join-Path $officeRoot 'app/VERSION') -Raw).Trim()
-if ($version -cnotmatch '\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z') {
+if ($version -cnotmatch '\A(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\z') {
     throw 'Set app/VERSION to a major.minor.patch version, such as 0.1.0.'
 }
 $tag = "v$version"
@@ -33,17 +37,42 @@ $windowsOptions = @{
     ApacheRuntimeArchive = $ApacheRuntimeArchive
     ApacheExpectedSha256 = $ApacheExpectedSha256
     DestinationPath = Join-Path $staging $windowsZip
+    ReleasePublicKeyFile = $ReleasePublicKeyFile
 }
 
 & $packager @windowsOptions
-& $packager -DestinationPath (Join-Path $staging $hostingZip)
+& $packager -DestinationPath (Join-Path $staging $hostingZip) -ReleasePublicKeyFile $ReleasePublicKeyFile
 
-$checksums = foreach ($asset in @($hostingZip, $windowsZip)) {
-    $hash = (Get-FileHash -LiteralPath (Join-Path $staging $asset) -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$hash  $asset"
+$assets=@{}
+$checksums = foreach ($platform in @('hosting','windows')) {
+    $name="portable-office-$tag-$platform.zip"
+    $file=Get-Item -LiteralPath (Join-Path $staging $name)
+    $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $assets[$platform]=@{sha256=$hash;size=$file.Length}
+    "$hash  $name"
 }
 $checksums | Set-Content -LiteralPath (Join-Path $staging 'SHA256SUMS.txt') -Encoding Ascii
+if ($SigningKeyFile) {
+    $payload=[Text.Encoding]::UTF8.GetBytes((@{format=1;version=$version;assets=$assets} | ConvertTo-Json -Depth 5 -Compress))
+    $signer=[Security.Cryptography.RSA]::Create()
+    $verifier=[Security.Cryptography.RSA]::Create()
+    try {
+        $signer.ImportFromPem((Get-Content -Raw -LiteralPath $SigningKeyFile))
+        $verifier.ImportFromPem((Get-Content -Raw -LiteralPath $ReleasePublicKeyFile))
+        $algorithm=[Security.Cryptography.HashAlgorithmName]::SHA256
+        $padding=[Security.Cryptography.RSASignaturePadding]::Pkcs1
+        $signature=$signer.SignData($payload,$algorithm,$padding)
+        if ($signer.KeySize -lt 3072 -or !$verifier.VerifyData($payload,$signature,$algorithm,$padding)) {
+            throw 'Use a matching RSA signing key pair of at least 3072 bits.'
+        }
+        @{payload=[Convert]::ToBase64String($payload);signature=[Convert]::ToBase64String($signature)} |
+            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $staging 'office-update.json') -Encoding Ascii
+    } finally {
+        $signer.Dispose()
+        $verifier.Dispose()
+    }
+}
 [IO.Directory]::Move($staging, $release)
 
 Write-Host "Suggested GitHub tag: $tag"
-Write-Host "Upload the ZIPs and SHA256SUMS.txt from $release"
+Write-Host "Upload the ZIPs, SHA256SUMS.txt, and office-update.json (if signed) from $release"

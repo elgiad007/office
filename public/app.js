@@ -2792,7 +2792,7 @@ function resolveAccount(accounts, query) {
 }
 async function syncAccounts(manual = true, accountQuery) {
     const accounts = accountQuery === undefined ? [...state.accounts] : [resolveAccount(state.accounts, accountQuery)];
-    if (state.syncing || document.hidden || (!manual && Date.now() - state.lastActivity > 120000))
+    if (updateInstalling || state.syncing || document.hidden || (!manual && Date.now() - state.lastActivity > 120000))
         return;
     if (!accounts.length) {
         if (manual) {
@@ -3551,7 +3551,98 @@ function renderJunkSettings() {
     select.onchange = () => void render();
     void render();
 }
-const settingsPages = [['appearance', 'Appearance'], ['mail', 'Mail'], ['mail-rules', 'Mail Rules'], ['accounts', 'Accounts'], ['activity-log', 'Activity Log'], ['connections', 'Connections'], ['keyboard', 'Keyboard'], ['backups', 'Backups'], ['swipe', 'Swipe Actions']];
+const settingsPages = [['appearance', 'Appearance'], ['mail', 'Mail'], ['mail-rules', 'Mail Rules'], ['accounts', 'Accounts'], ['activity-log', 'Activity Log'], ['connections', 'Connections'], ['keyboard', 'Keyboard'], ['backups', 'Backups'], ['swipe', 'Swipe Actions'], ['updates', 'Updates']];
+let updateInstalling = false;
+let updateChecking = false;
+let updateRelease;
+let updateMessage = '';
+function renderUpdateStatus() {
+    const panel = document.querySelector('#settings-updates');
+    if (!panel)
+        return;
+    panel.querySelector('#update-status').textContent = updateMessage;
+    panel.querySelector('#check-update').disabled = updateChecking || updateInstalling;
+    const release = updateRelease;
+    const notes = panel.querySelector('#update-notes');
+    const download = panel.querySelector('#update-download');
+    const install = panel.querySelector('#install-update');
+    notes.hidden = !release?.notes;
+    download.hidden = !release?.download;
+    install.hidden = !release?.canInstall;
+    install.disabled = !release?.canInstall || updateInstalling || updateChecking;
+    if (release?.notes)
+        notes.href = release.notes;
+    if (release?.download)
+        download.href = release.download;
+}
+async function checkOfficeUpdate() {
+    updateChecking = true;
+    updateRelease = undefined;
+    updateMessage = 'Checking for updates…';
+    renderUpdateStatus();
+    try {
+        updateRelease = await api('update-check');
+        const { latest, available, canInstall } = updateRelease;
+        updateMessage = available
+            ? `Office ${latest} is available. ${canInstall ? 'Install it when you’re ready to restart.' : 'Download the package to update this installation.'}`
+            : latest ? 'Office is up to date.' : 'No signed update is available. You can check GitHub Releases.';
+    }
+    catch (cause) {
+        updateMessage = asError(cause).message;
+    }
+    finally {
+        updateChecking = false;
+        renderUpdateStatus();
+    }
+}
+async function installOfficeUpdate(version) {
+    await leaveEditor();
+    if (state.syncing || pendingWrites || mailAccountQueue.size)
+        throw Error('Wait for current Office operations to finish, then try again.');
+    updateInstalling = true;
+    updateMessage = 'Preparing the update…';
+    renderUpdateStatus();
+    try {
+        const { job } = await withRecentSignIn(() => api('update-install', { version }));
+        const phaseMessages = {
+            downloading: 'Downloading and verifying the Windows release…',
+            waiting: 'Waiting for active requests to finish…',
+            installing: 'Creating a recovery snapshot and restarting Office…',
+        };
+        const deadline = Date.now() + 15 * 60 * 1000;
+        while (Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            let phase;
+            try {
+                const response = await fetch('api.php?r=update-progress&job=' + encodeURIComponent(job), { cache: 'no-store', signal: AbortSignal.timeout(4000) });
+                if (response.ok)
+                    phase = (await response.json()).phase;
+            }
+            catch { /* The local server is briefly offline during restart. */ }
+            if (phase === 'complete') {
+                if (state.dirty || state.savePromise)
+                    updateMessage = 'Office updated. Reload this tab after saving your edits.';
+                else
+                    location.reload();
+                return;
+            }
+            if (phase === 'failed')
+                throw Error('The update did not finish. Office kept or restored the previous version. See the private update log for details.');
+            if (phase === 'recovery')
+                throw Error('The update needs recovery. Follow the Windows recovery instructions in the Office README.');
+            updateMessage = phaseMessages[phase ?? ''] ?? 'Waiting for Office to come back online…';
+            renderUpdateStatus();
+        }
+        throw Error('The update did not report a result. Check the Windows update log and recovery instructions.');
+    }
+    catch (cause) {
+        updateMessage = cause instanceof DraftCancelled ? 'Update cancelled.' : asError(cause).message;
+    }
+    finally {
+        updateInstalling = false;
+        renderUpdateStatus();
+    }
+}
 const settingsPageKey = 'office-settings-page';
 let settingsPage = 'appearance';
 try {
@@ -3659,6 +3750,14 @@ function renderSettings(entryVersion) {
     <section class="settings-grid" id="settings-backups" data-settings-page="backups"${settingsPage === 'backups' ? '' : ' hidden'}>
       <section class="card"><h2>Backups</h2><p>SQLite backups include local records, cached messages, saved attachments, revisions, connections and preferences. Account credentials and your password are excluded.</p><button id="backup">Prepare backup</button> <button id="backup-download" hidden>↓ Download SQLite backup</button><div><progress id="backup-progress" aria-label="Backup progress" hidden></progress><div id="backup-status" role="status"></div></div><p>Restore a SQLite or JSON backup into an empty installation. Synced copies become local archives. Reconnect provider accounts after restoring.</p><button id="restore">↑ Restore backup</button></section>
     </section>
+    <section class="settings-grid" id="settings-updates" data-settings-page="updates"${settingsPage === 'updates' ? '' : ' hidden'}>
+      <section class="card"><h2>Office updates</h2>
+        <p>Installed version ${e(document.querySelector('meta[name="office-version"]')?.content || 'unknown')}</p>
+        <div class="actions"><button id="check-update">Check for updates</button> <button class="primary" id="install-update" hidden>Install and restart</button></div>
+        <p id="update-status" role="status"></p>
+        <p><a id="update-download" hidden>Download ZIP</a> <a id="update-notes" target="_blank" rel="noopener noreferrer" hidden>Release notes</a> <a href="https://github.com/elgiad007/office/releases" target="_blank" rel="noopener noreferrer">GitHub Releases</a></p>
+      </section>
+    </section>
     <section class="settings-grid" id="settings-swipe" data-settings-page="swipe"${settingsPage === 'swipe' ? '' : ' hidden'}>
       <section class="card"><h2>Swipe actions</h2><p>Swipe across a row on a touchscreen or with a pen. Move to folder opens the folder picker for synced mail.</p>
         <form id="swipe-preferences">
@@ -3749,6 +3848,13 @@ function renderSettings(entryVersion) {
             download(preparedBackup.name, preparedBackup.file, sqliteBackupType);
     };
     renderBackupStatus();
+    main.querySelector('#check-update').onclick = () => void checkOfficeUpdate();
+    main.querySelector('#install-update').onclick = () => {
+        const version = updateRelease?.latest;
+        if (version && updateRelease?.canInstall && !updateInstalling)
+            confirmation('Install Office ' + version, 'Office will restart after downloading the update. Save any open edits in other Office tabs first.', () => installOfficeUpdate(version), 'Install and restart');
+    };
+    renderUpdateStatus();
     document.querySelector('#restore').onclick = () => void attempt(() => importFile(true));
     document.querySelector('#add-account').onclick = accountDialog;
     document.querySelector('#keep-recovery').onchange = event => void attempt(async () => { state.prefs = { ...state.prefs, keepRecoveryCopies: event.target.checked }; await api('preferences', { preferences: state.prefs }); notice('Recovery preference saved.'); });

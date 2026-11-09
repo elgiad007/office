@@ -15,9 +15,10 @@ require dirname(__DIR__).'/app/backup.php';
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
     if (PHP_VERSION_ID<80200 || !extension_loaded('pdo_sqlite')) fail('Requires PHP 8.2+ and PDO SQLite. Enable these in cPanel.',503);
-    start_session();
     $route=$_GET['r']??'status'; $method=$_SERVER['REQUEST_METHOD'];
     if (!is_string($route)) fail('Invalid route.');
+    if ($route==='update-progress' && $method==='GET') json_response(office_update_progress($_GET['job']??null));
+    start_session();
     if ($route==='status' && $method==='GET') {
         $ready=setting('owner')!==null; if (!$ready) setup_token();
         $authenticated=!empty($_SESSION['owner']);
@@ -80,9 +81,21 @@ try {
         json_response(['ok'=>true]);
     }
     if (($route==='backup' && $method==='GET') ||
+        ($route==='update-install' && $method==='POST') ||
         ($route==='mail-empty-junk' && $method==='POST' && ($input['action']??null)==='empty') ||
         ($route==='google-connect' && $method==='POST' && ($input['permanentDelete']??false)===true)) {
         require_recent_sign_in();
+    }
+    if ($route==='update-check' && $method==='GET') {
+        session_write_close();
+        try { json_response(office_update_check()); }
+        catch (RuntimeException $error) { fail($error->getMessage(),503); }
+    }
+    if ($route==='update-install' && $method==='POST') {
+        session_write_close();
+        try { json_response(['job'=>office_queue_update($input['version']??null)],202); }
+        catch (HttpError $error) { throw $error; }
+        catch (RuntimeException $error) { fail($error->getMessage(),503); }
     }
     if($route==='connection-search' && $method==='GET') {
         session_write_close();

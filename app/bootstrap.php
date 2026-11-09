@@ -5,6 +5,8 @@ const KINDS = ['tasks', 'contacts', 'calendar', 'documents', 'wiki', 'sheets', '
 require_once __DIR__.'/attachments.php';
 require_once __DIR__.'/connections.php';
 require_once __DIR__.'/mail-index.php';
+require_once __DIR__.'/updates.php';
+office_update_request_gate();
 
 function data_dir(): string {
     $dir = getenv('OFFICE_DATA_DIR') ?: dirname(__DIR__) . '/data';

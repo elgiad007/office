@@ -39,6 +39,26 @@ For an internet-facing installation, redirect HTTP to HTTPS at the web server an
 
 Elapsed time appears in parentheses beside timestamps by default, using “now” for less than a minute, then minutes, hours or days (for example, `Nov 4, 10:30 AM (5 minutes ago)`). Disable **Show elapsed time beside dates** in **Settings → Look & feel**. Labels refresh once per minute while the page is visible; original dates remain available.
 
+## Update Office
+
+Open **Settings → Updates → Check for updates** to compare your version with the latest signed release. The screen links to the release notes and the ZIP for your installation. Older installations and unsigned builds need a one-time manual upgrade to a signed package to enable these checks.
+
+- **Windows.** Start the signed portable release with **Start Office.bat**. Save open edits in every Office tab before selecting **Install and restart**. Office verifies the downloaded ZIP, waits for active PHP requests to finish, and restarts on the same port. It snapshots the private data directory before starting the new version and restores the old code and data if startup fails. The installer keeps a separately installed Apache runtime when the new ZIP omits it.
+- **cPanel or Linux.** Download the hosting ZIP. Stage it outside the document root, pause access and drain the PHP workers before replacing the application files. Preserve the private `data/` directory (or the directory configured by `OFFICE_DATA_DIR`) and the domain’s `public/` document root. Keep a private copy of the stopped installation’s data and previous release files before starting the new version. A hosting administrator performs the deployment.
+
+For the one-time Windows upgrade, stop the old copy with **Stop Office.bat**, extract the signed ZIP to a new folder, and copy the old installation’s `data/` into the new folder before starting it.
+
+### Recover an interrupted Windows update
+
+An update keeps its log and any recovery snapshot in `.office-update/<job>/` next to the Office launchers. These folders can contain private workspace data and credentials. Keep them outside the public web root. Once you have verified the upgrade and no longer need its snapshot, you can remove the completed job folder.
+
+If an update was interrupted and Office is still unavailable, open PowerShell in the installation folder. The following command uses the pending job’s recovery script to restore the previous installation or finish clearing a completed update. If the updater is still running, the recovery script will report that its lock is in use.
+
+```powershell
+$job = (Get-Content -Raw -LiteralPath '.office-update/pending').Trim()
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".office-update/$job/recover.ps1" -Job $job -Recover
+```
+
 ## What works in this version
 
 - One-owner login, token-protected setup, CSRF-protected writes, and local encrypted provider credentials. Sessions expire after one hour without user interaction or 12 hours after sign-in. Background polling and sync do not extend the idle deadline. Workspace backups and permanent Junk/Spam deletion require password verification within the previous five minutes. Upgrading from an older version requires signing in again.
@@ -255,6 +275,10 @@ You can also run the release builder from PowerShell:
 Use `-WindowsRuntimeArchive` to select a different PHP ZIP. To bundle portable Apache in the Windows ZIP, also supply `-ApacheRuntimeArchive` and `-ApacheExpectedSha256`.
 
 For version `0.1.0`, upload `portable-office-v0.1.0-hosting.zip`, `portable-office-v0.1.0-windows.zip`, and `SHA256SUMS.txt` from `dist/release-v0.1.0/`. Use tag `v0.1.0` and select the commit that matches the packaged files. To rebuild the same version, move its existing release folder first.
+
+For signed releases, configure the GitHub Actions `office-release` environment with an `OFFICE_RELEASE_PRIVATE_KEY` secret and an `OFFICE_RELEASE_PUBLIC_KEY` variable. Use a matching RSA PEM key pair of at least 3072 bits and keep the private key outside the repository. The public key ships in both packages. Keep it stable across releases so installed copies can verify updates.
+
+Commit the new `app/VERSION` and push its matching tag (for example, `v0.1.1`). The release workflow tests and packages the tagged code, signs the manifest, and publishes the two ZIPs, `SHA256SUMS.txt`, and `office-update.json` to GitHub Releases. To build the same signed artifacts locally in PowerShell 7, pass `-ReleasePublicKeyFile` and `-SigningKeyFile` to `scripts/release.ps1`.
 
 See [the implementation plan](docs/implementation-plan.md) for staged work and acceptance criteria. No real-account or shared-host compatibility is implied by local tests.
 

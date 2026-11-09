@@ -402,6 +402,8 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .settings-grid { grid-template-columns: minmax(0, 1fr); }
 .settings-grid[hidden] { display: none; }
 #backup-download[hidden] { display: none; }
+#settings-updates [hidden] { display: none; }
+#settings-updates .actions { margin-bottom: 12px; }
 #backup-progress { accent-color: var(--accent); }
 #backup-status:not(:empty) { margin-block: 8px; }
 .settings-grid:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

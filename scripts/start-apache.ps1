@@ -2,6 +2,10 @@ param([ValidateRange(1024,65535)][int]$Port=8765,[switch]$NoBrowser,
     [string]$DataDirectory,[string]$PublicDirectory)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$officeMaintenance=Join-Path $officeRoot '.office-update/maintenance'
+if ((Test-Path -LiteralPath $officeMaintenance) -and $env:OFFICE_UPDATE_HEALTH -cne [IO.File]::ReadAllText($officeMaintenance)) {
+    throw 'An Office update is in progress. See the Windows update recovery instructions in README.md.'
+}
 $officeApacheRoot=Join-Path $officeRoot 'runtime\apache\Apache24'
 $officeHttpd=Join-Path $officeApacheRoot 'bin\httpd.exe'
 $officePhp=Join-Path $officeRoot 'runtime\windows\php-cgi.exe'
@@ -31,6 +35,7 @@ try{$officeListener.Start()}finally{$officeListener.Stop()}
 $officeConfig=Join-Path $officeData 'apache-local.conf'
 $officeWorkers=@();$officeReservations=@();$officeProcesses=@();$officeStarted=$null
 $officeOldData=$env:OFFICE_DATA_DIR;$officeOldRequests=$env:PHP_FCGI_MAX_REQUESTS
+$officeOldPortable=$env:OFFICE_PORTABLE_WINDOWS
 function ApachePath([string]$Value){return $Value.Replace('\','/')}
 try {
     # Separate CGI processes provide concurrency with the existing NTS PHP build.
@@ -89,6 +94,7 @@ $officeMembers
     & $officeHttpd -d $officeApacheRoot -f $officeConfig -t
     if($LASTEXITCODE -ne 0){throw 'Apache configuration check failed.'}
     $env:OFFICE_DATA_DIR=$officeData;$env:PHP_FCGI_MAX_REQUESTS='0'
+    $env:OFFICE_PORTABLE_WINDOWS=if ($officeData -eq (Join-Path $officeRoot 'data') -and $officePublic -eq (Join-Path $officeRoot 'public')) {'1'} else {''}
     foreach($officeIndex in 0..3){
         $officeReservations[$officeIndex].Stop()
         $officeArgs=@('-c',('"'+(Join-Path $officeRoot 'runtime\windows\php.ini')+'"'),
@@ -105,7 +111,7 @@ $officeMembers
     $officeReady=$false
     foreach($officeAttempt in 1..40){
         foreach($officeProcess in $officeProcesses){if($officeProcess.HasExited){throw 'A server process exited. Check data/apache-error.log and data/php-error.log.'}}
-        try{$officeStatus=Invoke-RestMethod -Uri ($officeUrl+'api.php?r=status') -TimeoutSec 2;if($officeStatus.csrf){$officeReady=$true;break}}catch{$officeLastError=$_.Exception.Message;Start-Sleep -Milliseconds 150}
+        try{$officeStatus=Invoke-RestMethod -Uri ($officeUrl+'api.php?r=status') -Headers @{'X-Office-Update-Health'=[string]$env:OFFICE_UPDATE_HEALTH} -TimeoutSec 2;if($officeStatus.csrf){$officeReady=$true;break}}catch{$officeLastError=$_.Exception.Message;Start-Sleep -Milliseconds 150}
     }
     if(!$officeReady){throw "Apache did not become ready: $officeLastError. Check the private server logs."}
     $officeIdentities=@($officeProcesses|ForEach-Object {
@@ -122,6 +128,7 @@ $officeMembers
 } finally {
     foreach($officeReservation in $officeReservations){$officeReservation.Stop()}
     $env:OFFICE_DATA_DIR=$officeOldData;$env:PHP_FCGI_MAX_REQUESTS=$officeOldRequests
+    $env:OFFICE_PORTABLE_WINDOWS=$officeOldPortable
 }
 Write-Host "Office is running on portable Apache with four PHP workers: $officeUrl"
 if(Test-Path -LiteralPath (Join-Path $officeData 'setup-token.txt')){Write-Host ('Setup token: '+(Get-Content -Raw -LiteralPath (Join-Path $officeData 'setup-token.txt')).Trim())}

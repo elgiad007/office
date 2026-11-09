@@ -2,6 +2,10 @@ param([ValidateRange(1024,65535)][int]$Port = 8765, [switch]$NoBrowser, [switch]
 $ErrorActionPreference = 'Stop'
 try {
     $officeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    $officeMaintenance=Join-Path $officeRoot '.office-update/maintenance'
+    if ((Test-Path -LiteralPath $officeMaintenance) -and $env:OFFICE_UPDATE_HEALTH -cne [IO.File]::ReadAllText($officeMaintenance)) {
+        throw 'An Office update is in progress. See the Windows update recovery instructions in README.md.'
+    }
     if (!$DevelopmentServer -and (Test-Path -LiteralPath (Join-Path $officeRoot 'runtime\apache\Apache24\bin\httpd.exe'))) {
         & (Join-Path $PSScriptRoot 'start-apache.ps1') -Port $Port -NoBrowser:$NoBrowser
         exit
@@ -30,15 +34,20 @@ try {
         $officeArgs = @('-c', ('"' + (Join-Path $officeRoot 'runtime\windows\php.ini') + '"'), '-d', ('extension_dir="' + (Join-Path $officeRoot 'runtime\windows\ext') + '"'), '-d', ('openssl.cafile="' + $officeCaFile + '"'), '-d', ('curl.cainfo="' + $officeCaFile + '"'), '-d', ('error_log="' + (Join-Path $officeData 'php-error.log') + '"'), '-S', "127.0.0.1:$Port", '-t', ('"' + (Join-Path $officeRoot 'public') + '"'))
         # Do not inherit a development/test database path into a user's portable installation.
         $officePreviousData = $env:OFFICE_DATA_DIR
+        $officePreviousPortable = $env:OFFICE_PORTABLE_WINDOWS
         $env:OFFICE_DATA_DIR = $officeData
+        $env:OFFICE_PORTABLE_WINDOWS = '1'
         # A separate hidden console avoids inherited/redirection handles keeping the batch launcher open.
         try { $officeStarted = Start-Process -FilePath $officePhp -ArgumentList $officeArgs -WorkingDirectory $officeRoot -WindowStyle Hidden -PassThru }
-        finally { $env:OFFICE_DATA_DIR = $officePreviousData }
+        finally { $env:OFFICE_DATA_DIR = $officePreviousData; $env:OFFICE_PORTABLE_WINDOWS = $officePreviousPortable }
         @{pid=$officeStarted.Id;port=$Port} | ConvertTo-Json | Set-Content -LiteralPath $officeState -Encoding UTF8
         $officeReady = $false
         for ($officeAttempt=0; $officeAttempt -lt 30; $officeAttempt++) {
             if ($officeStarted.HasExited) { break }
-            try { $officeStatus = Invoke-RestMethod -Uri ($officeUrl+'api.php?r=status') -TimeoutSec 1; if ($officeStatus.csrf) { $officeReady=$true; break } } catch { Start-Sleep -Milliseconds 150 }
+            try {
+                $officeStatus = Invoke-RestMethod -Uri ($officeUrl+'api.php?r=status') -Headers @{'X-Office-Update-Health'=[string]$env:OFFICE_UPDATE_HEALTH} -TimeoutSec 1
+                if ($officeStatus.csrf) { $officeReady=$true; break }
+            } catch { Start-Sleep -Milliseconds 150 }
         }
         if (-not $officeReady) {
             if (-not $officeStarted.HasExited) { $officeStarted.Kill(); $officeStarted.WaitForExit() }

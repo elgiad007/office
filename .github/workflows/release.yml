@@ -1,0 +1,60 @@
+name: Publish Office release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    environment: office-release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - name: Build and sign the release
+        shell: pwsh
+        env:
+          OFFICE_RELEASE_PRIVATE_KEY: ${{ secrets.OFFICE_RELEASE_PRIVATE_KEY }}
+          OFFICE_RELEASE_PUBLIC_KEY: ${{ vars.OFFICE_RELEASE_PUBLIC_KEY }}
+        run: |
+          $version = (Get-Content -Raw app/VERSION).Trim()
+          if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'The tag must match app/VERSION.' }
+          if (!$env:OFFICE_RELEASE_PRIVATE_KEY -or !$env:OFFICE_RELEASE_PUBLIC_KEY) { throw 'Configure the Office release signing keys.' }
+          $phpZip = Join-Path $env:RUNNER_TEMP 'office-php.zip'
+          $phpFile = 'php-8.4.27-1-nts-Win32-vs17-x64.zip'
+          try { Invoke-WebRequest "https://windows.php.net/downloads/releases/$phpFile" -OutFile $phpZip }
+          catch { Invoke-WebRequest "https://windows.php.net/downloads/releases/archives/$phpFile" -OutFile $phpZip }
+          $private = Join-Path $env:RUNNER_TEMP 'office-private.pem'
+          $public = Join-Path $env:RUNNER_TEMP 'office-public.pem'
+          try {
+            [IO.File]::WriteAllText($private,$env:OFFICE_RELEASE_PRIVATE_KEY)
+            [IO.File]::WriteAllText($public,$env:OFFICE_RELEASE_PUBLIC_KEY)
+            ./scripts/release.ps1 -WindowsRuntimeArchive $phpZip `
+              -ExpectedSha256 dbae154a0a89791f36c3d48e68bae797878333e7d6cb5721e74617de59b63ab7 `
+              -ReleasePublicKeyFile $public -SigningKeyFile $private
+          } finally {
+            if ([IO.File]::Exists($private)) { [IO.File]::Delete($private) }
+          }
+      - name: Publish the signed release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $assets = Get-ChildItem "dist/release-$tag" -File | Select-Object -ExpandProperty FullName
+          gh release create $tag @assets --verify-tag --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }

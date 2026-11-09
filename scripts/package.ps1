@@ -1,4 +1,4 @@
-param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256,[string]$ApacheRuntimeArchive,[string]$ApacheExpectedSha256,[string]$DestinationPath)
+param([string]$WindowsRuntimeArchive, [string]$ExpectedSha256,[string]$ApacheRuntimeArchive,[string]$ApacheExpectedSha256,[string]$DestinationPath,[string]$ReleasePublicKeyFile)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 & node (Join-Path $PSScriptRoot 'frontend.mjs') --check
@@ -15,10 +15,19 @@ foreach($officeRuntimeFile in @('php.ini','README.md','cacert.pem')) {
     Copy-Item -LiteralPath (Join-Path $officeRoot ('runtime\windows\'+$officeRuntimeFile)) -Destination (Join-Path $officePackage 'runtime\windows')
 }
 New-Item -ItemType Directory -Path (Join-Path $officePackage 'data') -Force | Out-Null
+if ($ReleasePublicKeyFile) {
+    $publicKey=Get-Content -Raw -LiteralPath $ReleasePublicKeyFile
+    if ($publicKey -cnotmatch '\A\s*-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+-----END PUBLIC KEY-----\s*\z') {
+        throw 'Supply an RSA public key in PEM format.'
+    }
+    $publicKey=$publicKey.Trim().Replace("`r`n","`n")+"`n"
+    [IO.File]::WriteAllText((Join-Path $officePackage 'app/release-key.pem'),$publicKey)
+}
 $officeZipName='portable-office-hosting.zip'
 if ($WindowsRuntimeArchive) {
     if (-not $ExpectedSha256 -or (Get-FileHash -LiteralPath $WindowsRuntimeArchive -Algorithm SHA256).Hash -ne $ExpectedSha256) { throw 'A matching official SHA-256 is required for the Windows runtime archive.' }
     Expand-Archive -LiteralPath $WindowsRuntimeArchive -DestinationPath (Join-Path $officePackage 'runtime\windows') -Force
+    New-Item -ItemType File -Path (Join-Path $officePackage 'app/windows-release') | Out-Null
     $officeZipName='portable-office-windows.zip'
 }
 if($ApacheRuntimeArchive){
