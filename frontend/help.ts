@@ -17,7 +17,7 @@ export function helpEntries(k: Record<string,string>): HelpEntry[] {
   const add=(shortcut: string,action: string,context='Normal mode',options='',...scopes: HelpScope[])=>rows.push({shortcut,action,context,options,scopes});
   add(k.help,'Open keyboard and command help','Normal mode, including Settings','Remappable in Settings.');
   add('g b','Go back to the previous view','Normal mode','Press g then b within 900 ms to retrace app changes and opened items, including links and agenda events.');
-  add(k.down+' / '+k.up,'Next / previous item','Normal mode','Works from the list and nonediting content; scrolls a focused read-only mail body. Use arrows or Tab for spreadsheet cells.','list');
+  add(k.down+' / '+k.up,'Next / previous item','Normal mode','Scrolls a focused wiki page or read-only mail body. Use arrows or Tab for spreadsheet cells.','list');
   add(k.left+' / '+k.right,'Focus the pane to the left / right','Normal mode','Move between the application sidebar, item list, and selected content.');
   add(k.down+' / '+k.up+'; ArrowDown / ArrowUp','Focus next / previous sidebar entry','Application sidebar','Navigate apps, mail accounts, and visible folders. The Mail folder dropdown uses arrow keys to choose a folder.','sidebar');
   add('Enter / Space','Activate the focused sidebar entry','Application sidebar','Enter opens an app, folder, or the focused account’s Inbox. Space expands or collapses account groups. Use the Mail folders button on narrow screens.','sidebar');

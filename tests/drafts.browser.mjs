@@ -3,6 +3,7 @@ import {createRequire} from 'node:module';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
+import {settleScroll} from './keyboard-scroll-ui.mjs';
 
 // Isolated browser fixtures: no live database, provider or mail is accessed.
 const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url));
@@ -67,14 +68,25 @@ try{
       await page.keyboard.press('i');
       const source=page.locator('#detail [name="body"]');
       assert.equal(await source.evaluate(node=>node===document.activeElement),true);
-      await source.fill('# Preview stays in memory');
+      const body='# Preview stays in memory\n\n'+Array.from({length:80},(_,index)=>'Paragraph '+index).join('\n\n')+'\n\n';
+      await source.fill(body);
+      await page.keyboard.press('j');
+      await page.keyboard.press('k');
+      assert.equal(await source.inputValue(),body+'jk');
       await page.keyboard.press('Escape');
       await page.locator('.article').getByRole('heading',{name:'Preview stays in memory',exact:true}).waitFor();
+      const detail=page.locator('#detail');
+      await page.keyboard.press('j');
+      await settleScroll(detail);
+      assert.ok(await detail.evaluate(node=>node.scrollTop)>0,'Escape returns focus to the scrollable wiki page');
+      await page.keyboard.press('k');
+      await settleScroll(detail);
+      assert.equal(await detail.evaluate(node=>node.scrollTop),0);
       await page.keyboard.press('i');
-      assert.equal(await source.inputValue(),'# Preview stays in memory');
+      assert.equal(await source.inputValue(),body+'jk');
       await page.locator('[data-action="wiki-mode"]').click();
       assert.equal(writes.length,before);await page.locator('[data-action="wiki-mode"]').click();
-      assert.equal(await source.inputValue(),'# Preview stays in memory');
+      assert.equal(await source.inputValue(),body+'jk');
     }
     if(app==='sheets'){
       await page.locator('#formula').fill('42');await page.locator('[data-action="add-sheet"]').click();

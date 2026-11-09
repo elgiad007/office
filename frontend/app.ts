@@ -1238,6 +1238,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   }
   if(state.app==='calendar'&&!r){panel.innerHTML='';return;}
   const contentFocused=!!r&&document.activeElement===contentEntry();
+  if(r&&state.app==='wiki'&&!state.wikiEditing)panel.tabIndex=-1;
   const openedMail=state.app==='mail'&&r?r.id:null, newlyOpened=openedMail!==displayedMailId;
   const restore=readerSnapshot?.id===openedMail?readerSnapshot:undefined;
   displayedMailId=openedMail;
@@ -2923,6 +2924,11 @@ document.addEventListener('keydown',event=>{
   if(mailBody&&scrollKeys[key]){event.preventDefault();scrollMailBody(target,scrollKeys[key]);return;}
   if(event.repeat&&action&&!['down','up','left','right'].includes(action)){event.preventDefault();return;}
   if(mailBody&&(action==='down'||action==='up'||key==='G')){event.preventDefault();scrollMailBody(target,key==='G'?'end':action==='up'?'up':'down');return;}
+  if((action==='down'||action==='up')&&state.app==='wiki'&&!state.wikiEditing&&state.current&&target.closest('.item-pane')){
+    event.preventDefault();
+    scrollFocusedPane(target,action);
+    return;
+  }
   if(action==='help'){event.preventDefault();help();return;}
   if(action==='left'){
     event.preventDefault();

@@ -52,6 +52,12 @@ export async function testFocusNavigation(page,url) {
         assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,'Mail scrolling keeps the message');
         await page.keyboard.press('n');await page.locator('#selected-item[data-id="focus-mail-2"]').waitFor();
         await page.keyboard.press('N');await page.locator('#selected-item[data-id="focus-mail-1"]').waitFor();
+      }else if(kind==='wiki'){
+        await page.keyboard.press('J');await settleScroll(page.locator('#detail'));assert.ok(await scrollOffset()>0,'Remapped Wiki down scrolls the page');
+        const down=await scrollOffset();
+        await page.keyboard.press('K');await settleScroll(page.locator('#detail'));assert.ok(await scrollOffset()<down,'Remapped Wiki up scrolls the page');
+        assert.equal(await page.locator('#selected-item').getAttribute('data-id'),selected,'Wiki scrolling keeps the page');
+        await page.keyboard.press('N');await page.locator('#selected-item[data-id="focus-wiki-0"]').waitFor();
       }else{
         await page.keyboard.press('J');
         await page.waitForFunction(id=>document.querySelector('#selected-item')?.dataset.id!==id,selected);
