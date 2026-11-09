@@ -4,7 +4,7 @@ import { createKeyboardScroller, vimScrollDirection } from './keyboard-scroll.js
 import { CommandError, resolveCommand } from './commands.js';
 import { createConnections } from './connections.js';
 import { asError, isPresent } from './utils.js';
-import { escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
+import { escapeHtml as e, markdown, safeDocument, csvParse, sheetCsv, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse } from './formats.js';
 import { openAccountSetup } from './account-setup.js';
 import { renderGoogleSettings } from './google-settings.js';
 import { captureFolderActions, renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, canQuickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder } from './mail-folders.js';
@@ -151,7 +151,8 @@ function rememberSelection() {
         lastSelectedItems.set(state.app, state.current.id);
 }
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
-const activity = createActivity({ csrf: () => state.csrf, keys: () => keys(), openItem: openActivityRecord });
+const activity = createActivity({ csrf: () => state.csrf, keys: () => keys(), openItem: openActivityRecord, onSessionExpired: () => void lockExpiredSession() });
+let remoteSenderIcons = false, lastSessionActivity = Date.now();
 const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, compact: () => phoneLayout.matches, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
 const connections = createConnections({ api, icon, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
@@ -490,10 +491,8 @@ async function requestApi(route, data, signal) {
     if (status >= 400) {
         if (status === 409 && result.code === 'mail_revision_conflict' && result.record)
             refreshMailRecord(result.record);
-        if (status === 401 && route !== 'login') {
-            state.dirty = false;
-            await boot();
-        }
+        if (status === 401 && route !== 'login')
+            await lockExpiredSession();
         throw Object.assign(Error(result.error || 'Request failed.'), { status, code: result.code, record: result.record });
     }
     for (const record of result.records || [])
@@ -652,6 +651,8 @@ async function boot() {
             authView(status);
             return;
         }
+        remoteSenderIcons = status.remoteSenderIcons === true;
+        lastSessionActivity = status.lastInteraction ? Math.min(Date.now(), status.lastInteraction * 1000) : Date.now();
         state.prefs = status.preferences || {};
         applyTheme();
         const hash = location.hash.slice(1);
@@ -671,6 +672,24 @@ async function boot() {
         root.innerHTML = `<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`;
         document.querySelector('#retry').onclick = boot;
     }
+}
+async function lockExpiredSession() {
+    if (!root.querySelector('.shell'))
+        return;
+    state.dirty = false;
+    root.replaceChildren();
+    if (dialog.open)
+        dialog.close();
+    dialog.replaceChildren();
+    activity.configure(false);
+    await boot();
+}
+function reportSessionActivity() {
+    const now = Date.now();
+    if (document.hidden || !root.querySelector('.shell') || now - lastSessionActivity < 30_000)
+        return;
+    lastSessionActivity = now;
+    void requestApi('session-activity', {}).catch(() => { });
 }
 let panelSizing;
 window.addEventListener('resize', () => panelSizing?.refresh());
@@ -778,7 +797,7 @@ function setMailFolderPanel(open, restoreFocus = false) {
     }
 }
 function mailFolderEnv() {
-    return { state, api, commit: leaveEditor, load, notice, modal, dialog, e, field, confirmation, attempt, mailDeletionReload, captureSidebarFocus, closeFolderPanel: () => {
+    return { state, api, commit: leaveEditor, load, notice, modal, dialog, e, field, confirmation, attempt, withRecentSignIn, mailDeletionReload, captureSidebarFocus, closeFolderPanel: () => {
             mobileItemOpen = false;
             if (phoneLayout.matches)
                 showMobileMenu(false, true);
@@ -1579,7 +1598,7 @@ function renderList() {
         const readState = state.app === 'mail' ? (displayed.meta.read ? 'read' : 'unread') : '';
         const readStatus = readState ? `<span class="mail-read-status"><span class="file-input">${readState === 'unread' ? 'Unread' : 'Read'}</span></span>` : '';
         const badges = state.app === 'mail' ? '' : `<span>${r.meta.folder ? `<span class="badge">${e(r.meta.folder)}</span>` : ''}${r.meta.remote ? '<span class="badge">Synced</span>' : ''}</span>`;
-        const itemIcon = state.app === 'mail' ? renderMailListIcon(r, state.selected.has(r.id), icon('mail')) : `<span class="item-icon">${state.selected.has(r.id) ? '✓' : icon(state.app)}</span>`;
+        const itemIcon = state.app === 'mail' ? renderMailListIcon(r, state.selected.has(r.id), icon('mail'), remoteSenderIcons) : `<span class="item-icon">${state.selected.has(r.id) ? '✓' : icon(state.app)}</span>`;
         return `<button class="item ${state.app === 'tasks' && r.meta.done ? 'task-completed' : ''} ${readState ? 'mail-' + readState : ''} ${selected ? 'selected' : ''} ${state.selected.has(r.id) ? 'multi-selected' : ''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id) || selected}" aria-haspopup="menu" ${selected ? 'id="selected-item"' : ''}>${readStatus}${itemIcon}${state.app === 'mail' ? renderMailListCopy(displayed, state.prefs.mailList, failedMailActions.get(r.id)) : `<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app === 'tasks' ? taskBadges(r) : ''}</span>`}${badges}</button>`;
     };
     const list = document.querySelector('#items'), focusedGroup = document.activeElement?.closest('[data-mail-group-key]')?.dataset.mailGroupKey;
@@ -1590,7 +1609,7 @@ function renderList() {
             return '';
         return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed ? '▸' : '▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}${state.app === 'mail' && mailPage?.more ? ' loaded' : ''}</span></button>${rendered.map(item).join('')}`;
     }).join('') : visible.map(item).join('')) : `<div class="list-empty">${state.app === 'tasks' ? 'No tasks match this view. Adjust List view filters or add a task.' : state.search ? 'No matching items. Try a different search.' : 'No items yet.'}</div>`;
-    if (state.app === 'mail')
+    if (state.app === 'mail' && remoteSenderIcons)
         bindMailFavicons(list);
     list.querySelectorAll('[data-mail-group-key]').forEach(button => button.onclick = () => {
         const p = state.app === 'tasks' ? taskViewPreferences(state.prefs.taskView) : mailViewPreferences(state.prefs.mailView), key = button.dataset.mailGroupKey;
@@ -1733,7 +1752,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
         panel.insertAdjacentHTML('afterbegin', `<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
     const form = panel.querySelector('#record-form');
     if (state.app === 'mail' && r.meta.folder !== 'Drafts')
-        bindMailReader(panel, r, renderDetail, keys());
+        bindMailReader(panel, r, renderDetail, keys(), reportSessionActivity);
     if (contentFocused)
         focusContent();
     if (state.app === 'mail')
@@ -2387,6 +2406,55 @@ catch (cause) {
 } }
 function modal(title, body) { dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector('[data-close]').onclick = () => dialog.close(); dialog.showModal(); }
 function confirmation(title, message, action, confirmLabel = title) { modal(title, `<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(confirmLabel)}</button></div>`); dialog.querySelector('#cancel').onclick = () => dialog.close(); dialog.querySelector('#cancel').focus(); dialog.querySelector('#confirm').onclick = async () => { dialog.close(); await attempt(action); }; }
+let passwordConfirmation;
+function confirmOwnerPassword() {
+    passwordConfirmation ??= new Promise(resolve => {
+        const previousMode = state.mode;
+        modal('Confirm your password', `<form id="confirm-password">${field('Office password', 'password', '', 'password', 'required autocomplete="current-password"')}<p class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-cancel>Cancel</button><button type="submit" class="primary">Confirm</button></div></form>`);
+        const form = dialog.querySelector('#confirm-password');
+        const password = form.querySelector('input');
+        const button = form.querySelector('button[type=submit]');
+        let verified = false;
+        dialog.addEventListener('close', () => { password.value = ''; setMode(previousMode); resolve(verified); }, { once: true });
+        form.querySelector('[data-cancel]').onclick = () => dialog.close();
+        password.focus();
+        form.onsubmit = async (event) => {
+            event.preventDefault();
+            if (button.disabled)
+                return;
+            busyButton(button, true);
+            const value = password.value;
+            password.value = '';
+            try {
+                await requestApi('reauthenticate', { password: value });
+                if (form.isConnected && dialog.open) {
+                    verified = true;
+                    dialog.close();
+                }
+            }
+            catch (cause) {
+                form.querySelector('.error').textContent = asError(cause).message;
+                password.focus();
+            }
+            finally {
+                busyButton(button, false);
+            }
+        };
+    }).finally(() => { passwordConfirmation = undefined; });
+    return passwordConfirmation;
+}
+async function withRecentSignIn(operation) {
+    try {
+        return await operation();
+    }
+    catch (cause) {
+        if (asError(cause).status !== 428)
+            throw cause;
+        if (!await confirmOwnerPassword())
+            throw new DraftCancelled();
+        return operation();
+    }
+}
 function download(name, text, type = 'text/plain') { const url = URL.createObjectURL(new Blob([text], { type })); const a = document.createElement('a'); a.href = url; a.download = name.replace(/[\\/:*?"<>|]/g, '_'); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 function originalMail(record) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64), c => c.charCodeAt(0)) : record.meta.raw || ''; }
 async function viewMessageHeaders() {
@@ -2542,9 +2610,13 @@ async function exportRecords(all = false, selectedRecords = null) {
         download(name + '.vcf', vcardExport(records), 'text/vcard');
     else if (state.app === 'sheets' && !all) {
         const sheet = workbook(records[0]).sheets[state.sheet];
-        const refs = Object.keys(sheet.cells).map(ref => cellPosition(ref));
-        const rows = Math.max(1, ...refs.map(x => x[0] + 1)), cols = Math.max(1, ...refs.map(x => x[1] + 1));
-        download(name + '.csv', csvWrite(Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => sheet.cells[colName(c) + (r + 1)] || ''))), 'text/csv');
+        modal('Export sheet', `<p>Values only exports calculated results and protects formula-like text. Formulas exports raw cells for use with trusted files.</p><div class="dialog-actions"><button type="button" data-csv="formulas">Export with formulas</button><button type="button" class="primary" data-csv="values">Export values only</button></div>`);
+        dialog.querySelectorAll('[data-csv]').forEach(button => button.onclick = () => void attempt(() => {
+            const csv = sheetCsv(sheet.cells, button.dataset.csv === 'formulas' ? 'formulas' : 'values');
+            dialog.close();
+            download(name + '.csv', csv, 'text/csv');
+        }));
+        dialog.querySelector('[data-csv=values]').focus();
     }
     else if (state.app === 'wiki' && !all)
         download(name + '.md', records[0].body, 'text/markdown');
@@ -2575,9 +2647,14 @@ async function prepareBackup() {
     const tracking = activity.queued(backupMessage);
     activity.running(tracking);
     try {
-        const response = await fetch('api.php?r=backup', { cache: 'no-store', signal: request.signal });
+        const response = await withRecentSignIn(async () => {
+            const result = await fetch('api.php?r=backup', { cache: 'no-store', signal: request.signal });
+            if (result.status === 428)
+                throw Object.assign(Error('Confirm your password to continue.'), { status: 428 });
+            return result;
+        });
         if (response.status === 401) {
-            await boot();
+            await lockExpiredSession();
             return;
         }
         if (!response.ok) {
@@ -2599,7 +2676,7 @@ async function prepareBackup() {
     }
     catch (cause) {
         if (backupRequest === request)
-            backupMessage = asError(cause).message;
+            backupMessage = cause instanceof DraftCancelled ? 'Backup canceled.' : asError(cause).message;
     }
     finally {
         activity.done(tracking);
@@ -4548,6 +4625,11 @@ document.addEventListener('pointerdown', event => {
         setMailFolderPanel(false);
 }, { passive: true });
 document.addEventListener('wheel', () => state.lastActivity = Date.now(), { passive: true });
+for (const type of ['keydown', 'pointerdown', 'wheel'])
+    document.addEventListener(type, event => {
+        if (event.isTrusted)
+            reportSessionActivity();
+    }, { capture: true, passive: true });
 window.addEventListener('beforeunload', event => { if (state.dirty || state.savePromise) {
     event.preventDefault();
     event.returnValue = '';

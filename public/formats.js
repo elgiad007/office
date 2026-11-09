@@ -43,6 +43,21 @@ export function csvParse(text) {
     return rows;
 }
 export function csvWrite(rows) { return rows.map(row => row.map(v => '"' + String(v ?? '').replaceAll('"', '""') + '"').join(',')).join('\r\n'); }
+export function sheetCsv(cells, mode) {
+    const positions = Object.keys(cells).map(cellPosition);
+    const rows = Math.max(1, ...positions.map(([row]) => row + 1));
+    const columns = Math.max(1, ...positions.map(([, column]) => column + 1));
+    return csvWrite(Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, column) => {
+        const address = colName(column) + (row + 1);
+        if (mode === 'formulas')
+            return cells[address] ?? '';
+        const value = cellValue(cells, address);
+        if (typeof value === 'number' && Number.isFinite(value))
+            return value;
+        const text = String(value);
+        return /^(?:[\t\r\n]|[\s\p{Cc}\p{Cf}]*[=+\-@＝＋－＠])/u.test(text) ? "'" + text : text;
+    })));
+}
 export function colName(index) { let s = ''; for (index++; index > 0; index = Math.floor((index - 1) / 26))
     s = String.fromCharCode(65 + (index - 1) % 26) + s; return s; }
 export function cellPosition(ref) {

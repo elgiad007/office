@@ -21,6 +21,11 @@ try {
     try { save_record($r); throw new RuntimeException('stale write accepted'); } catch(HttpError $e) {check($e->getCode()===409,'stale write rejected');}
     check((int)db()->query('SELECT COUNT(*) FROM revisions')->fetchColumn()===2,'history preserved');
     $encrypted=encrypt_secret(['password'=>'top secret']); check(!str_contains($encrypted,'top secret'),'credential ciphertext'); check(decrypt_secret($encrypted)['password']==='top secret','credential decrypt');
+    $legacyPassword=str_repeat('a',72);
+    set_setting('owner',['password'=>password_hash($legacyPassword,PASSWORD_BCRYPT)]);
+    check(!verify_owner_password($legacyPassword.'suffix'),'bcrypt rejects an unverified suffix');
+    check(verify_owner_password($legacyPassword),'existing bcrypt login remains valid');
+    check(password_get_info(setting('owner')['password'])['algo']===owner_password_algorithm(),'legacy password upgrades when Argon2id is available');
     $ics="BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:event-1\r\nSUMMARY:Hello\\, world\r\nDTSTART;TZID=America/New_York:20261029T090000\r\nRRULE:FREQ=WEEKLY\r\nBEGIN:VALARM\r\nDESCRIPTION:Do not replace event notes\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
     $events=parse_ics($ics); check(count($events)===1 && $events[0]['title']==='Hello, world','ICS parses escaped title');check($events[0]['meta']['start']==='2026-10-29T09:00:00-04:00','ICS timezone kept');check($events[0]['body']==='','nested alarm ignored');
     $mail=parse_eml("Subject: =?UTF-8?B?SGVsbG8=?=\r\nFrom: a@example.com\r\nContent-Transfer-Encoding: base64\r\n\r\n".base64_encode('A message'));
@@ -54,6 +59,7 @@ try {
     $q=db()->prepare('SELECT body FROM records WHERE id=?');$q->execute([$cached['id']]);check($q->fetchColumn()===$legacy['body'],'legacy display does not rewrite stored data');
     $edited=save_record(array_replace($legacy,['title'=>'Local body','body'=>'Keep local edits']));check($edited['body']==='Keep local edits','legacy hydration preserves local body edits');
     try {public_host('127.0.0.1');throw new RuntimeException('private endpoint accepted');}catch(HttpError){check(true,'private endpoints blocked');}
+    foreach (['100.64.0.1','198.18.0.1','192.0.2.1','224.0.0.1'] as $ip) check(!public_ipv4($ip),'provider rejects nonpublic address '.$ip);
     try {validate_record(['kind'=>'sheets','title'=>'bad','body'=>'','meta'=>['workbook'=>['sheets'=>[]]]]);throw new RuntimeException('bad workbook accepted');}catch(HttpError){check(true,'invalid workbook rejected');}
     db()->beginTransaction(); save_record(['kind'=>'tasks','title'=>'rollback','body'=>'','meta'=>[]]); db()->rollBack(); check((int)db()->query("SELECT COUNT(*) FROM records WHERE title='rollback'")->fetchColumn()===0,'batch rollback');
     // Deterministic stream fixture exercises IMAP tagged responses and literal framing without a provider.

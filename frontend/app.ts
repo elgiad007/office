@@ -9,7 +9,7 @@ interface WireResult {record?: OfficeRecord | null; records?: OfficeRecord[]; re
 interface RequestPayload {id?: string; revision?: number; action?: string; account?: string; summary?: boolean}
 type MailSnapshot = Pick<OfficeRecord, 'id' | 'kind' | 'contentHash' | 'meta'>;
 
-import {escapeHtml as e, markdown, safeDocument, csvParse, csvWrite, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
+import {escapeHtml as e, markdown, safeDocument, csvParse, sheetCsv, colName, cellPosition, cellValue, icsExport, vcardExport, vcardParse} from './formats.js';
 import {openAccountSetup} from './account-setup.js';
 import {renderGoogleSettings} from './google-settings.js';
 import {captureFolderActions, renderMailFolders, matchesMailScope, syncOpenFolder, fileMail, quickMoveMail, canQuickMoveMail, accountInboxScope, openAccountInbox, backOutOfMailFolder} from './mail-folders.js';
@@ -135,7 +135,8 @@ function rememberSelection() {
   if(state.current)lastSelectedItems.set(state.app,state.current.id);
 }
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
-const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys(),openItem:openActivityRecord});
+const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys(),openItem:openActivityRecord,onSessionExpired:()=>void lockExpiredSession()});
+let remoteSenderIcons=false,lastSessionActivity=Date.now();
 const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
 const connections=createConnections({api,icon,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
@@ -359,7 +360,7 @@ async function requestApi(route: ApiRoute, data?: ApiData, signal?: AbortSignal)
   await cacheRefresh;
   if (status>=400) {
     if(status===409&&result.code==='mail_revision_conflict'&&result.record)refreshMailRecord(result.record);
-    if (status===401 && route!=='login') { state.dirty=false; await boot(); }
+    if (status===401 && route!=='login') await lockExpiredSession();
     throw Object.assign(Error(result.error || 'Request failed.'),{status,code:result.code,record:result.record});
   }
   for(const record of result.records||[])rememberMail(record);
@@ -464,6 +465,8 @@ async function boot() {
   document.querySelector<HTMLElement>('#sync-status')!.hidden=true;
   lastMailDelete=undefined;
   try { const status=await api('status'); state.csrf=status.csrf;activity.configure(!!status.authenticated&&!!status.activity); if (!status.authenticated) { authView(status); return; }
+    remoteSenderIcons=status.remoteSenderIcons===true;
+    lastSessionActivity=status.lastInteraction?Math.min(Date.now(),status.lastInteraction*1000):Date.now();
     state.prefs=status.preferences||{}; applyTheme();
     const hash=location.hash.slice(1); state.app=apps[hash]||hash==='settings'?hash as AppName:'mail';
     mailListLimit=100;mailPage=undefined;
@@ -472,6 +475,21 @@ async function boot() {
     shell(); await load(undefined,{enteringApp:true},records??undefined);
     if (state.accounts.length) void syncAccounts(false);
   } catch(cause) { const error=asError(cause); root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector<HTMLElement>('#retry')!.onclick=boot; }
+}
+async function lockExpiredSession() {
+  if(!root.querySelector('.shell'))return;
+  state.dirty=false;
+  root.replaceChildren();
+  if(dialog.open)dialog.close();
+  dialog.replaceChildren();
+  activity.configure(false);
+  await boot();
+}
+function reportSessionActivity() {
+  const now=Date.now();
+  if(document.hidden||!root.querySelector('.shell')||now-lastSessionActivity<30_000)return;
+  lastSessionActivity=now;
+  void requestApi('session-activity',{}).catch(()=>{});
 }
 let panelSizing: ReturnType<typeof setupPanelSizing>;
 window.addEventListener('resize',()=>panelSizing?.refresh());
@@ -558,7 +576,7 @@ function setMailFolderPanel(open: boolean,restoreFocus=false) {
     trigger.focus({preventScroll:true});
   }
 }
-function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,mailDeletionReload,captureSidebarFocus,closeFolderPanel:()=>{
+function mailFolderEnv() { return {state,api,commit:leaveEditor,load,notice,modal,dialog,e,field,confirmation,attempt,withRecentSignIn,mailDeletionReload,captureSidebarFocus,closeFolderPanel:()=>{
   mobileItemOpen=false;
   if(phoneLayout.matches)showMobileMenu(false,true);
   setMailFolderPanel(false,true);
@@ -1164,7 +1182,7 @@ function renderList() {
     const readState=state.app==='mail'?(displayed.meta.read?'read':'unread'):'';
     const readStatus=readState?`<span class="mail-read-status"><span class="file-input">${readState==='unread'?'Unread':'Read'}</span></span>`:'';
     const badges=state.app==='mail'?'':`<span>${r.meta.folder?`<span class="badge">${e(r.meta.folder)}</span>`:''}${r.meta.remote?'<span class="badge">Synced</span>':''}</span>`;
-    const itemIcon=state.app==='mail'?renderMailListIcon(r,state.selected.has(r.id),icon('mail')):`<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>`;
+    const itemIcon=state.app==='mail'?renderMailListIcon(r,state.selected.has(r.id),icon('mail'),remoteSenderIcons):`<span class="item-icon">${state.selected.has(r.id)?'✓':icon(state.app)}</span>`;
     return `<button class="item ${state.app==='tasks'&&r.meta.done?'task-completed':''} ${readState?'mail-'+readState:''} ${selected?'selected':''} ${state.selected.has(r.id)?'multi-selected':''}" data-id="${r.id}" aria-pressed="${state.selected.has(r.id)||selected}" aria-haspopup="menu" ${selected?'id="selected-item"':''}>${readStatus}${itemIcon}${state.app==='mail'?renderMailListCopy(displayed,state.prefs.mailList,failedMailActions.get(r.id)):`<span class="item-copy"><strong>${e(r.title)}</strong><small>${hint}</small>${state.app==='tasks'?taskBadges(r):''}</span>`}${badges}</button>`;
   };
   const list=document.querySelector<HTMLElement>('#items')!,focusedGroup=(document.activeElement as HTMLElement)?.closest<HTMLElement>('[data-mail-group-key]')?.dataset.mailGroupKey;
@@ -1174,7 +1192,7 @@ function renderList() {
     if(!group.collapsed&&!rendered.length)return '';
     return `<button type="button" class="mail-group-header" data-mail-group-key="${e(group.key)}" aria-expanded="${!group.collapsed}"><span aria-hidden="true">${group.collapsed?'▸':'▾'}</span><span class="mail-group-label">${e(group.label)}</span><span class="mail-group-count">${group.rows.length}${state.app==='mail'&&mailPage?.more?' loaded':''}</span></button>${rendered.map(item).join('')}`;
   }).join(''):visible.map(item).join('')):`<div class="list-empty">${state.app==='tasks'?'No tasks match this view. Adjust List view filters or add a task.':state.search?'No matching items. Try a different search.':'No items yet.'}</div>`;
-  if(state.app==='mail')bindMailFavicons(list);
+  if(state.app==='mail'&&remoteSenderIcons)bindMailFavicons(list);
   list.querySelectorAll<HTMLButtonElement>('[data-mail-group-key]').forEach(button=>button.onclick=()=>{
     const p=state.app==='tasks'?taskViewPreferences(state.prefs.taskView):mailViewPreferences(state.prefs.mailView),key=button.dataset.mailGroupKey!;
     const collapsed=button.getAttribute('aria-expanded')==='false',all=p.collapsed.includes(p.group+':*'),exception=p.group+':!'+key;
@@ -1264,7 +1282,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   const failure=state.app==='mail'?failedMailActions.get(r.id):undefined;
   if(failure)panel.insertAdjacentHTML('afterbegin',`<p class="mail-action-failure" role="status">Mail action failed; message restored. ${e(failure)}</p>`);
   const form=panel.querySelector<HTMLFormElement>('#record-form')!;
-  if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail,keys());
+  if (state.app==='mail' && r.meta.folder!=='Drafts') bindMailReader(panel,r,renderDetail,keys(),reportSessionActivity);
   if(contentFocused)focusContent();
   if(state.app==='mail')bindAttachments(panel,r,{api,commit:requireSaved,notice,modal,update:record=>{
     if(state.current?.id===record.id){state.current.revision=record.revision;state.current.meta.attachments=record.meta.attachments;state.current.meta.hasAttachments=record.meta.hasAttachments;}
@@ -1626,6 +1644,43 @@ function setMode(mode: string) {state.mode=mode;const m=document.querySelector<H
 async function attempt<T>(fn: () => T | Promise<T>) { try{return await fn();}catch(cause) { if(cause instanceof DraftCancelled)return;const error=asError(cause);notice(error.message,true);} }
 function modal(title: string,body: string) { dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector<HTMLElement>('[data-close]')!.onclick=()=>dialog.close(); dialog.showModal(); }
 function confirmation(title: string,message: string,action: () => unknown,confirmLabel=title) { modal(title,`<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(confirmLabel)}</button></div>`); dialog.querySelector<HTMLElement>('#cancel')!.onclick=()=>dialog.close();dialog.querySelector<HTMLElement>('#cancel')!.focus();dialog.querySelector<HTMLElement>('#confirm')!.onclick=async()=>{dialog.close();await attempt(action);}; }
+let passwordConfirmation: Promise<boolean> | undefined;
+function confirmOwnerPassword(): Promise<boolean> {
+  passwordConfirmation??=new Promise<boolean>(resolve=>{
+    const previousMode=state.mode;
+    modal('Confirm your password',`<form id="confirm-password">${field('Office password','password','','password','required autocomplete="current-password"')}<p class="error" role="alert"></p><div class="dialog-actions"><button type="button" data-cancel>Cancel</button><button type="submit" class="primary">Confirm</button></div></form>`);
+    const form=dialog.querySelector<HTMLFormElement>('#confirm-password')!;
+    const password=form.querySelector<HTMLInputElement>('input')!;
+    const button=form.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    let verified=false;
+    dialog.addEventListener('close',()=>{password.value='';setMode(previousMode);resolve(verified);},{once:true});
+    form.querySelector<HTMLButtonElement>('[data-cancel]')!.onclick=()=>dialog.close();
+    password.focus();
+    form.onsubmit=async event=>{
+      event.preventDefault();
+      if(button.disabled)return;
+      busyButton(button,true);
+      const value=password.value;
+      password.value='';
+      try {
+        await requestApi('reauthenticate',{password:value});
+        if(form.isConnected&&dialog.open){verified=true;dialog.close();}
+      } catch(cause) {
+        form.querySelector<HTMLElement>('.error')!.textContent=asError(cause).message;
+        password.focus();
+      } finally {busyButton(button,false);}
+    };
+  }).finally(()=>{passwordConfirmation=undefined;});
+  return passwordConfirmation;
+}
+async function withRecentSignIn<T>(operation: () => Promise<T>): Promise<T> {
+  try {return await operation();}
+  catch(cause) {
+    if(asError(cause).status!==428)throw cause;
+    if(!await confirmOwnerPassword())throw new DraftCancelled();
+    return operation();
+  }
+}
 function download(name: string,text: BlobPart,type='text/plain') { const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'_');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
 function originalMail(record: OfficeRecord) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64),c=>c.charCodeAt(0)) : record.meta.raw || ''; }
 async function viewMessageHeaders() {
@@ -1753,7 +1808,16 @@ async function exportRecords(all=false,selectedRecords: OfficeRecord[] | null=nu
   const name=all?state.app:records[0].title;
   if(state.app==='calendar')download(name+'.ics',icsExport(records),'text/calendar');
   else if(state.app==='contacts')download(name+'.vcf',vcardExport(records),'text/vcard');
-  else if(state.app==='sheets'&&!all){const sheet=workbook(records[0]).sheets[state.sheet]; const refs=Object.keys(sheet.cells).map(ref=>cellPosition(ref));const rows=Math.max(1,...refs.map(x=>x[0]+1)),cols=Math.max(1,...refs.map(x=>x[1]+1));download(name+'.csv',csvWrite(Array.from({length:rows},(_,r)=>Array.from({length:cols},(_,c)=>sheet.cells[colName(c)+(r+1)]||''))),'text/csv');}
+  else if(state.app==='sheets'&&!all){
+    const sheet=workbook(records[0]).sheets[state.sheet];
+    modal('Export sheet',`<p>Values only exports calculated results and protects formula-like text. Formulas exports raw cells for use with trusted files.</p><div class="dialog-actions"><button type="button" data-csv="formulas">Export with formulas</button><button type="button" class="primary" data-csv="values">Export values only</button></div>`);
+    dialog.querySelectorAll<HTMLButtonElement>('[data-csv]').forEach(button=>button.onclick=()=>void attempt(()=>{
+      const csv=sheetCsv(sheet.cells,button.dataset.csv==='formulas'?'formulas':'values');
+      dialog.close();
+      download(name+'.csv',csv,'text/csv');
+    }));
+    dialog.querySelector<HTMLButtonElement>('[data-csv=values]')!.focus();
+  }
   else if(state.app==='wiki'&&!all)download(name+'.md',records[0].body,'text/markdown');
   else if(state.app==='documents'&&!all)download(name+'.html','<!doctype html><html lang="en"><meta charset="utf-8"><title>'+e(name)+'</title><body>'+safeDocument(records[0].body)+'</body></html>','text/html');
   else if(state.app==='mail'&&!all&&(records[0].meta.rawBase64||records[0].meta.raw))download(name+'.eml',originalMail(records[0]),'message/rfc822');
@@ -1777,8 +1841,12 @@ async function prepareBackup() {
   const tracking=activity.queued(backupMessage);
   activity.running(tracking);
   try {
-    const response=await fetch('api.php?r=backup',{cache:'no-store',signal:request.signal});
-    if(response.status===401){await boot();return;}
+    const response=await withRecentSignIn(async()=>{
+      const result=await fetch('api.php?r=backup',{cache:'no-store',signal:request.signal});
+      if(result.status===428)throw Object.assign(Error('Confirm your password to continue.'),{status:428});
+      return result;
+    });
+    if(response.status===401){await lockExpiredSession();return;}
     if(!response.ok){
       const error=await response.json().catch(()=>null);
       throw Error(error?.error||'Could not prepare the backup.');
@@ -1793,7 +1861,7 @@ async function prepareBackup() {
     preparedBackup={file,name};
     backupMessage='SQLite backup ready to download.';
   } catch(cause) {
-    if(backupRequest===request)backupMessage=asError(cause).message;
+    if(backupRequest===request)backupMessage=cause instanceof DraftCancelled?'Backup canceled.':asError(cause).message;
   } finally {
     activity.done(tracking);
     if(backupRequest===request){backupRequest=undefined;renderBackupStatus();}
@@ -2913,6 +2981,9 @@ document.addEventListener('pointerdown',event=>{
   if(document.querySelector('.folders-open')&&!(event.target as Element).closest('#mail-folder-navigation,[data-app="mail"]'))setMailFolderPanel(false);
 },{passive:true});
 document.addEventListener('wheel',()=>state.lastActivity=Date.now(),{passive:true});
+for(const type of ['keydown','pointerdown','wheel'])document.addEventListener(type,event=>{
+  if(event.isTrusted)reportSessionActivity();
+},{capture:true,passive:true});
 window.addEventListener('beforeunload',event=>{if(state.dirty||state.savePromise){event.preventDefault();event.returnValue='';}});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
 let mailCalendarDay=new Date().toDateString();

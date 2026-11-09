@@ -52,8 +52,7 @@ function json_response(mixed $value, int $code = 200): never {
     http_response_code($code); header('Content-Type: application/json; charset=utf-8');
     echo json_encode($value, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE); exit;
 }
-function request_json(): array {
-    $limit=($_GET['r']??'')==='restore'?128*1024*1024:16*1024*1024;
+function request_json(int $limit = 16*1024*1024): array {
     if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > $limit) fail('Request too large.', 413);
     $raw = file_get_contents('php://input', false, null, 0, $limit + 1);
     if (strlen($raw) > $limit) fail('Request too large.', 413);
@@ -62,23 +61,56 @@ function request_json(): array {
 }
 function start_session(): void {
     ini_set('session.use_strict_mode','1');
+    ini_set('session.use_only_cookies','1');
+    ini_set('session.gc_maxlifetime','3600');
     session_name('portable_office');
     session_save_path(data_dir());
-    session_set_cookie_params(['httponly'=>true,'secure'=>!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off','samesite'=>'Lax','path'=> '/']);
+    session_set_cookie_params(['httponly'=>true,'secure'=>!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off','samesite'=>'Lax','path'=>'/','domain'=>'']);
     session_start();
     $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
-    if (isset($_SESSION['seen']) && time() - $_SESSION['seen'] > 3600) unset($_SESSION['owner']);
-    $_SESSION['seen'] = time();
+    $now=time();
+    if (!empty($_SESSION['owner']) && ($now-($_SESSION['seen']??0)>=3600 || $now-($_SESSION['signed_in']??0)>=12*3600)) {
+        $_SESSION=['csrf'=>bin2hex(random_bytes(32))];
+    }
 }
 function csrf(): void {
     if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) fail('Session expired. Refresh and try again.',403);
 }
 function owner(): void { if (empty($_SESSION['owner'])) fail('Sign in required.',401); }
+function require_recent_sign_in(): void {
+    if (time()-($_SESSION['verified_at']??0)>=300) fail('Confirm your password to continue.',428);
+}
+function owner_password_algorithm(): string|int {
+    return in_array('argon2id',password_algos(),true)?PASSWORD_ARGON2ID:PASSWORD_BCRYPT;
+}
+function verify_owner_password(mixed $password): bool {
+    if (!is_string($password) || strlen($password)>1024 || str_contains($password,"\0")) return false;
+    $user=setting('owner');
+    if (!$user) return false;
+    $bcrypt=password_get_info($user['password'])['algoName']==='bcrypt';
+    if (($bcrypt && strlen($password)>72) || !password_verify($password,$user['password'])) return false;
+    $algorithm=owner_password_algorithm();
+    // A legacy bcrypt suffix was never verified. Upgrade only a fully checked password.
+    if (($bcrypt || $algorithm!==PASSWORD_BCRYPT) && password_needs_rehash($user['password'],$algorithm)) {
+        $q=db()->prepare("UPDATE settings SET value=? WHERE key='owner' AND value=?");
+        $q->execute([json_encode(['password'=>password_hash($password,$algorithm)],JSON_THROW_ON_ERROR),json_encode($user,JSON_THROW_ON_ERROR)]);
+    }
+    return true;
+}
 function throttle(): void {
     $bucket = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'local');
-    $q = db()->prepare('SELECT * FROM attempts WHERE bucket=?'); $q->execute([$bucket]); $row=$q->fetch();
-    if ($row && time() - (int)$row['started'] < 900 && (int)$row['count'] >= 10) fail('Too many attempts. Try again in 15 minutes.',429);
-    db()->prepare('INSERT INTO attempts VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=CASE WHEN started < ? THEN 1 ELSE count+1 END, started=CASE WHEN started < ? THEN excluded.started ELSE started END')->execute([$bucket,time(),time()-900,time()-900]);
+    $now=time();$cutoff=$now-900;
+    $q=db()->prepare('INSERT INTO attempts VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET
+        count=CASE WHEN started<=? THEN 1 ELSE count+1 END,
+        started=CASE WHEN started<=? THEN excluded.started ELSE started END
+        WHERE count<10 OR started<=?');
+    $q->execute([$bucket,$now,$cutoff,$cutoff,$cutoff]);
+    if (!$q->rowCount()) fail('Too many attempts. Try again in 15 minutes.',429);
+}
+function public_ipv4(string $ip): bool {
+    // PHP's global-range flag accepts multicast.
+    return filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4|FILTER_FLAG_GLOBAL_RANGE)!==false
+        && (int)explode('.',$ip,2)[0]<224;
 }
 function setup_token(): string {
     $path = data_dir() . '/setup-token.txt';

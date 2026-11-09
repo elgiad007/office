@@ -15,11 +15,13 @@ require dirname(__DIR__).'/app/backup.php';
 header('Cache-Control: no-store'); header('X-Content-Type-Options: nosniff'); header('Referrer-Policy: no-referrer');
 try {
     if (PHP_VERSION_ID<80200 || !extension_loaded('pdo_sqlite')) fail('Requires PHP 8.2+ and PDO SQLite. Enable these in cPanel.',503);
-    db(); start_session();
+    start_session();
     $route=$_GET['r']??'status'; $method=$_SERVER['REQUEST_METHOD'];
+    if (!is_string($route)) fail('Invalid route.');
     if ($route==='status' && $method==='GET') {
         $ready=setting('owner')!==null; if (!$ready) setup_token();
-        json_response(['setup'=>!$ready,'authenticated'=>!empty($_SESSION['owner']),'activity'=>!empty($_SESSION['owner']),'csrf'=>$_SESSION['csrf'],'extensions'=>['sqlite'=>true,'openssl'=>extension_loaded('openssl'),'curl'=>extension_loaded('curl'),'dom'=>extension_loaded('dom')],'preferences'=>!empty($_SESSION['owner'])?setting('preferences',[]):[]]);
+        $authenticated=!empty($_SESSION['owner']);
+        json_response(['setup'=>!$ready,'authenticated'=>$authenticated,'activity'=>$authenticated,'csrf'=>$_SESSION['csrf'],'extensions'=>['sqlite'=>true,'openssl'=>extension_loaded('openssl'),'curl'=>extension_loaded('curl'),'dom'=>extension_loaded('dom')],'preferences'=>$authenticated?setting('preferences',[]):[],'lastInteraction'=>$authenticated?$_SESSION['seen']:null,'remoteSenderIcons'=>$authenticated && getenv('OFFICE_REMOTE_SENDER_ICONS')==='1']);
     }
     if ($route==='oauth-callback' && $method==='GET') {
         owner(); $oauth=$_SESSION['oauth']??null; unset($_SESSION['oauth']);
@@ -40,21 +42,48 @@ try {
         header('Location: ./#settings',true,303); exit;
     }
     $sqliteRestore=$route==='restore' && ($_SERVER['CONTENT_TYPE']??'')===OFFICE_BACKUP_TYPE;
-    if ($method==='POST') { csrf(); $input=$sqliteRestore?[]:request_json(); }
-    elseif ($method!=='GET') fail('Method not allowed.',405);
-    if (in_array($route,['setup','login'],true) && $method==='POST') {
+    if (!in_array($method,['GET','POST'],true)) fail('Method not allowed.',405);
+    if (in_array($route,['setup','login','reauthenticate'],true) && $method==='POST') {
+        if ($route==='reauthenticate') owner();
+        csrf();
         throttle();
+        $input=request_json(16384);
         if ($route==='setup') {
             if (setting('owner')!==null) fail('Already configured.',409);
-            if (!hash_equals(setup_token(),(string)($input['token']??''))) fail('Incorrect setup token.',403);
-            $password=(string)($input['password']??''); if (strlen($password)<12 || strlen($password)>1024) fail('Use a password between 12 and 1024 bytes.');
-            $hash=password_hash($password,PASSWORD_DEFAULT); $db=db(); $db->exec('BEGIN IMMEDIATE');
+            $token=$input['token']??null;
+            if (!is_string($token) || !hash_equals(setup_token(),$token)) fail('Incorrect setup token.',403);
+            $password=$input['password']??null;
+            $algorithm=owner_password_algorithm();$maxBytes=$algorithm===PASSWORD_BCRYPT?72:1024;
+            if (!is_string($password) || strlen($password)<12 || strlen($password)>$maxBytes || str_contains($password,"\0")) fail("Use a password between 12 and $maxBytes bytes, without null characters.");
+            $hash=password_hash($password,$algorithm); $db=db(); $db->exec('BEGIN IMMEDIATE');
             try { if (setting('owner')!==null) fail('Already configured.',409); set_setting('owner',['password'=>$hash]); $db->exec('COMMIT'); } catch(Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
             @unlink(data_dir().'/setup-token.txt');
-        } else { $user=setting('owner'); if (!$user || !password_verify((string)($input['password']??''),$user['password'])) fail('Incorrect password.',401); }
-        session_regenerate_id(true); $_SESSION['owner']=true; $_SESSION['csrf']=bin2hex(random_bytes(32)); json_response(['ok'=>true,'csrf'=>$_SESSION['csrf']]);
+        } elseif (!verify_owner_password($input['password']??null)) {
+            fail('Incorrect password.',$route==='reauthenticate'?403:401);
+        }
+        $now=time();
+        if ($route==='reauthenticate') {
+            $_SESSION['seen']=$_SESSION['verified_at']=$now;
+            json_response(['ok'=>true]);
+        }
+        session_regenerate_id(true);
+        $_SESSION=['owner'=>true,'csrf'=>bin2hex(random_bytes(32)),'seen'=>$now,'signed_in'=>$now,'verified_at'=>$now];
+        json_response(['ok'=>true,'csrf'=>$_SESSION['csrf']]);
     }
     owner();
+    if ($method==='POST') {
+        csrf();
+        $input=$sqliteRestore?[]:request_json($route==='restore'?128*1024*1024:16*1024*1024);
+    }
+    if ($route==='session-activity' && $method==='POST') {
+        $_SESSION['seen']=time();
+        json_response(['ok'=>true]);
+    }
+    if (($route==='backup' && $method==='GET') ||
+        ($route==='mail-empty-junk' && $method==='POST' && ($input['action']??null)==='empty') ||
+        ($route==='google-connect' && $method==='POST' && ($input['permanentDelete']??false)===true)) {
+        require_recent_sign_in();
+    }
     if($route==='connection-search' && $method==='GET') {
         session_write_close();
         $limit=20;$sort=null;
@@ -236,7 +265,7 @@ try {
             $count=count($preview['ids']);
             $token=$count?bin2hex(random_bytes(24)):'';
             if ($count) {
-                session_start();
+                start_session();
                 owner();csrf();
                 $_SESSION['empty_junk']=$preview+['token'=>$token,'expires'=>time()+300];
                 session_write_close();

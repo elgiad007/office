@@ -13,7 +13,7 @@ function sender_favicon_domain(string $domain): bool {
 function sender_favicon_address(string $domain): ?string {
     $addresses=@gethostbynamel($domain);
     if(!$addresses)return null;
-    foreach($addresses as $address)if(!filter_var($address,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4|FILTER_FLAG_GLOBAL_RANGE))return null;
+    foreach($addresses as $address)if(!public_ipv4($address))return null;
     return $addresses[0];
 }
 
@@ -147,19 +147,31 @@ function sender_favicon_cache_fresh(mixed $cached): bool {
 
 function serve_sender_favicon(string $domain): never {
     $domain=strtolower($domain);if(!sender_favicon_domain($domain))fail('Invalid sender domain.');
-    $directory=data_dir().'/favicons';
+    $directory=data_dir().'/favicons-bounded';
     if(!is_dir($directory) && !@mkdir($directory,0700,true) && !is_dir($directory)){http_response_code(204);exit;}
-    $path=$directory.'/'.hash('sha256',$domain).'.json';
-    $cached=json_decode(@file_get_contents($path)?:'null',true);
+    // A collision replaces its slot rather than allocating another cache file.
+    $path=$directory.'/'.substr(hash('sha256',$domain),0,2).'.json';
+    $read=static function()use($path,$domain): ?array {
+        $entry=json_decode(@file_get_contents($path)?:'null',true);
+        return ($entry['domain']??null)===$domain?$entry:null;
+    };
+    $cached=$read();
     if(!sender_favicon_cache_fresh($cached)){
-        $lock=@fopen($path.'.lock','c');
+        // One outstanding lookup per installation and at most 30 starts per minute.
+        $lock=@fopen($directory.'/lookup-limit','c+');
         if(!$lock || !flock($lock,LOCK_EX|LOCK_NB)){if($lock)fclose($lock);http_response_code(204);exit;}
         try{
-            // Recheck after acquiring the lock in case another request just populated it.
-            $cached=json_decode(@file_get_contents($path)?:'null',true);
+            $cached=$read();
             if(!sender_favicon_cache_fresh($cached)){
+                $now=time();
+                $budget=json_decode(stream_get_contents($lock)?:'null',true);
+                if(($budget['since']??0)<=$now-60)$budget=['since'=>$now,'count'=>0];
+                if($budget['count']>=30){http_response_code(204);exit;}
+                ++$budget['count'];
+                rewind($lock);
+                if(!ftruncate($lock,0) || fwrite($lock,json_encode($budget))===false || !fflush($lock)){http_response_code(204);exit;}
                 $icon=sender_favicon_lookup($domain);
-                $cached=['version'=>SENDER_FAVICON_CACHE_VERSION,'expires'=>time()+($icon?604800:900),'icon'=>$icon];
+                $cached=['domain'=>$domain,'version'=>SENDER_FAVICON_CACHE_VERSION,'expires'=>time()+($icon?604800:900),'icon'=>$icon];
                 @file_put_contents($path,json_encode($cached),LOCK_EX);@chmod($path,0600);
             }
         }finally{flock($lock,LOCK_UN);fclose($lock);}

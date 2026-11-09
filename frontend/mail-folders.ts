@@ -156,7 +156,7 @@ function bindEmptyJunk(env: FolderEnvironment,button: HTMLButtonElement,account?
         if(env.state.app!=='mail')return;
         if('authorize' in result && account){
           env.confirmation('Authorize permanent Spam deletion',`Google requires full Gmail access for Office to permanently empty Spam for ${account.label}. You only need to grant this permission once per Gmail account in Office. After that, you can empty Spam directly in Office. If you revoke access, you’ll need to grant it again.`,async()=>{
-            const authorization=await env.api('google-connect',{id:account.id,permanentDelete:true});
+            const authorization=await env.withRecentSignIn(()=>env.api('google-connect',{id:account.id,permanentDelete:true}));
             location.href=authorization.url;
           },'Continue to Google');
           return;
@@ -166,7 +166,7 @@ function bindEmptyJunk(env: FolderEnvironment,button: HTMLButtonElement,account?
         env.confirmation(title,`Permanently delete ${result.count} ${result.count===1?'message':'messages'} from ${result.name}? This also removes their Office connections and cannot be undone.`,async()=>{
           await env.commit();
           let outcome;
-          try {outcome=await busy(env,()=>env.api('mail-empty-junk',{action:'empty',token:result.token}));}
+          try {outcome=await env.withRecentSignIn(()=>busy(env,()=>env.api('mail-empty-junk',{action:'empty',token:result.token})));}
           finally {await reloadMail(env,true);}
           if(!('deleted' in outcome))throw Error('Could not confirm the folder was emptied.');
           const summary=`${outcome.deleted} permanently deleted.${outcome.skipped?` ${outcome.skipped} skipped because they changed or left the folder.`:''}`;

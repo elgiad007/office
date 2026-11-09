@@ -28,6 +28,13 @@ try {
     $bridge=<<<'JS'
 (()=>{
   let keys=new Set(['g','G','n','N','Tab']),sequenceTime=0;
+  let lastInteraction=0;
+  for(const type of ['keydown','pointerdown','wheel'])addEventListener(type,event=>{
+    const now=Date.now();
+    if(!event.isTrusted||now-lastInteraction<1000)return;
+    lastInteraction=now;
+    parent.postMessage({type:'office-mail-interaction'},'*');
+  },{capture:true,passive:true});
   const scroll=createKeyboardScroller(document.scrollingElement);
   addEventListener('message',event=>{
     if(event.source!==parent)return;

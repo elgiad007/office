@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {csvParse,csvWrite,cellValue,icsExport,markdown,vcardExport,vcardParse} from '../public/formats.js';
+import {csvParse,csvWrite,sheetCsv,cellValue,icsExport,markdown,vcardExport,vcardParse} from '../public/formats.js';
 
 test('CSV round-trips multiline fields, quotes, Unicode and trailing blanks',()=>{
   const rows=[['name','notes',''],['Zoë','two\nlines, "quoted"',''],['','last','']];
   assert.deepEqual(csvParse(csvWrite(rows)),rows);
   assert.throws(()=>csvParse('"unfinished'),/Unclosed/);
+});
+test('values CSV exports results and protects formula-like text',()=>{
+  const cells={A1:'=1+2',B1:'-12',C1:' @SUM(1)',D1:'=WEBSERVICE("https://example.invalid")',E1:'\ntext',F1:'＋2'};
+  assert.deepEqual(csvParse(sheetCsv(cells,'values')),[['3','-12',"' @SUM(1)",'#FORMULA!',"'\ntext","'＋2"]]);
+  assert.deepEqual(csvParse(sheetCsv(cells,'formulas')),[Object.values(cells)]);
 });
 test('formulas calculate references, precedence, ranges and dependencies',()=>{
   const cells={A1:'5',A2:'7',A3:'=SUM(A1:A2)',B1:'=A3*2+2^3',B2:'=-2^2',C1:'=AVERAGE(A1:A3)',C2:'=COUNT(A1:A4)'};

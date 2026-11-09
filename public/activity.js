@@ -2,7 +2,7 @@
 import { asError, isPresent } from './utils.js';
 import { escapeHtml as e } from './formats.js';
 import { timestampLabel, timestampText } from './time-labels.js';
-export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), openItem }) {
+export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), openItem, onSessionExpired }) {
     const bar = document.querySelector('#activity-status'), status = document.querySelector('#notice'), button = document.querySelector('#view-activity'), dialog = document.querySelector('#activity-dialog');
     let enabled = false, entries = [], cursor = 0, polling = false, generation = 0, lastMessage = 'Ready.', lastError = false, sequence = 0;
     const tasks = new Map();
@@ -28,7 +28,10 @@ export function createActivity({ csrf, keys = () => ({ down: 'j', up: 'k' }), op
             idleTimer = setTimeout(() => { idle = true; localErrorHeld = false; commandErrorHeld = false; renderStatus(); }, lastError ? 8000 : 1200);
     };
     const request = async (data) => {
+        const currentGeneration = generation;
         const response = await fetch('api.php?r=activity' + (data ? '' : '&after=' + cursor), { method: data ? 'POST' : 'GET', headers: data ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() } : undefined, body: data ? JSON.stringify(data) : undefined, cache: 'no-store' });
+        if (response.status === 401 && currentGeneration === generation)
+            onSessionExpired?.();
         if (!response.ok)
             throw Error('Activity log could not be loaded.');
         return response.json();

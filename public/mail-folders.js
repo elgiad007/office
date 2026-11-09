@@ -209,7 +209,7 @@ function bindEmptyJunk(env, button, account, folder = '') {
                     return;
                 if ('authorize' in result && account) {
                     env.confirmation('Authorize permanent Spam deletion', `Google requires full Gmail access for Office to permanently empty Spam for ${account.label}. You only need to grant this permission once per Gmail account in Office. After that, you can empty Spam directly in Office. If you revoke access, you’ll need to grant it again.`, async () => {
-                        const authorization = await env.api('google-connect', { id: account.id, permanentDelete: true });
+                        const authorization = await env.withRecentSignIn(() => env.api('google-connect', { id: account.id, permanentDelete: true }));
                         location.href = authorization.url;
                     }, 'Continue to Google');
                     return;
@@ -224,7 +224,7 @@ function bindEmptyJunk(env, button, account, folder = '') {
                     await env.commit();
                     let outcome;
                     try {
-                        outcome = await busy(env, () => env.api('mail-empty-junk', { action: 'empty', token: result.token }));
+                        outcome = await env.withRecentSignIn(() => busy(env, () => env.api('mail-empty-junk', { action: 'empty', token: result.token })));
                     }
                     finally {
                         await reloadMail(env, true);

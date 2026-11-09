@@ -117,6 +117,8 @@ export interface GoogleSettings {
 export interface Status {
   setup: boolean; authenticated: boolean; activity: boolean;
   csrf: string; preferences: Preferences;
+  lastInteraction?: number | null;
+  remoteSenderIcons?: boolean;
 }
 export interface MutationResult { record: OfficeRecord; removedIds?: string[] }
 export interface MailActionResult { record: OfficeRecord | null; removedIds?: string[]; undoToken?: string }
@@ -126,6 +128,7 @@ export interface ApiResponses {
   status: Status;
   accounts: { accounts: Account[] };
   setup: { csrf: string }; login: { csrf: string }; logout: { ok: boolean };
+  'session-activity': { ok: boolean }; reauthenticate: { ok: boolean };
   save: MutationResult; delete: { ok: boolean; undoToken?: string }; 'mail-action': MailActionResult;
   'mail-undo': MutationResult;
   'mail-junk-settings': {rules: {type: 'sender' | 'domain'; target: string}[]; folder: string};
@@ -180,6 +183,7 @@ export interface FolderEnvironment {
   dialog: HTMLDialogElement; e: (value: unknown) => string;
   field: (label: string, name: string, value?: string, type?: string, extra?: string) => string;
   confirmation: Confirmation; attempt: Attempt; closeFolderPanel?: () => void;
+  withRecentSignIn: <T>(operation: () => Promise<T>) => Promise<T>;
   mailDeletionReload?: () => (removedIds: string[]) => Promise<void>;
 }
 export interface MenuEnvironment {

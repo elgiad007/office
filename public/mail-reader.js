@@ -36,7 +36,7 @@ export function mailBody(record, prefs) {
     return mode === 'html' ? `<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id) ? '&colors=original' : ''}${hasImageConsent(record.id) ? '&images=1' : ''}"></iframe>` : `<div class="mail-body">${e(record.body)}</div>`;
 }
 let bridgeCleanup;
-export function bindMailReader(panel, record, render, navigation = {}) {
+export function bindMailReader(panel, record, render, navigation = {}, onInteraction) {
     bridgeCleanup?.();
     readerSize?.disconnect();
     moreOpening?.disconnect();
@@ -54,6 +54,10 @@ export function bindMailReader(panel, record, render, navigation = {}) {
                 return;
             if (data.type === 'office-mail-ready' && Object.keys(data).length === 1) {
                 configure();
+                return;
+            }
+            if (data.type === 'office-mail-interaction' && Object.keys(data).length === 1) {
+                onInteraction?.();
                 return;
             }
             if (data.type === 'office-mail-pointer' && Object.keys(data).length === 1) {

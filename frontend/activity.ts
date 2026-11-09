@@ -3,7 +3,7 @@ import type {ActivityEntry,ActivityProgress} from './types.js';
 import {escapeHtml as e} from './formats.js';
 import {timestampLabel, timestampText} from './time-labels.js';
 
-export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem}: {csrf: () => string; keys?: () => Record<string,string>; openItem?: (id: string,dismiss: () => boolean) => Promise<void>}) {
+export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem,onSessionExpired}: {csrf: () => string; keys?: () => Record<string,string>; openItem?: (id: string,dismiss: () => boolean) => Promise<void>; onSessionExpired?: () => void}) {
   const bar=document.querySelector<HTMLElement>('#activity-status')!,status=document.querySelector<HTMLElement>('#notice')!,button=document.querySelector<HTMLButtonElement>('#view-activity')!,dialog=document.querySelector<HTMLDialogElement>('#activity-dialog')!;
   let enabled=false,entries: ActivityEntry[]=[],cursor=0,polling=false,generation=0,lastMessage='Ready.',lastError=false,sequence=0;
   const tasks=new Map<number, {message: string; active: boolean; syncProgress?: boolean}>();
@@ -24,7 +24,9 @@ export function createActivity({csrf,keys=()=>({down:'j',up:'k'}),openItem}: {cs
     if(!tasks.size)idleTimer=setTimeout(()=>{idle=true;localErrorHeld=false;commandErrorHeld=false;renderStatus();},lastError?8000:1200);
   };
   const request=async(data?: {action: string; message?: string; error?: boolean}): Promise<{entries?: ActivityEntry[]}>=>{
+    const currentGeneration=generation;
     const response=await fetch('api.php?r=activity'+(data?'':'&after='+cursor),{method:data?'POST':'GET',headers:data?{'Content-Type':'application/json','X-CSRF-Token':csrf()}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store'});
+    if(response.status===401&&currentGeneration===generation)onSessionExpired?.();
     if(!response.ok)throw Error('Activity log could not be loaded.');return response.json() as Promise<{entries?: ActivityEntry[]}>;
   };
   function renderStatus() {

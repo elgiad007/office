@@ -7,7 +7,7 @@ function public_host(string $host): string {
     if (!preg_match('/^[a-zA-Z0-9.-]{1,253}$/D',$host)) fail('Use a public DNS hostname.');
     $ips=gethostbynamel($host);
     if (!$ips) fail('Cannot resolve server hostname.');
-    foreach ($ips as $ip) if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_NO_PRIV_RANGE|FILTER_FLAG_NO_RES_RANGE)) fail('Private/reserved servers are not supported.');
+    foreach ($ips as $ip) if (!public_ipv4($ip)) fail('Private/reserved servers are not supported.');
     return $ips[0];
 }
 function web_request(string $url, string $method='GET', array $headers=[], ?string $body=null,int $limit=8388608): array {
@@ -16,7 +16,7 @@ function web_request(string $url, string $method='GET', array $headers=[], ?stri
     if (!$p || ($p['scheme']??'')!=='https' || empty($p['host']) || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) fail('Use an HTTPS endpoint without embedded credentials.');
     $port=(int)($p['port']??443); if (!in_array($port,[443,8443],true)) fail('HTTPS ports 443 or 8443 are supported.');
     $ip=public_host($p['host']); $ch=curl_init($url); $response='';
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>30,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response,$limit) { if (strlen($response)+strlen($chunk)>$limit) return 0; $response.=$chunk; return strlen($chunk); }]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>30,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_PROXY=>'',CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response,$limit) { if (strlen($response)+strlen($chunk)>$limit) return 0; $response.=$chunk; return strlen($chunk); }]);
     if ($body!==null) curl_setopt($ch,CURLOPT_POSTFIELDS,$body);
     $ok=curl_exec($ch); $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
     if ($ok===false) fail('Provider connection failed or exceeded its response limit.');

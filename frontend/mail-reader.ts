@@ -30,7 +30,7 @@ export function mailBody(record: OfficeRecord,prefs: Preferences) {
   return mode==='html'?`<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id)?'&colors=original':''}${hasImageConsent(record.id)?'&images=1':''}"></iframe>`:`<div class="mail-body">${e(record.body)}</div>`;
 }
 let bridgeCleanup: (()=>void)|undefined;
-export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: () => void,navigation: Record<string,string>={}) {
+export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: () => void,navigation: Record<string,string>={},onInteraction?: () => void) {
   bridgeCleanup?.();
   readerSize?.disconnect();
   moreOpening?.disconnect();
@@ -45,6 +45,7 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
       const data=event.data;
       if(!data||typeof data!=='object'||Array.isArray(data))return;
       if(data.type==='office-mail-ready'&&Object.keys(data).length===1){configure();return;}
+      if(data.type==='office-mail-interaction'&&Object.keys(data).length===1){onInteraction?.();return;}
       if(data.type==='office-mail-pointer'&&Object.keys(data).length===1){more.open=false;return;}
       if(data.type==='office-mail-context'&&Object.keys(data).length===3&&Number.isFinite(data.x)&&Number.isFinite(data.y)&&data.x>=0&&data.y>=0&&data.x<=frame.clientWidth&&data.y<=frame.clientHeight){const rect=frame.getBoundingClientRect();frame.dispatchEvent(new MouseEvent('contextmenu',{clientX:rect.left+data.x,clientY:rect.top+data.y,bubbles:true,cancelable:true}));return;}
       if(data.type==='office-mail-save'&&Object.keys(data).length===4&&typeof data.ctrlKey==='boolean'&&typeof data.metaKey==='boolean'&&(data.ctrlKey||data.metaKey)&&typeof data.repeat==='boolean'){frame.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:data.ctrlKey,metaKey:data.metaKey,repeat:data.repeat,bubbles:true,cancelable:true}));return;}

@@ -65,6 +65,9 @@ function office_backup_rows(PDO $archive,string $table): Generator {
 }
 
 function restore_sqlite_backup(): array {
+    $configured=getenv('OFFICE_SQLITE_RESTORE_MAX_BYTES');
+    $limit=filter_var($configured,FILTER_VALIDATE_INT,['options'=>['min_range'=>20,'max_range'=>PHP_INT_MAX-1]])?:128*1024*1024;
+    if ((int)($_SERVER['CONTENT_LENGTH']??0)>$limit) fail('SQLite backup exceeds the restore upload limit.',413);
     $path=backup_temp_file();
     try {
         $input=fopen('php://input','rb');
@@ -75,7 +78,8 @@ function restore_sqlite_backup(): array {
             if(strlen($header)!==20||substr($header,0,16)!=="SQLite format 3\0")fail('Choose an Office SQLite backup.');
             if(substr($header,18,2)!=="\x01\x01")fail('Choose a standalone Office SQLite backup.');
             if(fwrite($file,$header)!==20)fail('Cannot write the backup upload.',500);
-            $copied=stream_copy_to_stream($input,$file);
+            $copied=stream_copy_to_stream($input,$file,$limit-19);
+            if ($copied!==false && $copied+20>$limit) fail('SQLite backup exceeds the restore upload limit.',413);
             if($copied===false || (isset($_SERVER['CONTENT_LENGTH']) && $copied+20!==(int)$_SERVER['CONTENT_LENGTH']))fail('The backup upload was incomplete.');
         } finally {
             if($input)fclose($input);

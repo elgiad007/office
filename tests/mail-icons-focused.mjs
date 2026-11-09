@@ -17,7 +17,7 @@ const php=process.env.OFFICE_PHP||'php';
 const live=process.env.OFFICE_TEST_LIVE_FAVICONS==='1';
 const extensions=process.env.OFFICE_PHP_EXT?['-d','extension_dir='+resolve(process.env.OFFICE_PHP_EXT),...['pdo_sqlite','openssl','curl','dom'].flatMap(name=>['-d','extension='+name])]:[];
 const ca=process.env.OFFICE_PHP_CA?['-d','curl.cainfo='+resolve(process.env.OFFICE_PHP_CA)]:[];
-const server=spawn(php,[...extensions,...ca,'-S',`127.0.0.1:${port}`,'-t',resolve('public')],{env:{...process.env,OFFICE_DATA_DIR:dir},windowsHide:true,stdio:'ignore'});
+const server=spawn(php,[...extensions,...ca,'-S',`127.0.0.1:${port}`,'-t',resolve('public')],{env:{...process.env,OFFICE_DATA_DIR:dir,OFFICE_REMOTE_SENDER_ICONS:'1'},windowsHide:true,stdio:'ignore'});
 let browser;
 try{
   for(let i=0;i<60;i++){try{await fetch(url+'api.php?r=status');break;}catch{await new Promise(r=>setTimeout(r,100));}}
@@ -40,11 +40,12 @@ try{
   const rows=(await api('records&kind=mail&summaries=1')).records;
   assert.equal(rows.find(r=>r.id===mail.id).connectionCount,2);assert.equal(rows.find(r=>r.id===missing.id).connectionCount,0);
   const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
-  await mkdir(dir+'/favicons');
-  for(const [name,icon] of [[domain,live?null:{type:'image/png',body:png}],['missing.example',null]])await writeFile(dir+'/favicons/'+createHash('sha256').update(name).digest('hex')+'.json',JSON.stringify({...(name==='missing.example'?{version:2}:{}),expires:Math.floor(Date.now()/1000)+3600,icon}));
+  const cachePath=name=>dir+'/favicons-bounded/'+createHash('sha256').update(name).digest('hex').slice(0,2)+'.json';
+  await mkdir(dir+'/favicons-bounded');
+  for(const [name,icon] of [[domain,live?null:{type:'image/png',body:png}],['missing.example',null]])await writeFile(cachePath(name),JSON.stringify({domain:name,...(name==='missing.example'?{version:2}:{}),expires:Math.floor(Date.now()/1000)+3600,icon}));
   // Live mode starts from an old negative cache entry and requires real discovery to replace it.
   const cached=await context.request.get(url+'sender-favicon.php?domain='+domain);assert.equal(cached.headers()['content-type'],'image/png');assert.equal(cached.status(),200);
-  if(live){const saved=JSON.parse(await readFile(dir+'/favicons/'+createHash('sha256').update(domain).digest('hex')+'.json','utf8'));assert.equal(saved.version,2);assert.ok(saved.icon);assert.notEqual(saved.icon.body,png);}
+  if(live){const saved=JSON.parse(await readFile(cachePath(domain),'utf8'));assert.equal(saved.version,2);assert.ok(saved.icon);assert.notEqual(saved.icon.body,png);}
   assert.equal((await context.request.get(url+'sender-favicon.php?domain=127.0.0.1')).status(),400);
   assert.equal((await context.request.get(url+'sender-favicon.php?domain=missing.example')).status(),204);
   const anonymous=await browser.newContext();assert.equal((await anonymous.request.get(url+'sender-favicon.php?domain=example.com')).status(),401);await anonymous.close();

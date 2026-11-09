@@ -7,11 +7,11 @@ import net from 'node:net';
 
 const php=process.env.OFFICE_PHP||'php',extensionDir=process.env.OFFICE_PHP_EXT;
 const servers=[];
-async function start(){
+async function start(overrides={}){
  await mkdir('.runtime',{recursive:true});const dir=await mkdtemp(join(resolve('.runtime'),'http-'));
  const listener=net.createServer();listener.listen(0,'127.0.0.1');await once(listener,'listening');const port=listener.address().port;await new Promise(r=>listener.close(r));
  const args=extensionDir?['-d','extension_dir='+resolve(extensionDir),'-d','extension=pdo_sqlite','-d','extension=openssl','-d','extension=curl']:[];
- const server=spawn(php,[...args,'-S','127.0.0.1:'+port,'-t',resolve('public')],{env:{...process.env,OFFICE_DATA_DIR:dir},windowsHide:true,stdio:['ignore','ignore','pipe']});servers.push(server);
+ const server=spawn(php,[...args,'-S','127.0.0.1:'+port,'-t',resolve('public')],{env:{...process.env,OFFICE_DATA_DIR:dir,OFFICE_REMOTE_SENDER_ICONS:'0',...overrides},windowsHide:true,stdio:['ignore','ignore','pipe']});servers.push(server);
  let logs='';server.stderr.on('data',chunk=>logs=(logs+chunk).slice(-4000));server.on('error',e=>console.error(e));
  const client={dir,csrf:'',cookie:'',url:'http://127.0.0.1:'+port+'/api.php?r='};
  client.call=async(route,body,expected=200,token=client.csrf)=>{
@@ -23,7 +23,49 @@ async function start(){
 }
 async function setup(c){const before=c.cookie;const result=await c.call('setup',{token:(await readFile(c.dir+'/setup-token.txt','utf8')).trim(),password:'test-password-only-123'});c.csrf=result.csrf;assert.notEqual(c.cookie,before);}
 try{
- const a=await start();await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('mail-export',undefined,401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);await setup(a);
+ const a=await start({OFFICE_SQLITE_RESTORE_MAX_BYTES:'64'});await a.call('records&kind=tasks',undefined,401);await a.call('activity',undefined,401);await a.call('google-settings',undefined,401);await a.call('google-settings',{},401);await a.call('account-test',{},401);await a.call('mail-export',undefined,401);await a.call('setup',{token:'bad',password:'long-enough-password'},403);
+ const malformed=await fetch(a.url+'save',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf},body:'{invalid'});
+ assert.equal(malformed.status,401,'authorize before parsing JSON');
+ await setup(a);
+ assert.equal((await a.call('status')).remoteSenderIcons,false);
+ assert.equal((await fetch(new URL('sender-favicon.php?domain=example.com',a.url),{headers:{Cookie:a.cookie}})).status,404);
+ const sessionPath=()=>join(a.dir,'sess_'+a.cookie.split('=')[1]);
+ const sessionTime=async key=>Number((await readFile(sessionPath(),'utf8')).match(new RegExp(key+'\\|i:(\\d+);'))[1]);
+ const ageSession=async (key,seconds)=>{
+   const path=sessionPath(),session=await readFile(path,'utf8'),timestamp=Math.floor(Date.now()/1000)-seconds;
+   await writeFile(path,session.replace(new RegExp(key+'\\|i:\\d+;'),key+'|i:'+timestamp+';'));
+ };
+ await ageSession('seen',60);
+ const seen=await sessionTime('seen');
+ await a.call('activity');
+ assert.equal(await sessionTime('seen'),seen);
+ await a.call('session-activity',{},403,'bad-token');
+ await a.call('session-activity',{});
+ assert.ok(await sessionTime('seen')>seen);
+ await ageSession('verified_at',301);
+ await a.call('backup&format=json',undefined,428);
+ await a.call('mail-empty-junk',{action:'empty'},428);
+ await a.call('reauthenticate',{password:'wrong password'},403);
+ await a.call('reauthenticate',{password:'test-password-only-123'});
+ assert.equal((await a.call('backup&format=json')).format,'portable-office');
+ await ageSession('seen',3601);
+ await a.call('activity',undefined,401);
+ a.csrf=(await a.call('status')).csrf;
+ a.csrf=(await a.call('login',{password:'test-password-only-123'})).csrf;
+ await ageSession('signed_in',43201);
+ await a.call('session-activity',{},401);
+ a.csrf=(await a.call('status')).csrf;
+ a.csrf=(await a.call('login',{password:'test-password-only-123'})).csrf;
+ const oversizedBackup=Buffer.alloc(65);
+ oversizedBackup.write('SQLite format 3\0');
+ oversizedBackup[18]=oversizedBackup[19]=1;
+ const restoreHeaders={Cookie:a.cookie,'X-CSRF-Token':a.csrf,'Content-Type':'application/vnd.sqlite3'};
+ const oversized=await fetch(a.url+'restore',{method:'POST',headers:restoreHeaders,body:oversizedBackup});
+ assert.equal(oversized.status,413);
+ const chunked=await fetch(a.url+'restore',{method:'POST',headers:restoreHeaders,duplex:'half',body:new ReadableStream({start(stream){stream.enqueue(oversizedBackup);stream.close();}})});
+ assert.equal(chunked.status,413);
+ assert.ok(!(await readdir(a.dir)).some(file=>file.startsWith('office-backup-')));
+ console.log('PASS HTTP idle and absolute expiry, password confirmation, authentication order, icon default and bounded restore uploads');
  const undoMail=(await a.call('save',{kind:'mail',title:'HTTP undo mail',body:'Complete local mail body',meta:{folder:'Archive',rawBase64:Buffer.from('Original EML').toString('base64')}})).record;
  const headerOnly=(await a.call('save',{kind:'mail',title:'Header-only fixture',body:'',meta:{headerOnly:true,headersBase64:'SGVhZGVycw=='}})).record;
  const unrelated=(await a.call('save',{kind:'tasks',title:'Not mail',body:'',meta:{}})).record;
@@ -102,6 +144,7 @@ try{
  await a.call('activity',{action:'clear'},403,'bad-token');
  await a.call('activity',{action:'notice',message:'Activity visibility fixture',error:true});
  assert.ok((await a.call('activity')).entries.some(entry=>entry.message==='Activity visibility fixture'&&entry.level==='error'));
+ await a.call('preferences',{preferences:{activityLogLevel:'detailed'}});
  await a.call('activity',{action:'diagnostic',message:'Mail conflict diagnostic fixture'});
  assert.ok((await a.call('activity')).entries.some(entry=>entry.message==='Mail conflict diagnostic fixture'&&entry.phase==='diagnostic'&&entry.level==='info'));
  await a.call('activity',{action:'diagnostic',message:'No CSRF'},403,'bad-token');

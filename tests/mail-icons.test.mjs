@@ -10,7 +10,8 @@ test('sender domain uses the mailbox and rejects malformed domains',()=>{
 test('mail identity keeps fallback, selection and connection count independent',()=>{
   const row={meta:{from:'user@example.com'},connectionCount:123};
   const html=renderMailListIcon(row,false,'<svg class="fallback"></svg>');
-  assert.match(html,/sender-favicon.php\?domain=example.com/);
+  assert.doesNotMatch(html,/sender-favicon.php/);
+  assert.match(renderMailListIcon(row,false,'envelope',true),/sender-favicon.php\?domain=example.com/);
   assert.match(html,/class="fallback"/);
   assert.match(html,/aria-label="123 connections"/);
   const selected=renderMailListIcon(row,true,'envelope');

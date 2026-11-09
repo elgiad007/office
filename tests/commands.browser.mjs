@@ -3,7 +3,7 @@ export async function testCommands(page,url) {
   await page.goto('about:blank');
   let authenticated=true,creates=[],logout=0,saves=0,releaseCreate,createStarted,failLogout=false;
   const notices=[];
-  let backupCalls=0,finishBackup,backupStarted;
+  let backupCalls=0,finishBackup,backupStarted,recentlyVerified=false;
   const backupPending=new Promise(resolve=>{backupStarted=resolve;});
   const synced=[];
   const openedFolders=[];
@@ -19,10 +19,18 @@ export async function testCommands(page,url) {
     else if(action==='backup'){
       backupCalls++;
       if(backupCalls===1){await route.fulfill({status:503,json:{error:'Backup temporarily unavailable.'}});return;}
+      if(!recentlyVerified){await route.fulfill({status:428,json:{error:'Confirm your password to continue.'}});return;}
       await new Promise(resolve=>{finishBackup=resolve;backupStarted();});
       await route.fulfill({contentType:'application/vnd.sqlite3',body:'SQLite format 3\0'});
       return;
     }
+    else if(action==='reauthenticate'){
+      if(route.request().postDataJSON().password!=='fixture-owner-password'){
+        await route.fulfill({status:403,json:{error:'Incorrect password.'}});return;
+      }
+      recentlyVerified=true;json={ok:true};
+    }
+    else if(action==='session-activity')json={ok:true};
     else if(action==='sync'){synced.push(route.request().postDataJSON().id);json={more:false};}
     else if(action==='mail-folder-sync'){openedFolders.push(route.request().postDataJSON());json={more:false};}
     else if(action==='connections')json={links:[],items:[],more:false};
@@ -107,7 +115,7 @@ export async function testCommands(page,url) {
     await page.keyboard.press('Tab');
     assert.equal(await page.locator('#command-input').inputValue(),':m "Work Account"');
     await page.keyboard.press('Enter');
-    await page.locator('.folder-current').getByText(/Work Account \/ Inbox/i).waitFor();
+    await page.locator('.folder-current-heading').filter({hasText:/Work Account \/ Inbox/i}).waitFor();
     await page.locator('#selected-item[data-id=gmail-inbox]').waitFor();
     await page.waitForFunction(()=>!document.querySelector('#sync-button').disabled);
     assert.deepEqual(openedFolders.map(({account,folder})=>[account,folder]),[['work-gmail','INBOX']]);
@@ -154,12 +162,21 @@ export async function testCommands(page,url) {
     await page.getByRole('progressbar',{name:'Backup progress'}).waitFor();
     assert.equal(await prepare.isDisabled(),true);
     assert.equal(await backupDownload.isVisible(),false);
+    const passwordDialog=page.getByRole('dialog',{name:'Confirm your password'});
+    const password=passwordDialog.getByLabel('Office password');
+    await password.fill('wrong password');
+    await passwordDialog.getByRole('button',{name:'Confirm',exact:true}).click();
+    await passwordDialog.getByText('Incorrect password.').waitFor();
+    assert.equal(await backupDownload.isVisible(),false);
+    await password.fill('fixture-owner-password');
+    await passwordDialog.getByRole('button',{name:'Confirm',exact:true}).click();
     await backupPending;
     finishBackup();
     await backupDownload.waitFor();
     assert.match(await page.locator('#backup-status').textContent(),/ready to download/i);
     assert.equal(await page.getByRole('progressbar',{name:'Backup progress'}).isVisible(),false);
     await page.locator('#main').focus();await page.keyboard.press('?');
+    await page.getByRole('tab',{name:'All help'}).click();
     for(const alias of ['cal','con','doc','sh','set','backup']){
       await page.locator('[data-help-search]').fill(':'+alias);
       assert.ok(await page.locator('.help-table tbody tr').count());
