@@ -120,14 +120,18 @@ try{
  await page.locator('[data-connection-kind]').selectOption('tasks');await page.locator('[data-list-title]').filter({hasText:'Matching items'}).waitFor();assert.equal(await page.locator('.connection-list-row').count(),50);assert.equal(await page.locator('[data-node][data-kind="documents"]').count(),0);
  await page.locator('[data-overview]').click();await page.locator('[data-group-node]').click();await page.locator('[data-node]').first().waitFor();
  await page.getByRole('button',{name:'Center selection',exact:true}).click();await page.screenshot({path:'test-results/connection-explorer-desktop.png'});
+ await page.locator('[data-toggle-panel]').click();assert.equal(await page.locator('#connection-panel').isVisible(),false);await page.locator('[data-toggle-panel]').click();assert.equal(await page.locator('#connection-panel').isVisible(),true);
  for(const viewport of [{width:390,height:844},{width:844,height:390}]){
-  await page.setViewportSize(viewport);await checkFitBuffer();
+  await page.setViewportSize(viewport);await page.getByRole('button',{name:'Map',exact:true}).click();
+  await checkFitBuffer();
   await page.getByRole('button',{name:'Center selection',exact:true}).click();assert.ok(await page.locator('dialog').evaluate(node=>node.scrollWidth<=node.clientWidth+1));
   assert.ok(await page.locator('svg').evaluate(svg=>{const from=svg.querySelector('[data-origin-node] .connection-outline').getBoundingClientRect(),current=svg.querySelector('.connection-focal .connection-outline').getBoundingClientRect(),map=svg.getBoundingClientRect();return (from.right<=current.left||from.bottom<=current.top)&&[from,current].every(rect=>rect.left>=map.left-1&&rect.right<=map.right+1&&rect.top>=map.top-1&&rect.bottom<=map.bottom+1);}));
-  const map=await page.locator('[data-connection-graph]').boundingBox();assert.ok(map.height>=100);assert.ok(map.y+map.height<=viewport.height);
-  await page.locator('[data-toggle-panel]').click();assert.equal(await page.locator('#connection-panel').isVisible(),false);await page.locator('[data-toggle-panel]').click();assert.equal(await page.locator('#connection-panel').isVisible(),true);
+  const map=await page.locator('[data-connection-graph]').boundingBox();assert.ok(map.height>=240);
+  assert.equal(await page.locator('#connection-panel').isVisible(),false);
   await page.screenshot({path:`test-results/connection-explorer-${viewport.width}.png`});
+  await page.getByRole('button',{name:'List',exact:true}).click();assert.equal(await page.locator('#connection-panel').isVisible(),true);assert.equal(await page.locator('#connection-map-pane').isVisible(),false);
  }
+ await page.setViewportSize({width:1440,height:1000});
  await page.keyboard.press('Escape');assert.equal(await page.locator('dialog').isVisible(),false);assert.equal(await page.locator('#launch').evaluate(node=>node===document.activeElement),true);
  // A search result drills into its neighborhood, then Enter opens its content without another fetch.
  await page.locator('#launch').click();await page.locator('[data-group-node]').waitFor();await page.keyboard.press('/');await page.locator('[data-connection-filter]').fill('Project item 1199');await page.keyboard.press('Enter');await page.waitForFunction(()=>document.activeElement?.getAttribute('data-node')==='n1199');
@@ -162,6 +166,46 @@ try{
  assert.equal(await neighborArea.locator('g > rect').count(),0);
  await highlight.click();
  assert.equal(await neighborArea.locator('g > rect').count(),2);
+ groupCount=6;
+ items[1199].title+=' '+ 'LongUnbrokenTitle'.repeat(12);
+ const phone=await browser.newPage({viewport:{width:320,height:700},isMobile:true,hasTouch:true});
+ phone.on('pageerror',error=>errors.push(error.message));
+ await phone.goto(url);await phone.locator('#launch').tap();
+ const phoneStatus=phone.locator('[data-connection-status]'),phoneList=phone.locator('#connection-panel');
+ const phoneMap=phone.locator('#connection-map-pane');
+ const phoneSearch=phone.getByRole('searchbox',{name:'Find connected items'});
+ const mapSwitch=phone.getByRole('button',{name:'Map',exact:true});
+ const listSwitch=phone.getByRole('button',{name:'List',exact:true});
+ await phoneStatus.filter({hasText:'groups loaded'}).waitFor();
+ assert.equal(await listSwitch.getAttribute('aria-pressed'),'true');
+ assert.equal(await phoneMap.isVisible(),false);
+ const group=phoneList.locator('.connection-list-row').filter({hasText:'Workspace group 1'});
+ const groupButton=group.getByRole('button',{name:'Explore group'});
+ assert.ok((await groupButton.boundingBox()).height>=44);
+ await phone.screenshot({path:'test-results/connection-explorer-phone-list.png'});
+ await groupButton.tap();await phoneStatus.filter({hasText:'100 of 1200'}).waitFor();
+ const endpoint=phoneList.locator('[data-select="n1"]').first();
+ await endpoint.tap();
+ const selected=phoneList.locator('[data-selection]');
+ assert.match(await selected.locator('h3').textContent(),/Project item 0001/);
+ await selected.getByRole('button',{name:'Explore connections'}).tap();await phoneStatus.filter({hasText:'1 of 1 connections loaded'}).waitFor();
+ const neighbor=phoneList.locator('.connection-list-neighbor');
+ assert.match(await neighbor.textContent(),/Project hub/);
+ await mapSwitch.tap();assert.equal(await phoneList.isVisible(),false);assert.equal(await phoneMap.isVisible(),true);
+ await listSwitch.tap();assert.equal(await neighbor.isVisible(),true);
+ await phone.getByRole('button',{name:'Back in connections'}).tap();await phoneStatus.filter({hasText:'100 of 1200'}).waitFor();
+ await phoneList.getByRole('button',{name:'Load more connections'}).tap();await phoneStatus.filter({hasText:'200 of 1200'}).waitFor();
+ await phoneSearch.fill('Project item 1199');await phoneStatus.filter({hasText:'1 of 1 matching items'}).waitFor();
+ assert.equal(await phoneSearch.evaluate(node=>node===document.activeElement),true);
+ await phone.evaluate(()=>{
+   document.documentElement.style.fontSize='200%';
+   document.documentElement.style.setProperty('--office-keyboard-height','340px');
+ });
+ assert.equal(await phone.locator('dialog').evaluate(node=>node.clientHeight<=340),true);
+ assert.equal(await phone.locator('.connections-view').evaluate(node=>node.scrollWidth<=node.clientWidth+1),true);
+ const open=phoneList.locator('[data-open="n1199"]');
+ await open.tap();await phone.waitForFunction(()=>window.opened==='n1199');
+ await phone.close();
  assert.deepEqual(errors,[]);console.log('PASS explorer: full screen, 1,200-edge fixture, grouping, bounded map/list, selection, persisted direct-neighbor highlight, zoom/pan, neighborhood requests, global search, type filters, history, stale responses, responsive views and lifecycle.');
 }catch(error){if(page)await page.screenshot({path:'test-results/connection-explorer-failure.png'});throw error;}
 finally{await browser?.close();server.closeAllConnections();await new Promise(r=>server.close(r));}

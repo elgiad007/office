@@ -66,8 +66,9 @@ try{
  await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'Tasks',exact:true}).click();await page.locator('#items [data-id="'+source.id+'"]').click();await page.locator('#detail [data-action="delete"]').click();await page.locator('[data-preserve]').waitFor();assert.equal(await page.locator('[data-preserve]').isChecked(),true);await page.locator('#cancel').click();
  const backup=await api('backup&format=json');assert.equal(backup.connections.filter(link=>link.archived===1).length,3);
+ for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});
  await assert.rejects(api('restore',{backup:{...backup,connections:backup.connections.map(link=>({...link,archived:'yes'}))}}),/archive status/);
- for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});await api('restore',{backup});
+ await api('restore',{backup});
  assert.equal((await api('connections&mode=overview')).groupTotal,1);assert.equal((await api('connections&mode=overview&visibility=archived')).total,3);
  const legacy={...backup,connections:backup.connections.map(({archived,...link})=>link)};for(const record of backup.records)await api('delete',{id:record.id,revision:record.revision});await api('restore',{backup:legacy});assert.equal((await api('connections&mode=overview')).total,4);assert.equal((await api('connections&mode=overview&visibility=archived')).total,0);
  await page.reload();await page.locator('[data-action="connections"]').click();await page.locator('[data-group-node]').first().waitFor();assert.equal(await page.locator('[data-connection-visibility]').inputValue(),'active');
@@ -81,6 +82,14 @@ try{
  await page.locator('[data-selection] [data-archive-action="restore"]').click();await loaded('Restored 1 connections.');await page.keyboard.press('Escape');await page.waitForFunction(()=>document.querySelector('#mode')?.textContent==='NORMAL'&&document.activeElement?.id==='selected-item');assert.equal(await page.locator('#dialog').isVisible(),false);
  await page.keyboard.press('L');await loaded('1 of 1 connections loaded');await page.keyboard.press('/');assert.equal(await page.locator('#mode').textContent(),'NORMAL');await page.locator('[data-close]').click();await page.waitForFunction(()=>document.querySelector('#mode')?.textContent==='NORMAL');
  await page.keyboard.press('g');await page.keyboard.press('g');const firstMail=await page.locator('#selected-item').getAttribute('data-id');await page.keyboard.press('j');await page.waitForFunction(id=>document.querySelector('#selected-item')?.getAttribute('data-id')!==id,firstMail);assert.equal(await page.locator('#mode').textContent(),'NORMAL');
+ await page.keyboard.press('L');await loaded('1 of 1 connections loaded');
+ await page.setViewportSize({width:390,height:740});
+ const mobileEdge=page.locator('#connection-panel [data-connection-edge]');
+ assert.equal(await page.locator('#connection-map-pane').isVisible(),false);
+ await mobileEdge.locator('[data-archive-action="archive"]').click();await loaded('Archived 1 connections.');
+ await setView('archived');await loaded('1 of 1 connections loaded');
+ await mobileEdge.locator('[data-archive-action="restore"]').click();await loaded('Restored 1 connections.');
+ assert.equal(await mobileEdge.locator('.connection-archive-badge').count(),0);
  assert.deepEqual(errors,[]);console.log('PASS archive: real API, edge/item/group controls, active/archived/all, badges, search/count consistency, history invalidation, other groups, backup and legacy restore.');
 }catch(error){if(page){console.error((await page.locator('body').innerText()).slice(-1800));await page.screenshot({path:'test-results/connection-archive-failure.png'});}throw error;}
 finally{await browser?.close();server.kill();proxy.closeAllConnections();await new Promise(r=>proxy.close(r));}

@@ -14,29 +14,44 @@ const typeLabel=(kind:string)=>itemTypes[kind as ItemKind]?.label||kind;
 const symbols:Record<string,string>={mail:'✉',calendar:'▦',tasks:'✓',contacts:'♙',documents:'▤',wiki:'◇',sheets:'▦',lists:'☑'};
 const ORIGIN_ID='navigation-origin';
 const NEIGHBOR_HIGHLIGHT_KEY='office.connections.highlightDirect';
+const COMPACT_CONNECTIONS='(max-width:760px), (max-height:550px)';
 
 export async function openConnectionExplorer(env:Env,source='') {
   const opener=document.activeElement as HTMLElement|null;
-  env.modal('Connections',`<div class="connections-view">
+  const compact=matchMedia(COMPACT_CONNECTIONS);
+  env.modal('Connections',`<div class="connections-view" data-view="list">
     <div class="connection-tools"><div class="connection-history"><button data-history="-1" aria-label="Back in connections">←</button><button data-history="1" aria-label="Forward in connections">→</button><button data-overview>Workspace overview</button></div>
-      <label>Find connected items<input data-connection-filter type="search" placeholder="Search the whole workspace" maxlength="500"></label>
+      <label>Find connected items<input data-connection-filter type="search" enterkeyhint="search" placeholder="Search the whole workspace" maxlength="500"></label>
       <label>Item type<select data-connection-kind><option value="">All types</option>${Object.entries(itemTypes).map(([kind,type])=>`<option value="${kind}">${e(type.label)}</option>`).join('')}</select></label>
       <label>Connections<select data-connection-visibility aria-label="Connection visibility"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>
       <button data-toggle-panel aria-expanded="true" aria-controls="connection-panel">Hide details</button></div>
     <p class="connection-location" data-location></p>
-    <div class="connection-workspace"><section class="connection-map-pane" aria-label="Connections map">
+    <div class="connection-view-switch" role="group" aria-label="Connections view"><button data-show-view="list" aria-controls="connection-panel" aria-pressed="true">List</button><button data-show-view="map" aria-controls="connection-map-pane" aria-pressed="false">Map</button></div>
+    <div class="connection-feedback"><p role="status" aria-live="polite" data-connection-status></p><button data-retry hidden>Retry loading connections</button></div>
+    <div class="connection-workspace"><section id="connection-map-pane" class="connection-map-pane" aria-label="Connections map">
       <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span><button data-neighbor-highlight aria-pressed="true">Highlight direct connections</button><span data-group-actions></span></div>
       <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-neighbor-area aria-hidden="true"></g><g data-edges></g><g data-navigation-path></g><g data-nodes></g></svg></div>
       <p class="connection-map-note" data-map-note></p>
       <div class="connection-legend" aria-label="Item type legend">${Object.entries(itemTypes).map(([kind,type])=>`<span class="connection-type" data-kind="${kind}">${symbols[kind]} ${e(type.label)}</span>`).join('')}</div>
-    </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
-    <p role="status" aria-live="polite" data-connection-status></p></div>`);
+    </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div class="connection-list-group-actions" data-list-group-actions></div><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
+    </div>`);
   const dialog=env.dialog,host=dialog.querySelector<HTMLElement>('.connections-view')!;
   const query=<T extends Element>(s:string)=>host.querySelector<T>(s)!;
   const filter=query<HTMLInputElement>('[data-connection-filter]'),kind=query<HTMLSelectElement>('[data-connection-kind]');
   const visibilityControl=query<HTMLSelectElement>('[data-connection-visibility]');
   let visibility:ConnectionVisibility='active',mutating=false;
   const more=query<HTMLButtonElement>('[data-connection-more]'),svg=query<SVGSVGElement>('svg'),map=query<HTMLElement>('[data-connection-graph]');
+  const retry=query<HTMLButtonElement>('[data-retry]');
+  const viewButtons=[...host.querySelectorAll<HTMLButtonElement>('[data-show-view]')];
+  const showingList=()=>compact.matches&&host.dataset.view==='list';
+  const setView=(name:string)=>{
+    host.dataset.view=name;
+    for(const button of viewButtons)button.setAttribute('aria-pressed',String(button.dataset.showView===name));
+  };
+  for(const button of viewButtons)button.onclick=()=>{
+    setView(button.dataset.showView!);
+    if(!showingList())button.parentElement?.scrollIntoView({block:'start'});
+  };
   const status=query<HTMLElement>('[data-connection-status]');
   const highlightToggle=query<HTMLButtonElement>('[data-neighbor-highlight]');
   let highlightNeighbors=true;
@@ -61,7 +76,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   const cancel=()=>clearTimeout(timer);
   dialog.addEventListener('close',onClose,{once:true});dialog.addEventListener('cancel',cancel);
   const observer=new MutationObserver(()=>{if(!host.isConnected)cleanup();});observer.observe(dialog,{childList:true});
-  const size=()=>{const rect=svg.getBoundingClientRect();width=Math.max(rect.width,1);height=Math.max(rect.height,1);};
+  const size=()=>{const rect=svg.getBoundingClientRect();if(rect.width&&rect.height){width=rect.width;height=rect.height;}};
   const updateView=()=>{svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);query('[data-zoom-level]').textContent=`${Math.round(width/view.w*100)}%`;};
   function itemCard(kind:string,title:string,subtitle:string){
     const shape=connectionShape(kind),lines=titleLines(title,shape.width);
@@ -76,8 +91,10 @@ export async function openConnectionExplorer(env:Env,source='') {
   function centerSelection(){const p=points.get(selected);if(p){size();const from=selected===(place.id||place.group)?points.get(originNodeId):undefined;
     if(from){const left=Math.min(p.x,from.x)-140,right=Math.max(p.x,from.x)+140,top=Math.min(p.y,from.y)-104,bottom=Math.max(p.y,from.y)+88,unit=Math.max(1,(right-left)/width,(bottom-top)/height);view={x:(left+right)/2-width*unit/2,y:(top+bottom)/2-height*unit/2,w:width*unit,h:height*unit};}
     else view={x:p.x-width/2,y:p.y-height/2,w:width,h:height};updateView();}}
-  const resize=new ResizeObserver(()=>{if(!active())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{if(points.has(originNodeId)||(oldW>=640)!==(width>=640))renderMap();view.w*=width/oldW;view.h*=height/oldH;updateView();if(points.has(originNodeId)&&selected===(place.id||place.group))centerSelection();else if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
+  const resize=new ResizeObserver(()=>{if(!active()||showingList())return;const oldW=width,oldH=height;size();if(place.mode==='overview'){renderMap();fit();}else{if(points.has(originNodeId)||(oldW>=640)!==(width>=640))renderMap();view.x+=(view.w-view.w*width/oldW)/2;view.y+=(view.h-view.h*height/oldH)/2;view.w*=width/oldW;view.h*=height/oldH;updateView();if(points.has(originNodeId)&&selected===(place.id||place.group))centerSelection();else if(map.contains(document.activeElement))reveal(focusedId);}});resize.observe(map);
   const panel=query<HTMLElement>('#connection-panel');
+  const listTitle=query<HTMLElement>('[data-list-title]');
+  const scrollPane=()=>compact.matches?host:panel;
   const archiveButtons=(scope:'group'|'item'|'edge',id:string,active:number,archived:number,target='')=>[
     ...(visibility!=='archived'&&active>0?['archive']:[]),...(visibility!=='active'&&archived>0?['restore']:[])
   ].map(action=>`<button data-archive-action="${action}" data-archive-scope="${scope}" data-archive-id="${e(id)}" data-archive-target="${e(target)}" ${mutating?'disabled':''}>${action==='archive'?'Archive':'Restore'}${scope==='group'?' group':scope==='item'?' connections':''}</button>`).join('');
@@ -100,7 +117,10 @@ export async function openConnectionExplorer(env:Env,source='') {
   };
   function wireItems(root:Element){
     root.querySelectorAll<HTMLButtonElement>('[data-archive-action]').forEach(button=>button.onclick=()=>void archiveConnections(button));
-    root.querySelectorAll<HTMLButtonElement>('[data-select]').forEach(button=>button.onclick=()=>select(button.dataset.select!));
+    root.querySelectorAll<HTMLButtonElement>('[data-select]').forEach(button=>button.onclick=()=>{
+      select(button.dataset.select!);
+      if(showingList())query<HTMLElement>('[data-selection] h3').focus();
+    });
     root.querySelectorAll<HTMLButtonElement>('[data-open]').forEach(button=>button.onclick=()=>openItem(button.dataset.open!));
     root.querySelectorAll<HTMLButtonElement>('[data-explore]').forEach(button=>button.onclick=()=>void navigate({mode:'graph',id:button.dataset.explore!,group:'',q:'',kind:''}));
     root.querySelectorAll<HTMLButtonElement>('[data-group]').forEach(button=>button.onclick=()=>void navigate({mode:'graph',id:'',group:button.dataset.group!,q:'',kind:''}));
@@ -122,7 +142,8 @@ export async function openConnectionExplorer(env:Env,source='') {
     layer.innerHTML=`<mask id="connection-neighbor-mask" maskUnits="userSpaceOnUse" ${bounds}><rect ${bounds} fill="white"/>${exclusions.map(([,point])=>halo(point,'black',5)).join('')}</mask><g mask="url(#connection-neighbor-mask)">${bands}${included.map(point=>halo(point,'currentColor')).join('')}</g>`;
   }
   function selection(){const item=data.items.find(item=>item.id===selected),section=query<HTMLElement>('[data-selection]');
-    section.innerHTML=item?`<h3>${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind]||'●'} ${e(typeLabel(item.kind))} · ${item.degree??'—'} ${visibility==='all'?'total':visibility} connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>`:'<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
+    section.classList.toggle('connection-selection-empty',!item);
+    section.innerHTML=item?`<h3 tabindex="-1">${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind]||'●'} ${e(typeLabel(item.kind))} · ${item.degree??'—'} ${visibility==='all'?'total':visibility} connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>`:'<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
     wireItems(section);
     const peers=new Set([selected]);for(const link of data.links)if(link.a===selected||link.b===selected){peers.add(link.a);peers.add(link.b);}
     svg.querySelectorAll<SVGGElement>('[data-node]').forEach(node=>{node.classList.toggle('selected',node.dataset.node===selected);node.classList.toggle('dimmed',!!item&&!peers.has(node.dataset.node!));node.setAttribute('aria-pressed',String(node.dataset.node===selected));});
@@ -143,6 +164,10 @@ export async function openConnectionExplorer(env:Env,source='') {
   function focusMap(preferred=focusedId){const nodes=mapNodes(),candidate=nodes.find(node=>nodeId(node)===preferred);
     const visible=nodes.find(node=>{const p=points.get(nodeId(node))!;return p.x>=view.x&&p.x<=view.x+view.w&&p.y>=view.y&&p.y<=view.y+view.h;});
     const node=candidate||visible||nodes[0];if(node)node.focus({preventScroll:true});else map.focus({preventScroll:true});
+  }
+  function focusResults(preferred=focusedId,preventScroll=false){
+    if(showingList())listTitle.focus({preventScroll});
+    else focusMap(preferred);
   }
   function exploreNode(node=mapNodes().find(node=>nodeId(node)===focusedId)){if(!node)return;
     if(node.dataset.originNode){moveHistory(-1);return;}
@@ -205,21 +230,28 @@ export async function openConnectionExplorer(env:Env,source='') {
   }
   function render(reset:boolean){
     query('[data-location]').textContent=place.mode==='overview'?'Workspace overview':place.mode==='items'?'Search results across the workspace':place.id?`Connections of ${data.items.find(item=>item.id===place.id)?.title||'selected item'}`:'Connected group';
-    query('[data-list-title]').textContent=place.mode==='overview'?'Connected groups':place.mode==='items'?'Matching items':'Loaded connections';
+    listTitle.textContent=place.mode==='overview'?'Connected groups':place.mode==='items'?'Matching items':place.id?'Direct connections':'Loaded connections';
     const list=query<HTMLElement>('[data-connection-list]'),byId=new Map(data.items.map(item=>[item.id,item])),start=listPage*50;
-    list.innerHTML=place.mode==='overview'?(data.groups||[]).slice(start,start+50).map(group=>`<div class="connection-list-row" data-kind="${e(group.kind)}"><strong><span class="connection-group-symbol" role="img" aria-label="${e(typeLabel(group.kind))}">${symbols[group.kind]||'●'}</span> ${e(group.title)}</strong><span>${group.items} items · ${group.links} connections</span>${archiveBadge(group.archivedLinks||0,group.links)}<button data-group="${e(group.id)}">Explore group</button>${archiveButtons('group',group.id,group.links-(group.archivedLinks||0),group.archivedLinks||0)}</div>`).join(''):place.mode==='items'?data.items.slice(start,start+50).map(item=>`<div class="connection-list-row"><button data-select="${e(item.id)}">${e(item.title)}</button><span>${e(typeLabel(item.kind))} · ${item.degree} ${visibility==='all'?'total':visibility} connections</span>${itemButtons(item)}</div>`).join(''):data.links.slice(start,start+50).map(link=>`<div class="connection-list-row" data-connection-edge="${e(link.a)}|${e(link.b)}">${[link.a,link.b].map(id=>{const item=byId.get(id)!;return `<button data-select="${e(id)}">${symbols[item.kind]||'●'} ${e(item.title)}</button>`;}).join('<span aria-label="connected to">↔</span>')}${archiveBadge(link.archived?1:0,1)}${archiveButtons('edge',link.a,link.archived?0:1,link.archived?1:0,link.b)}</div>`).join('');
+    list.innerHTML=place.mode==='overview'?(data.groups||[]).slice(start,start+50).map(group=>`<div class="connection-list-row" data-kind="${e(group.kind)}"><strong><span class="connection-group-symbol" role="img" aria-label="${e(typeLabel(group.kind))}">${symbols[group.kind]||'●'}</span> ${e(group.title)}</strong><span class="connection-group-kind">${e(typeLabel(group.kind))}</span><span>${group.items} items · ${group.links} connections</span>${archiveBadge(group.archivedLinks||0,group.links)}<button data-group="${e(group.id)}">Explore group</button>${archiveButtons('group',group.id,group.links-(group.archivedLinks||0),group.archivedLinks||0)}</div>`).join(''):place.mode==='items'?data.items.slice(start,start+50).map(item=>`<div class="connection-list-row"><button data-select="${e(item.id)}">${e(item.title)}</button><span>${e(typeLabel(item.kind))} · ${item.degree} ${visibility==='all'?'total':visibility} connections</span>${itemButtons(item)}</div>`).join(''):data.links.slice(start,start+50).map(link=>{
+      const neighbor=place.id?byId.get(link.a===place.id?link.b:link.a):undefined;
+      const endpoints=[link.a,link.b].map(id=>{const item=byId.get(id)!;return `<button data-select="${e(id)}"><span aria-hidden="true">${symbols[item.kind]||'●'}</span> ${e(item.title)}<span class="connection-group-kind"> · ${e(typeLabel(item.kind))}</span></button>`;}).join('<span aria-label="connected to">↔</span>');
+      return `<div class="connection-list-row" data-connection-edge="${e(link.a)}|${e(link.b)}"><div class="connection-list-endpoints" ${neighbor?'data-has-neighbor':''}>${endpoints}</div>${neighbor?`<div class="connection-list-neighbor"><strong>${e(neighbor.title)}</strong><span>${e(typeLabel(neighbor.kind))}</span><button data-explore="${e(neighbor.id)}">Explore connections</button><button data-open="${e(neighbor.id)}">Open item</button></div>`:''}${archiveBadge(link.archived?1:0,1)}${archiveButtons('edge',link.a,link.archived?0:1,link.archived?1:0,link.b)}</div>`;
+    }).join('');
     if(!list.childElementCount)list.innerHTML='<p>No connections found. Try a different search or item type.</p>';
     wireItems(list);more.hidden=!data.more;more.textContent=place.mode==='overview'?'Load more groups':place.mode==='items'?'Load more items':'Load more connections';
-    const groupActions=query<HTMLElement>('[data-group-actions]');groupActions.innerHTML=place.group?archiveButtons('group',place.group,data.activeTotal??data.links.filter(link=>!link.archived).length,data.archivedTotal??data.links.filter(link=>link.archived).length):'';wireItems(groupActions);
+    const groupActions=place.group?archiveButtons('group',place.group,data.activeTotal??data.links.filter(link=>!link.archived).length,data.archivedTotal??data.links.filter(link=>link.archived).length):'';
+    for(const container of host.querySelectorAll('[data-group-actions],[data-list-group-actions]')){container.innerHTML=groupActions;wireItems(container);}
     renderMap();if(reset){fit();if(place.mode==='graph')centerSelection();}
     const loaded=place.mode==='overview'?(data.groups||[]).length:place.mode==='items'?data.items.length:data.links.length;
     query('[data-list-range]').textContent=loaded?`${start+1}–${Math.min(start+50,loaded)} of ${loaded}`:'0 results';
+    query('.connection-list-pages').classList.toggle('connection-single-page',loaded<=50);
     host.querySelectorAll<HTMLButtonElement>('[data-list-page]').forEach(button=>button.disabled=Number(button.dataset.listPage)<0?listPage===0:start+50>=loaded);
     status.textContent=`${visibility==='all'?'All':visibility==='active'?'Active':'Archived'} · `+(place.mode==='overview'?`${loaded} of ${data.groupTotal??loaded} groups loaded · ${data.itemTotal??0} items · ${data.total??0} total connections.`:`${loaded} of ${data.total??loaded} ${place.mode==='items'?'matching items':'connections'} loaded. ${data.more?'Load more to continue.':''}`);
     host.querySelectorAll<HTMLButtonElement>('[data-history]').forEach(button=>button.disabled=Number(button.dataset.history)<0?historyIndex===0:historyIndex===history.length-1);
   }
   async function fetchPage(reset:boolean){
     const version=++request;busy=true;
+    retry.hidden=true;
     if(reset){data={items:[],links:[],more:false};listPage=0;render(true);}
     more.disabled=true;status.textContent='Loading connections…';host.setAttribute('aria-busy','true');
     const offset=reset?0:place.mode==='overview'?(data.groups||[]).length:place.mode==='items'?data.items.length:data.links.length;
@@ -227,11 +259,12 @@ export async function openConnectionExplorer(env:Env,source='') {
     try{const result=await env.api(route);if(version!==request||!active())return;
       listPage=reset?0:Math.floor(offset/50);
       data=reset?result:{...result,links:[...new Map([...data.links,...result.links].map(link=>[link.a+'|'+link.b,link])).values()],items:[...new Map([...data.items,...result.items].map(item=>[item.id,item])).values()],groups:[...(data.groups||[]),...(result.groups||[])]};render(reset||place.mode==='overview');
-      if(reset&&document.activeElement!==filter&&document.activeElement!==kind&&document.activeElement!==visibilityControl)focusMap(selected||focusedId);
-    }catch(error){if(version===request&&active()){status.textContent=`Could not load connections: ${(error as Error).message}. Use Reset view to retry.`;}}
+      if(reset&&document.activeElement!==filter&&document.activeElement!==kind&&document.activeElement!==visibilityControl&&!viewButtons.some(button=>button===document.activeElement))focusResults(selected||focusedId);
+      if(!reset&&showingList())focusResults();
+    }catch(error){if(version===request&&active()){status.textContent=`Could not load connections: ${(error as Error).message}.`;retry.hidden=false;retry.onclick=()=>void fetchPage(reset);}}
     finally{if(version===request&&active()){busy=false;more.disabled=false;host.setAttribute('aria-busy','false');}}
   }
-  function remember(){if(!busy&&!mutating)history[historyIndex].snapshot={data,selected,focusedId,view:{...view},fitWidth,listPage,scroll:panel.scrollTop,width,height};}
+  function remember(){if(!busy&&!mutating)history[historyIndex].snapshot={data,selected,focusedId,view:{...view},fitWidth,listPage,scroll:scrollPane().scrollTop,width,height};}
   function invalidateHistory(){for(const entry of history){delete entry.snapshot;delete entry.from;}}
   async function archiveConnections(button:HTMLButtonElement){
     if(mutating)return;mutating=true;clearTimeout(timer);++request;busy=false;more.disabled=true;host.setAttribute('aria-busy','true');filter.value=place.q;kind.value=place.kind;
@@ -245,7 +278,7 @@ export async function openConnectionExplorer(env:Env,source='') {
       if(scope==='group'&&action==='archive'&&visibility==='active')await navigate({mode:'overview',id:'',group:'',q:'',kind:''});else await fetchPage(true);
       if(action==='restore'&&active()){
         const restoredGroup=place.mode==='overview'?data.groups?.find(group=>group.id===targetId)||data.groups?.find(group=>targetGroup&&group.title===targetGroup.title&&group.kind===targetGroup.kind):undefined;
-        focusMap(restoredGroup?.id||(scope==='item'?targetId:selected||focusedId));
+        focusResults(restoredGroup?.id||(scope==='item'?targetId:selected||focusedId));
       }
       if(active()){const message=`${action==='archive'?'Archived':'Restored'} ${result.changed??0} connections.`;status.textContent=message+' '+status.textContent;env.notice(message);}
     }catch(error){if(active())status.textContent=`Could not ${action==='archive'?'archive':'restore'} connections: ${(error as Error).message}`;}
@@ -256,11 +289,11 @@ export async function openConnectionExplorer(env:Env,source='') {
     remember();historyIndex=index;const entry=history[index],snapshot=entry.snapshot;
     if(!snapshot){void navigate(entry.place,false);return;}
     clearTimeout(timer);++request;busy=false;place={...entry.place};filter.value=place.q;kind.value=place.kind;data=snapshot.data;selected=snapshot.selected;focusedId=snapshot.focusedId;listPage=snapshot.listPage;render(false);
-    size();view={...snapshot.view,w:snapshot.view.w*width/snapshot.width,h:snapshot.view.h*height/snapshot.height};fitWidth=snapshot.fitWidth;updateView();panel.scrollTop=snapshot.scroll;more.disabled=false;host.setAttribute('aria-busy','false');focusMap(focusedId||selected);
+    size();view={...snapshot.view,w:snapshot.view.w*width/snapshot.width,h:snapshot.view.h*height/snapshot.height};fitWidth=snapshot.fitWidth;updateView();scrollPane().scrollTop=snapshot.scroll;more.disabled=false;retry.hidden=true;host.setAttribute('aria-busy','false');focusResults(focusedId||selected,true);
   }
   host.querySelectorAll<HTMLButtonElement>('[data-history]').forEach(button=>button.onclick=()=>moveHistory(Number(button.dataset.history)));
   query<HTMLButtonElement>('[data-overview]').onclick=()=>void navigate({mode:'overview',id:'',group:'',q:'',kind:''});
-  const runSearch=()=>navigate({mode:filter.value.trim()||kind.value?'items':'overview',id:'',group:'',q:filter.value.trim(),kind:kind.value});
+  const runSearch=()=>{if(compact.matches)setView('list');return navigate({mode:filter.value.trim()||kind.value?'items':'overview',id:'',group:'',q:filter.value.trim(),kind:kind.value});};
   const search=()=>{clearTimeout(timer);++request;busy=false;more.disabled=true;timer=setTimeout(()=>void runSearch(),220);};filter.oninput=search;kind.onchange=search;
   visibilityControl.onchange=()=>{visibility=visibilityControl.value as ConnectionVisibility;clearTimeout(timer);invalidateHistory();void fetchPage(true);};
   more.onclick=()=>{if(!busy)void fetchPage(false);};
@@ -269,7 +302,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   query<HTMLButtonElement>('[data-reset-graph]').onclick=()=>void navigate({...place},false);
   query<HTMLButtonElement>('[data-center]').onclick=centerSelection;
   host.querySelectorAll<HTMLButtonElement>('[data-zoom]').forEach(button=>button.onclick=()=>zoom(button.dataset.zoom==='in'?.8:1.25));
-  query<HTMLButtonElement>('[data-toggle-panel]').onclick=event=>{const button=event.currentTarget as HTMLButtonElement;panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',String(!panel.hidden));button.textContent=panel.hidden?'Show details':'Hide details';};
+  query<HTMLButtonElement>('[data-toggle-panel]').onclick=event=>{const button=event.currentTarget as HTMLButtonElement;const hidden=panel.classList.toggle('connection-panel-collapsed');button.setAttribute('aria-expanded',String(!hidden));button.textContent=hidden?'Show details':'Hide details';};
   map.addEventListener('wheel',event=>{event.preventDefault();const rect=svg.getBoundingClientRect();zoom(Math.exp(Math.max(-.35,Math.min(.35,event.deltaY*.002))),event.clientX-rect.left,event.clientY-rect.top);},{passive:false});
   const pointers=new Map<number,{x:number;y:number}>();
   map.onpointerdown=event=>{if(event.button!==0)return;if((event.target as Element).closest('[data-node],[data-group-node],[data-origin-node]'))return;map.focus({preventScroll:true});map.setPointerCapture(event.pointerId);pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});};
@@ -278,7 +311,7 @@ export async function openConnectionExplorer(env:Env,source='') {
   host.addEventListener('keydown',event=>{
     if(event.defaultPrevented||event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
     const target=event.target as Element,typing=!!target.closest('input,textarea,select,[contenteditable="true"]');
-    if(typing){if(target===filter&&event.key==='Escape'){event.preventDefault();focusMap();}else if(target===filter&&event.key==='Enter'){event.preventDefault();const value=filter.value.trim();clearTimeout(timer);void runSearch().then(()=>{if(active()&&filter.value.trim()===value&&document.activeElement===filter)focusMap();});}return;}
+    if(typing){if(target===filter&&event.key==='Escape'){event.preventDefault();focusResults();}else if(target===filter&&event.key==='Enter'){event.preventDefault();const value=filter.value.trim();clearTimeout(timer);void runSearch().then(()=>{if(active()&&filter.value.trim()===value&&document.activeElement===filter)focusResults();});}return;}
     if(event.key==='Backspace'){event.preventDefault();sequenceTime=0;if(event.repeat)return;
       if(historyIndex>0)moveHistory(-1);
       else if(place.mode!=='overview'){
@@ -301,5 +334,5 @@ export async function openConnectionExplorer(env:Env,source='') {
     if(event.key==='G'||event.key==='Home'||event.key==='End'){event.preventDefault();const nodes=mapNodes(),node=event.key==='Home'?nodes[0]:nodes.at(-1);if(node)focusMap(nodeId(node));return;}
     if(['+','=','-'].includes(event.key)){event.preventDefault();zoom(event.key==='-'?1.25:.8);}
   });
-  await fetchPage(true);if(active()&&document.activeElement!==filter&&document.activeElement!==kind)focusMap(selected||focusedId);
+  await fetchPage(true);
 }

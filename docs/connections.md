@@ -14,6 +14,8 @@ Use `:new linked task Follow up` to create a draft whose connection is saved wit
 
 ## Explore the map and list
 
+On phones, Connections opens in **List**. Browse groups, search for items, or explore an item's direct connections from the list. Choose **Map** to see the same connections visually, and **List** to return to the readable rows and item actions.
+
 - Choose **Connections** in the sidebar or enter `:links all` to start with workspace groups. A group contains items joined directly or through other items. Enter `:links` to start with the current item's direct connections.
 - Use **Find connected items** to search titles or exact IDs across the workspace. Filter by item type and use the list or load more results when the map shows only part of a group.
 - Select a card to highlight its direct connections. Choose **Explore connections** to center on that item or **Open item** to go to its app. With keyboard focus on a card, arrow keys move spatially, Space selects, and Enter explores or opens the item when it is already the center.

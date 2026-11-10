@@ -8,28 +8,46 @@ const typeLabel = (kind) => itemTypes[kind]?.label || kind;
 const symbols = { mail: '✉', calendar: '▦', tasks: '✓', contacts: '♙', documents: '▤', wiki: '◇', sheets: '▦', lists: '☑' };
 const ORIGIN_ID = 'navigation-origin';
 const NEIGHBOR_HIGHLIGHT_KEY = 'office.connections.highlightDirect';
+const COMPACT_CONNECTIONS = '(max-width:760px), (max-height:550px)';
 export async function openConnectionExplorer(env, source = '') {
     const opener = document.activeElement;
-    env.modal('Connections', `<div class="connections-view">
+    const compact = matchMedia(COMPACT_CONNECTIONS);
+    env.modal('Connections', `<div class="connections-view" data-view="list">
     <div class="connection-tools"><div class="connection-history"><button data-history="-1" aria-label="Back in connections">←</button><button data-history="1" aria-label="Forward in connections">→</button><button data-overview>Workspace overview</button></div>
-      <label>Find connected items<input data-connection-filter type="search" placeholder="Search the whole workspace" maxlength="500"></label>
+      <label>Find connected items<input data-connection-filter type="search" enterkeyhint="search" placeholder="Search the whole workspace" maxlength="500"></label>
       <label>Item type<select data-connection-kind><option value="">All types</option>${Object.entries(itemTypes).map(([kind, type]) => `<option value="${kind}">${e(type.label)}</option>`).join('')}</select></label>
       <label>Connections<select data-connection-visibility aria-label="Connection visibility"><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>
       <button data-toggle-panel aria-expanded="true" aria-controls="connection-panel">Hide details</button></div>
     <p class="connection-location" data-location></p>
-    <div class="connection-workspace"><section class="connection-map-pane" aria-label="Connections map">
+    <div class="connection-view-switch" role="group" aria-label="Connections view"><button data-show-view="list" aria-controls="connection-panel" aria-pressed="true">List</button><button data-show-view="map" aria-controls="connection-map-pane" aria-pressed="false">Map</button></div>
+    <div class="connection-feedback"><p role="status" aria-live="polite" data-connection-status></p><button data-retry hidden>Retry loading connections</button></div>
+    <div class="connection-workspace"><section id="connection-map-pane" class="connection-map-pane" aria-label="Connections map">
       <div class="connection-map-tools"><button data-zoom="in" aria-label="Zoom in">+</button><button data-zoom="out" aria-label="Zoom out">−</button><button data-fit>Fit view</button><button data-center>Center selection</button><button data-reset-graph>Reset view</button><span data-zoom-level></span><button data-neighbor-highlight aria-pressed="true">Highlight direct connections</button><span data-group-actions></span></div>
       <div data-connection-graph tabindex="0" role="region" aria-label="Interactive map. Arrow keys or your movement bindings navigate cards. Enter explores, Space selects, slash searches. Shift and arrows pan; plus and minus zoom."><svg xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Connection graph"><g data-neighbor-area aria-hidden="true"></g><g data-edges></g><g data-navigation-path></g><g data-nodes></g></svg></div>
       <p class="connection-map-note" data-map-note></p>
       <div class="connection-legend" aria-label="Item type legend">${Object.entries(itemTypes).map(([kind, type]) => `<span class="connection-type" data-kind="${kind}">${symbols[kind]} ${e(type.label)}</span>`).join('')}</div>
-    </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
-    <p role="status" aria-live="polite" data-connection-status></p></div>`);
+    </section><aside id="connection-panel" class="connection-panel" aria-label="Connection details and list"><section data-selection></section><h3 data-list-title tabindex="-1">Connections</h3><div class="connection-list-group-actions" data-list-group-actions></div><div data-connection-list></div><div class="connection-list-pages"><button data-list-page="-1">Previous page</button><span data-list-range></span><button data-list-page="1">Next page</button></div><button data-connection-more hidden>Load more connections</button></aside></div>
+    </div>`);
     const dialog = env.dialog, host = dialog.querySelector('.connections-view');
     const query = (s) => host.querySelector(s);
     const filter = query('[data-connection-filter]'), kind = query('[data-connection-kind]');
     const visibilityControl = query('[data-connection-visibility]');
     let visibility = 'active', mutating = false;
     const more = query('[data-connection-more]'), svg = query('svg'), map = query('[data-connection-graph]');
+    const retry = query('[data-retry]');
+    const viewButtons = [...host.querySelectorAll('[data-show-view]')];
+    const showingList = () => compact.matches && host.dataset.view === 'list';
+    const setView = (name) => {
+        host.dataset.view = name;
+        for (const button of viewButtons)
+            button.setAttribute('aria-pressed', String(button.dataset.showView === name));
+    };
+    for (const button of viewButtons)
+        button.onclick = () => {
+            setView(button.dataset.showView);
+            if (!showingList())
+                button.parentElement?.scrollIntoView({ block: 'start' });
+        };
     const status = query('[data-connection-status]');
     const highlightToggle = query('[data-neighbor-highlight]');
     let highlightNeighbors = true;
@@ -67,7 +85,10 @@ export async function openConnectionExplorer(env, source = '') {
     const observer = new MutationObserver(() => { if (!host.isConnected)
         cleanup(); });
     observer.observe(dialog, { childList: true });
-    const size = () => { const rect = svg.getBoundingClientRect(); width = Math.max(rect.width, 1); height = Math.max(rect.height, 1); };
+    const size = () => { const rect = svg.getBoundingClientRect(); if (rect.width && rect.height) {
+        width = rect.width;
+        height = rect.height;
+    } };
     const updateView = () => { svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`); query('[data-zoom-level]').textContent = `${Math.round(width / view.w * 100)}%`; };
     function itemCard(kind, title, subtitle) {
         const shape = connectionShape(kind), lines = titleLines(title, shape.width);
@@ -105,7 +126,7 @@ export async function openConnectionExplorer(env, source = '') {
             updateView();
         }
     }
-    const resize = new ResizeObserver(() => { if (!active())
+    const resize = new ResizeObserver(() => { if (!active() || showingList())
         return; const oldW = width, oldH = height; size(); if (place.mode === 'overview') {
         renderMap();
         fit();
@@ -113,6 +134,8 @@ export async function openConnectionExplorer(env, source = '') {
     else {
         if (points.has(originNodeId) || (oldW >= 640) !== (width >= 640))
             renderMap();
+        view.x += (view.w - view.w * width / oldW) / 2;
+        view.y += (view.h - view.h * height / oldH) / 2;
         view.w *= width / oldW;
         view.h *= height / oldH;
         updateView();
@@ -123,6 +146,8 @@ export async function openConnectionExplorer(env, source = '') {
     } });
     resize.observe(map);
     const panel = query('#connection-panel');
+    const listTitle = query('[data-list-title]');
+    const scrollPane = () => compact.matches ? host : panel;
     const archiveButtons = (scope, id, active, archived, target = '') => [
         ...(visibility !== 'archived' && active > 0 ? ['archive'] : []), ...(visibility !== 'active' && archived > 0 ? ['restore'] : [])
     ].map(action => `<button data-archive-action="${action}" data-archive-scope="${scope}" data-archive-id="${e(id)}" data-archive-target="${e(target)}" ${mutating ? 'disabled' : ''}>${action === 'archive' ? 'Archive' : 'Restore'}${scope === 'group' ? ' group' : scope === 'item' ? ' connections' : ''}</button>`).join('');
@@ -157,7 +182,11 @@ export async function openConnectionExplorer(env, source = '') {
     };
     function wireItems(root) {
         root.querySelectorAll('[data-archive-action]').forEach(button => button.onclick = () => void archiveConnections(button));
-        root.querySelectorAll('[data-select]').forEach(button => button.onclick = () => select(button.dataset.select));
+        root.querySelectorAll('[data-select]').forEach(button => button.onclick = () => {
+            select(button.dataset.select);
+            if (showingList())
+                query('[data-selection] h3').focus();
+        });
         root.querySelectorAll('[data-open]').forEach(button => button.onclick = () => openItem(button.dataset.open));
         root.querySelectorAll('[data-explore]').forEach(button => button.onclick = () => void navigate({ mode: 'graph', id: button.dataset.explore, group: '', q: '', kind: '' }));
         root.querySelectorAll('[data-group]').forEach(button => button.onclick = () => void navigate({ mode: 'graph', id: '', group: button.dataset.group, q: '', kind: '' }));
@@ -182,7 +211,8 @@ export async function openConnectionExplorer(env, source = '') {
     }
     function selection() {
         const item = data.items.find(item => item.id === selected), section = query('[data-selection]');
-        section.innerHTML = item ? `<h3>${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind] || '●'} ${e(typeLabel(item.kind))} · ${item.degree ?? '—'} ${visibility === 'all' ? 'total' : visibility} connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>` : '<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
+        section.classList.toggle('connection-selection-empty', !item);
+        section.innerHTML = item ? `<h3 tabindex="-1">${e(item.title)}</h3><p class="connection-type" data-kind="${e(item.kind)}">${symbols[item.kind] || '●'} ${e(typeLabel(item.kind))} · ${item.degree ?? '—'} ${visibility === 'all' ? 'total' : visibility} connections</p><p>${e(Object.values(item.meta).join(' · '))}</p><div class="connection-selection-actions">${itemButtons(item)}</div>` : '<h3>Explore your connections</h3><p>Select an item to see its full title and connections. Explore fetches its direct neighbors.</p>';
         wireItems(section);
         const peers = new Set([selected]);
         for (const link of data.links)
@@ -228,6 +258,12 @@ export async function openConnectionExplorer(env, source = '') {
             node.focus({ preventScroll: true });
         else
             map.focus({ preventScroll: true });
+    }
+    function focusResults(preferred = focusedId, preventScroll = false) {
+        if (showingList())
+            listTitle.focus({ preventScroll });
+        else
+            focusMap(preferred);
     }
     function exploreNode(node = mapNodes().find(node => nodeId(node) === focusedId)) {
         if (!node)
@@ -332,17 +368,23 @@ export async function openConnectionExplorer(env, source = '') {
     }
     function render(reset) {
         query('[data-location]').textContent = place.mode === 'overview' ? 'Workspace overview' : place.mode === 'items' ? 'Search results across the workspace' : place.id ? `Connections of ${data.items.find(item => item.id === place.id)?.title || 'selected item'}` : 'Connected group';
-        query('[data-list-title]').textContent = place.mode === 'overview' ? 'Connected groups' : place.mode === 'items' ? 'Matching items' : 'Loaded connections';
+        listTitle.textContent = place.mode === 'overview' ? 'Connected groups' : place.mode === 'items' ? 'Matching items' : place.id ? 'Direct connections' : 'Loaded connections';
         const list = query('[data-connection-list]'), byId = new Map(data.items.map(item => [item.id, item])), start = listPage * 50;
-        list.innerHTML = place.mode === 'overview' ? (data.groups || []).slice(start, start + 50).map(group => `<div class="connection-list-row" data-kind="${e(group.kind)}"><strong><span class="connection-group-symbol" role="img" aria-label="${e(typeLabel(group.kind))}">${symbols[group.kind] || '●'}</span> ${e(group.title)}</strong><span>${group.items} items · ${group.links} connections</span>${archiveBadge(group.archivedLinks || 0, group.links)}<button data-group="${e(group.id)}">Explore group</button>${archiveButtons('group', group.id, group.links - (group.archivedLinks || 0), group.archivedLinks || 0)}</div>`).join('') : place.mode === 'items' ? data.items.slice(start, start + 50).map(item => `<div class="connection-list-row"><button data-select="${e(item.id)}">${e(item.title)}</button><span>${e(typeLabel(item.kind))} · ${item.degree} ${visibility === 'all' ? 'total' : visibility} connections</span>${itemButtons(item)}</div>`).join('') : data.links.slice(start, start + 50).map(link => `<div class="connection-list-row" data-connection-edge="${e(link.a)}|${e(link.b)}">${[link.a, link.b].map(id => { const item = byId.get(id); return `<button data-select="${e(id)}">${symbols[item.kind] || '●'} ${e(item.title)}</button>`; }).join('<span aria-label="connected to">↔</span>')}${archiveBadge(link.archived ? 1 : 0, 1)}${archiveButtons('edge', link.a, link.archived ? 0 : 1, link.archived ? 1 : 0, link.b)}</div>`).join('');
+        list.innerHTML = place.mode === 'overview' ? (data.groups || []).slice(start, start + 50).map(group => `<div class="connection-list-row" data-kind="${e(group.kind)}"><strong><span class="connection-group-symbol" role="img" aria-label="${e(typeLabel(group.kind))}">${symbols[group.kind] || '●'}</span> ${e(group.title)}</strong><span class="connection-group-kind">${e(typeLabel(group.kind))}</span><span>${group.items} items · ${group.links} connections</span>${archiveBadge(group.archivedLinks || 0, group.links)}<button data-group="${e(group.id)}">Explore group</button>${archiveButtons('group', group.id, group.links - (group.archivedLinks || 0), group.archivedLinks || 0)}</div>`).join('') : place.mode === 'items' ? data.items.slice(start, start + 50).map(item => `<div class="connection-list-row"><button data-select="${e(item.id)}">${e(item.title)}</button><span>${e(typeLabel(item.kind))} · ${item.degree} ${visibility === 'all' ? 'total' : visibility} connections</span>${itemButtons(item)}</div>`).join('') : data.links.slice(start, start + 50).map(link => {
+            const neighbor = place.id ? byId.get(link.a === place.id ? link.b : link.a) : undefined;
+            const endpoints = [link.a, link.b].map(id => { const item = byId.get(id); return `<button data-select="${e(id)}"><span aria-hidden="true">${symbols[item.kind] || '●'}</span> ${e(item.title)}<span class="connection-group-kind"> · ${e(typeLabel(item.kind))}</span></button>`; }).join('<span aria-label="connected to">↔</span>');
+            return `<div class="connection-list-row" data-connection-edge="${e(link.a)}|${e(link.b)}"><div class="connection-list-endpoints" ${neighbor ? 'data-has-neighbor' : ''}>${endpoints}</div>${neighbor ? `<div class="connection-list-neighbor"><strong>${e(neighbor.title)}</strong><span>${e(typeLabel(neighbor.kind))}</span><button data-explore="${e(neighbor.id)}">Explore connections</button><button data-open="${e(neighbor.id)}">Open item</button></div>` : ''}${archiveBadge(link.archived ? 1 : 0, 1)}${archiveButtons('edge', link.a, link.archived ? 0 : 1, link.archived ? 1 : 0, link.b)}</div>`;
+        }).join('');
         if (!list.childElementCount)
             list.innerHTML = '<p>No connections found. Try a different search or item type.</p>';
         wireItems(list);
         more.hidden = !data.more;
         more.textContent = place.mode === 'overview' ? 'Load more groups' : place.mode === 'items' ? 'Load more items' : 'Load more connections';
-        const groupActions = query('[data-group-actions]');
-        groupActions.innerHTML = place.group ? archiveButtons('group', place.group, data.activeTotal ?? data.links.filter(link => !link.archived).length, data.archivedTotal ?? data.links.filter(link => link.archived).length) : '';
-        wireItems(groupActions);
+        const groupActions = place.group ? archiveButtons('group', place.group, data.activeTotal ?? data.links.filter(link => !link.archived).length, data.archivedTotal ?? data.links.filter(link => link.archived).length) : '';
+        for (const container of host.querySelectorAll('[data-group-actions],[data-list-group-actions]')) {
+            container.innerHTML = groupActions;
+            wireItems(container);
+        }
         renderMap();
         if (reset) {
             fit();
@@ -351,6 +393,7 @@ export async function openConnectionExplorer(env, source = '') {
         }
         const loaded = place.mode === 'overview' ? (data.groups || []).length : place.mode === 'items' ? data.items.length : data.links.length;
         query('[data-list-range]').textContent = loaded ? `${start + 1}–${Math.min(start + 50, loaded)} of ${loaded}` : '0 results';
+        query('.connection-list-pages').classList.toggle('connection-single-page', loaded <= 50);
         host.querySelectorAll('[data-list-page]').forEach(button => button.disabled = Number(button.dataset.listPage) < 0 ? listPage === 0 : start + 50 >= loaded);
         status.textContent = `${visibility === 'all' ? 'All' : visibility === 'active' ? 'Active' : 'Archived'} · ` + (place.mode === 'overview' ? `${loaded} of ${data.groupTotal ?? loaded} groups loaded · ${data.itemTotal ?? 0} items · ${data.total ?? 0} total connections.` : `${loaded} of ${data.total ?? loaded} ${place.mode === 'items' ? 'matching items' : 'connections'} loaded. ${data.more ? 'Load more to continue.' : ''}`);
         host.querySelectorAll('[data-history]').forEach(button => button.disabled = Number(button.dataset.history) < 0 ? historyIndex === 0 : historyIndex === history.length - 1);
@@ -358,6 +401,7 @@ export async function openConnectionExplorer(env, source = '') {
     async function fetchPage(reset) {
         const version = ++request;
         busy = true;
+        retry.hidden = true;
         if (reset) {
             data = { items: [], links: [], more: false };
             listPage = 0;
@@ -375,12 +419,16 @@ export async function openConnectionExplorer(env, source = '') {
             listPage = reset ? 0 : Math.floor(offset / 50);
             data = reset ? result : { ...result, links: [...new Map([...data.links, ...result.links].map(link => [link.a + '|' + link.b, link])).values()], items: [...new Map([...data.items, ...result.items].map(item => [item.id, item])).values()], groups: [...(data.groups || []), ...(result.groups || [])] };
             render(reset || place.mode === 'overview');
-            if (reset && document.activeElement !== filter && document.activeElement !== kind && document.activeElement !== visibilityControl)
-                focusMap(selected || focusedId);
+            if (reset && document.activeElement !== filter && document.activeElement !== kind && document.activeElement !== visibilityControl && !viewButtons.some(button => button === document.activeElement))
+                focusResults(selected || focusedId);
+            if (!reset && showingList())
+                focusResults();
         }
         catch (error) {
             if (version === request && active()) {
-                status.textContent = `Could not load connections: ${error.message}. Use Reset view to retry.`;
+                status.textContent = `Could not load connections: ${error.message}.`;
+                retry.hidden = false;
+                retry.onclick = () => void fetchPage(reset);
             }
         }
         finally {
@@ -392,7 +440,7 @@ export async function openConnectionExplorer(env, source = '') {
         }
     }
     function remember() { if (!busy && !mutating)
-        history[historyIndex].snapshot = { data, selected, focusedId, view: { ...view }, fitWidth, listPage, scroll: panel.scrollTop, width, height }; }
+        history[historyIndex].snapshot = { data, selected, focusedId, view: { ...view }, fitWidth, listPage, scroll: scrollPane().scrollTop, width, height }; }
     function invalidateHistory() { for (const entry of history) {
         delete entry.snapshot;
         delete entry.from;
@@ -427,7 +475,7 @@ export async function openConnectionExplorer(env, source = '') {
                 await fetchPage(true);
             if (action === 'restore' && active()) {
                 const restoredGroup = place.mode === 'overview' ? data.groups?.find(group => group.id === targetId) || data.groups?.find(group => targetGroup && group.title === targetGroup.title && group.kind === targetGroup.kind) : undefined;
-                focusMap(restoredGroup?.id || (scope === 'item' ? targetId : selected || focusedId));
+                focusResults(restoredGroup?.id || (scope === 'item' ? targetId : selected || focusedId));
             }
             if (active()) {
                 const message = `${action === 'archive' ? 'Archived' : 'Restored'} ${result.changed ?? 0} connections.`;
@@ -483,14 +531,16 @@ export async function openConnectionExplorer(env, source = '') {
         view = { ...snapshot.view, w: snapshot.view.w * width / snapshot.width, h: snapshot.view.h * height / snapshot.height };
         fitWidth = snapshot.fitWidth;
         updateView();
-        panel.scrollTop = snapshot.scroll;
+        scrollPane().scrollTop = snapshot.scroll;
         more.disabled = false;
+        retry.hidden = true;
         host.setAttribute('aria-busy', 'false');
-        focusMap(focusedId || selected);
+        focusResults(focusedId || selected, true);
     }
     host.querySelectorAll('[data-history]').forEach(button => button.onclick = () => moveHistory(Number(button.dataset.history)));
     query('[data-overview]').onclick = () => void navigate({ mode: 'overview', id: '', group: '', q: '', kind: '' });
-    const runSearch = () => navigate({ mode: filter.value.trim() || kind.value ? 'items' : 'overview', id: '', group: '', q: filter.value.trim(), kind: kind.value });
+    const runSearch = () => { if (compact.matches)
+        setView('list'); return navigate({ mode: filter.value.trim() || kind.value ? 'items' : 'overview', id: '', group: '', q: filter.value.trim(), kind: kind.value }); };
     const search = () => { clearTimeout(timer); ++request; busy = false; more.disabled = true; timer = setTimeout(() => void runSearch(), 220); };
     filter.oninput = search;
     kind.onchange = search;
@@ -502,7 +552,7 @@ export async function openConnectionExplorer(env, source = '') {
     query('[data-reset-graph]').onclick = () => void navigate({ ...place }, false);
     query('[data-center]').onclick = centerSelection;
     host.querySelectorAll('[data-zoom]').forEach(button => button.onclick = () => zoom(button.dataset.zoom === 'in' ? .8 : 1.25));
-    query('[data-toggle-panel]').onclick = event => { const button = event.currentTarget; panel.hidden = !panel.hidden; button.setAttribute('aria-expanded', String(!panel.hidden)); button.textContent = panel.hidden ? 'Show details' : 'Hide details'; };
+    query('[data-toggle-panel]').onclick = event => { const button = event.currentTarget; const hidden = panel.classList.toggle('connection-panel-collapsed'); button.setAttribute('aria-expanded', String(!hidden)); button.textContent = hidden ? 'Show details' : 'Hide details'; };
     map.addEventListener('wheel', event => { event.preventDefault(); const rect = svg.getBoundingClientRect(); zoom(Math.exp(Math.max(-.35, Math.min(.35, event.deltaY * .002))), event.clientX - rect.left, event.clientY - rect.top); }, { passive: false });
     const pointers = new Map();
     map.onpointerdown = event => { if (event.button !== 0)
@@ -530,14 +580,14 @@ export async function openConnectionExplorer(env, source = '') {
         if (typing) {
             if (target === filter && event.key === 'Escape') {
                 event.preventDefault();
-                focusMap();
+                focusResults();
             }
             else if (target === filter && event.key === 'Enter') {
                 event.preventDefault();
                 const value = filter.value.trim();
                 clearTimeout(timer);
                 void runSearch().then(() => { if (active() && filter.value.trim() === value && document.activeElement === filter)
-                    focusMap(); });
+                    focusResults(); });
             }
             return;
         }
@@ -627,6 +677,4 @@ export async function openConnectionExplorer(env, source = '') {
         }
     });
     await fetchPage(true);
-    if (active() && document.activeElement !== filter && document.activeElement !== kind)
-        focusMap(selected || focusedId);
 }
