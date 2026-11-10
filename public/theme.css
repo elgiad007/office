@@ -140,7 +140,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .calendar-sources summary { font-weight: 600; cursor: pointer; }
 .calendar-source { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; margin: 6px 0; }
 .calendar-source > label { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.calendar-source-name { overflow-wrap: anywhere; }
+.calendar-source-name { font-size: 12px; font-weight: normal; overflow-wrap: anywhere; }
 .calendar-source-rename { width: 26px; height: 26px; padding: 0; }
 .calendar-source-rename .mobile-control-icon { display: block; width: 15px; height: 15px; }
 @media (pointer: coarse) {
