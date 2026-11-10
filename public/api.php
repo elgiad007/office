@@ -192,6 +192,18 @@ try {
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.
         if (!empty($input['meta']['remote'])) fail('Provider records cannot be edited locally.');
+        if (($input['kind']??'')==='calendar') {
+            $start=$input['meta']['start']??'';
+            $end=$input['meta']['end']??'';
+            if (is_string($start) && is_string($end) && $start!=='' && $end!=='') {
+                $utc=new DateTimeZone('UTC');
+                try {
+                    $startDate=new DateTimeImmutable($start,$utc);
+                    $endDate=new DateTimeImmutable($end,$utc);
+                } catch (Exception $e) { fail('Enter valid event dates.'); }
+                if ($endDate<=$startDate) fail('End must be after start.');
+            }
+        }
         $linkedTo=$input['linkedTo']??null;
         if($linkedTo!==null){
             if(!is_string($linkedTo)||isset($input['id']))fail('Linked creation requires a new item and a saved source.');

@@ -27,6 +27,13 @@ try{
  const malformed=await fetch(a.url+'save',{method:'POST',headers:{Cookie:a.cookie,'X-CSRF-Token':a.csrf},body:'{invalid'});
  assert.equal(malformed.status,401,'authorize before parsing JSON');
  await setup(a);
+ const event={kind:'calendar',title:'Range validation',body:'',meta:{start:'2026-11-20',end:'2026-11-09'}};
+ assert.equal((await a.call('save',event,400)).error,'End must be after start.');
+ const calendarEvent=(await a.call('save',{...event,meta:{start:'2026-11-20',end:'2026-11-21'}})).record;
+ const sameInstant={start:'2026-11-21T00:00:00-05:00',end:'2026-11-21T05:00:00Z'};
+ assert.equal((await a.call('save',{...calendarEvent,meta:sameInstant},400)).error,'End must be after start.');
+ assert.equal((await a.call('records&kind=calendar')).records[0].revision,calendarEvent.revision);
+ await a.call('delete',calendarEvent);
  assert.equal((await a.call('status')).remoteSenderIcons,false);
  assert.equal((await fetch(new URL('sender-favicon.php?domain=example.com',a.url),{headers:{Cookie:a.cookie}})).status,404);
  const sessionPath=()=>join(a.dir,'sess_'+a.cookie.split('=')[1]);

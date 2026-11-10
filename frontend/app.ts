@@ -25,7 +25,7 @@ import {taskView,taskViewPreferences,taskPriority,taskDue} from './task-view.js'
 import {bindChecklist,checklistContent,checklistEntry,checklistProgress,moveChecklistFocus} from './checklist.js';
 import {renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings} from './mail-list.js';
 import {createActivity} from './activity.js';
-import {agendaEventLabel,createCalendar,dateOnly,upcomingEvents} from './calendar.js';
+import {addDays,agendaEventLabel,calendarDate,createCalendar,dateOnly,dayKey,upcomingEvents} from './calendar.js';
 import {timestampLabel, configureTimeLabels, refreshTimeLabels} from './time-labels.js';
 import {panelSplitter, setupPanelSizing} from './panel-sizing.js';
 import {mobileActionLabel, mobileDisclosure, mobileIcon, phoneLayout, setDisclosure} from './mobile-layout.js';
@@ -1321,7 +1321,7 @@ function renderDetail(readerSnapshot=captureMailReader(),toolbarOnly=false) {
   if(state.app==='lists')bindChecklist(panel,r,{changed:markDirty,normal:()=>setMode('normal'),rename:()=>enterEdit(true),modal,dialog,confirmation});
   if(state.app==='calendar'){
     const close=document.createElement('button');close.textContent='Close event';close.className='calendar-close';close.onclick=()=>void attempt(returnToItemList);panel.prepend(close);
-    const allDay=form?.querySelector<HTMLInputElement>('[name="allDay"]');if(allDay)allDay.onchange=()=>{for(const name of ['start','end']){const input=form!.querySelector<HTMLInputElement>(`[name="${name}"]`)!;const value=input.value;input.type=allDay.checked?'date':'datetime-local';input.value=allDay.checked?value.slice(0,10):value+'T00:00';}markDirty();};
+    if(form&&!remote)bindCalendarDates(form);
   }
   if (fillSender) markDirty();
   panel.querySelectorAll<HTMLButtonElement>('[data-format]').forEach(button=>{
@@ -1349,7 +1349,17 @@ function detailContent(r: OfficeRecord) {
   let content=`<form id="record-form" class="detail-form"><label><span class="file-input">${state.app==='wiki'?'Page ID (namespace:page)':'Title'}</span><input class="title-input" name="title" value="${e(r.title)}" required ${disabled} aria-label="Title"></label>`;
   if (state.app==='tasks') content+=`<div class="task-detail-badges">${taskBadges(r)}</div><div class="fields">${field('Due date','due',m.due,'date')}<label>Priority<select name="priority" aria-label="Priority" ${disabled}>${[...new Set(['High','Normal','Low',taskPriority(r)])].map(value=>`<option value="${e(value)}" ${value===taskPriority(r)?'selected':''}>${e(value)}</option>`).join('')}</select></label><label class="check-label"><input type="checkbox" name="done" ${m.done?'checked':''} ${disabled}> Completed</label></div>`;
   if (state.app==='contacts') content+=`<div class="fields">${field('Email','email',m.email,'email')}${field('Phone','phone',m.phone,'tel')}${field('Company','company',m.company)}${field('Group','group',m.group)}</div>`;
-  if (state.app==='calendar') content+=`<label class="check-label"><input type="checkbox" name="allDay" ${dateOnly(m.start)?'checked':''} ${disabled}> All day</label><div class="fields">${field('Start (local time)','start',dateOnly(m.start)?m.start:localInput(m.start),dateOnly(m.start)?'date':'datetime-local',disabled)}${field(dateOnly(m.start)?'End (exclusive date)':'End (local time)','end',dateOnly(m.start)?m.end:localInput(m.end),dateOnly(m.start)?'date':'datetime-local',disabled)}${field('Location','location',m.location,'text',disabled)}</div>${m.rawIcs||m.raw?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>`:''}`;
+  if (state.app==='calendar') {
+    const allDay=dateOnly(m.start), type=allDay?'date':'datetime-local';
+    content+=`<label class="check-label"><input type="checkbox" name="allDay" ${allDay?'checked':''} ${disabled}> All day</label>
+      <div class="fields calendar-date-fields">
+        ${field('Start (local time)','start',allDay?m.start:localInput(m.start),type,disabled)}
+        <div><label><span id="calendar-end-label">${calendarEndLabel(allDay)}</span>
+          <input name="end" type="${type}" value="${e((allDay?m.end:localInput(m.end))||'')}" aria-describedby="calendar-end-error" ${disabled}>
+        </label><div id="calendar-end-error" class="error" role="alert"></div></div>
+        ${field('Location','location',m.location,'text',disabled)}
+      </div>${m.rawIcs||m.raw?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>`:''}`;
+  }
   if (state.app==='mail') content+=`<div class="fields">${field('To (one recipient)','to',m.to,'email','required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount&&!mailAccounts().some(a=>a.id===m.sendAccount)?`<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>`:''}${mailAccounts().map(a=>`<option value="${a.id}" ${m.sendAccount===a.id?'selected':''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
   if (state.app==='documents') content+=`<div class="document-content">${mobileDisclosure('document-formatting','Formatting',undefined,'formatting')}<div id="document-formatting" class="rich-toolbar mobile-collapsible" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
   else if (state.app==='sheets') content+=sheetContent(r);
@@ -1358,6 +1368,45 @@ function detailContent(r: OfficeRecord) {
   return content+'</form>';
 }
 function localInput(value?: string) { if (!value) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value+'T00:00'; if (!/[Zz]|[+-]\d\d:\d\d$/.test(value)) return value.slice(0,16); const d=new Date(value); return new Date(+d-d.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+function calendarEndLabel(allDay: boolean) { return allDay?'End (exclusive date)':'End (local time)'; }
+function bindCalendarDates(form: HTMLFormElement) {
+  const start=form.querySelector<HTMLInputElement>('[name="start"]')!;
+  const end=form.querySelector<HTMLInputElement>('[name="end"]')!;
+  const allDay=form.querySelector<HTMLInputElement>('[name="allDay"]')!;
+  form.oninput=event=>{
+    if(event.target===allDay){
+      for(const input of [start,end]){
+        const value=input.value;
+        input.type=allDay.checked?'date':'datetime-local';
+        input.value=allDay.checked?value.slice(0,10):value+'T00:00';
+      }
+      form.querySelector('#calendar-end-label')!.textContent=calendarEndLabel(allDay.checked);
+    }
+    if((event.target===start||event.target===allDay)&&start.value){
+      const date=calendarDate(start.value);
+      if(!end.value||calendarDate(end.value)<=date){
+        if(allDay.checked)end.value=dayKey(addDays(date,1));
+        else {
+          date.setHours(date.getHours()+1);
+          end.value=localInput(date.toISOString());
+        }
+      }
+    }
+    markDirty();
+  };
+}
+function validateCalendarEnd() {
+  if(state.current?.kind!=='calendar'||state.current.meta.remote)return true;
+  const end=document.querySelector<HTMLInputElement>('#record-form [name="end"]');
+  if(!end)return true;
+  const start=end.form!.querySelector<HTMLInputElement>('[name="start"]')!;
+  const invalid=!!(start.value&&end.value&&calendarDate(end.value)<=calendarDate(start.value));
+  const error=end.form!.querySelector('#calendar-end-error')!;
+  const message=invalid?'End must be after start.':'';
+  if(error.textContent!==message)error.textContent=message;
+  if(invalid)end.setAttribute('aria-invalid','true');else end.removeAttribute('aria-invalid');
+  return !invalid;
+}
 function workbook(r: OfficeRecord) {
   r.meta.workbook??={sheets:[{name:'Sheet 1',cells:{}}]};
   for (const s of r.meta.workbook.sheets) if (Array.isArray(s.cells)) s.cells={...s.cells};
@@ -1387,7 +1436,8 @@ function collect() {
 function updateSaveButton() {
   const button=document.querySelector<HTMLButtonElement>('#detail [data-action="save"]');
   if(!button)return;
-  button.disabled=!!state.savePromise||!state.dirty;
+  const valid=validateCalendarEnd();
+  button.disabled=!!state.savePromise||!state.dirty||!valid;
 }
 function markDirty() { collect();state.dirty=true; updateSaveButton(); const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=isUnsavedDraft()?'Unsaved draft':'Unsaved changes'; clearTimeout(saveTimer); if(!isUnsavedDraft())saveTimer=setTimeout(()=>void attempt(()=>commit()),800); }
 async function completeTask() {
@@ -1424,6 +1474,7 @@ async function leaveEditor() {
 }
 async function commit(explicit=false): Promise<void> {
   clearTimeout(saveTimer); if(state.savePromise) await state.savePromise; if(!state.dirty || !state.current) return;
+  if(!validateCalendarEnd())throw new DraftCancelled();
   collect();if(isUnsavedDraft()&&!explicit)return;
   const taskOrder=state.app==='tasks'?[...document.querySelectorAll<HTMLElement>('#items [data-id]')].map(el=>el.dataset.id!):[];
   const taskPane=activePane();
