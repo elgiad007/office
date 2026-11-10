@@ -9,6 +9,7 @@ export async function testAccountSetup(page, url) {
   const done = async () => { await modal.getByRole('button', {name:'Done',exact:true}).click(); await modal.waitFor({state:'hidden'}); };
   const testPredicate = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r') === 'account-test';
   const authPredicate = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r') === 'google-connect';
+  const discoveryPredicate = target => target.pathname.endsWith('/api.php') && target.searchParams.get('r') === 'account-find-calendars';
   let imapChecks = 0;
   await page.route(testPredicate, async route => {
     if (!['imap','gmail'].includes(route.request().postDataJSON().type)) return route.continue();
@@ -88,7 +89,7 @@ export async function testAccountSetup(page, url) {
     await modal.getByLabel('Username',{exact:true}).fill('calendar-user');
     await modal.getByLabel('Password / app password',{exact:true}).fill('fixture-calendar-secret');
     await modal.getByRole('button',{name:'Save account',exact:true}).click();
-    await modal.getByText('Use an HTTPS calendar collection URL on port 443 or 8443, without embedded credentials.',{exact:true}).waitFor();
+    await modal.getByText('Use an HTTPS calendar collection URL on port 443, 8443, or 2080, without embedded credentials.',{exact:true}).waitFor();
     assert.equal(await modal.getByLabel('Password / app password',{exact:true}).inputValue(),'fixture-calendar-secret');
     await modal.getByLabel('Calendar collection URL',{exact:true}).fill('https://calendar.example.invalid/personal/');
     await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
@@ -125,6 +126,38 @@ export async function testAccountSetup(page, url) {
     const gmail=accounts.find(account=>account.label==='Gmail app password fixture');
     assert.equal(gmail.type,'imap');
     assert.ok(!JSON.stringify(accounts).includes('abcdefghijklmnop'));
+    const imap=accounts.find(account=>account.label==='Guided IMAP fixture');
+    await page.getByRole('button',{name:'Edit account Guided IMAP fixture',exact:true}).click();
+    await modal.getByRole('heading',{name:'Edit account',exact:true}).waitFor();
+    assert.equal(await modal.getByLabel('IMAP server (TLS 993)',{exact:true}).inputValue(),'imap.example.invalid');
+    assert.equal(await modal.getByLabel('Password / app password',{exact:true}).inputValue(),'');
+    assert.ok(!(await modal.innerHTML()).includes('fixture-imap-secret'));
+    await modal.getByLabel('Account label',{exact:true}).fill('Renamed IMAP fixture');
+    await modal.getByRole('button',{name:'Save changes',exact:true}).click();
+    await modal.getByRole('heading',{name:'Account saved',exact:true}).waitFor(); await done();
+    const edited=(await (await page.request.get(url+'api.php?r=accounts')).json()).accounts;
+    assert.equal(edited.length,3);
+    assert.equal(edited.find(account=>account.id===imap.id).label,'Renamed IMAP fixture');
+    await page.getByRole('button',{name:'Edit account Renamed IMAP fixture',exact:true}).click();
+    await modal.getByLabel('CalDAV server or collection URL',{exact:true}).fill('https://calendar.example.invalid:2080/');
+    const confirm=page.waitForEvent('dialog').then(async dialog=>{
+      assert.match(dialog.message(),/Change calendar discovery settings/);
+      await dialog.accept();
+    });
+    await modal.getByRole('button',{name:'Save changes',exact:true}).click();
+    await confirm;
+    await modal.getByRole('heading',{name:'Account saved',exact:true}).waitFor(); await done();
+    await page.getByRole('button',{name:'Edit account Renamed IMAP fixture',exact:true}).click();
+    assert.equal(await modal.getByLabel('CalDAV server or collection URL',{exact:true}).inputValue(),'https://calendar.example.invalid:2080/');
+    await page.route(discoveryPredicate,async route=>{
+      assert.deepEqual(route.request().postDataJSON(),{id:imap.id});
+      await route.fulfill({json:{calendars:[],checked:1,approval:'https://provider.example.invalid/dav/'}});
+    });
+    await modal.getByRole('button',{name:'Find calendars',exact:true}).click();
+    await modal.getByText(/Allow Office to use the mailbox login at provider\.example\.invalid/).waitFor();
+    await modal.getByRole('button',{name:'Use discovered URL',exact:true}).click();
+    assert.equal(await modal.getByLabel('CalDAV server or collection URL',{exact:true}).inputValue(),'https://provider.example.invalid/dav/');
+    await modal.getByRole('button',{name:'Close dialog',exact:true}).click();
     // Mobile and Escape close work without retaining the last draft's secrets.
     await page.setViewportSize({width:390,height:844});
     await open(); await modal.getByRole('button',{name:'Guided setup',exact:true}).click();
@@ -141,9 +174,10 @@ export async function testAccountSetup(page, url) {
     }
     await page.setViewportSize({width:1440,height:1000});
     await page.reload(); await page.getByRole('button',{name:'Add account',exact:true}).waitFor();
-    console.log('PASS account setup: guided/manual paths, required fields, drafts across provider/mode/back changes, Google connection with optional Calendar and no premature save, masked review, connection results/invalidation, save/error recovery, cleared secrets, keyboard and mobile.');
+    console.log('PASS account setup and editing: guided/manual paths, provider-specific checks, in-place updates, blank passwords, calendar discovery approval, keyboard and mobile.');
   } finally {
     await page.unroute(testPredicate);
     await page.unroute(authPredicate);
+    await page.unroute(discoveryPredicate);
   }
 }

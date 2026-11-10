@@ -1,7 +1,7 @@
 import {asError} from './utils.js';
-import type {CheckResult, RequestApi} from './types.js';
+import type {AccountEditDetails, CheckResult, RequestApi} from './types.js';
 type Provider = 'imap' | 'gmail' | 'google' | 'caldav';
-type AccountDraft = {label: string; email?: string; host?: string; smtp?: string; username?: string; password?: string; archiveFolder?: string; trashFolder?: string; url?: string; calendar?: boolean};
+type AccountDraft = {label: string; email?: string; host?: string; smtp?: string; username?: string; password?: string; archiveFolder?: string; trashFolder?: string; url?: string; calendar?: boolean; calendarUrl?: string};
 import {escapeHtml as escape} from './formats.js';
 
 const providers = {
@@ -12,15 +12,20 @@ const providers = {
 };
 
 /** The entire draft lives in this dialog closure, never browser storage. */
-export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialogElement; request: RequestApi; onSaved: (provider: Provider) => Promise<void>}) {
+export function openAccountSetup({dialog, request, onSaved, existing, onCalendarUpdate}: {dialog: HTMLDialogElement; request: RequestApi; onSaved: (provider: Provider) => Promise<void>; existing?: AccountEditDetails; onCalendarUpdate?: () => Promise<void>}) {
   const drafts: Record<Provider, AccountDraft> = {
     imap: {label:'', email:'', host:'', smtp:'', username:'', password:'', archiveFolder:'Archive', trashFolder:'Trash'},
     gmail: {label:'', email:'', password:''},
     google: {label:'', email:'', calendar:false},
     caldav: {label:'', url:'', username:'', password:''},
   };
-  let mode: string | null = null;
-  let provider: Provider = 'imap';
+  let mode: string | null = existing ? 'manual' : null;
+  let provider: Provider = existing?.gmailImap ? 'gmail' : existing?.type || 'imap';
+  let calendarStatus = existing?.calendarStatus;
+  if (existing) {
+    const {label,email,host,smtp,username,archiveFolder,trashFolder,url,calendarUrl}=existing;
+    drafts[provider]={...drafts[provider],label,email,host,smtp,username,archiveFolder:archiveFolder??'Archive',trashFolder:trashFolder??'Trash',url,calendarUrl};
+  }
   let step = 0;
   let busy = false;
   let result: CheckResult | null = null;
@@ -29,7 +34,8 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
   let previouslyFocused: HTMLElement | null = (document.activeElement as HTMLElement);
   const draft = () => drafts[provider];
   const steps = () => ['Account', 'Connection', 'Review'];
-  const payload = () => ({type:provider, ...draft()});
+  const payload = () => ({type:provider, ...draft(), ...(existing && {id:existing.id,version:existing.version})});
+  const passwordHelp = existing ? 'Leave blank to keep the saved password.' : 'Use an app password if your provider requires one.';
 
   function capture() {
     const form = dialog.querySelector<HTMLFormElement>('#account-form')!;
@@ -55,6 +61,8 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
   }
 
   function identity() {
+    if (existing) return input('Account label','label')
+      + (provider==='caldav' ? '' : input(provider==='google'?'Gmail address':'Sender email','email',{type:'email',readonly:provider!=='imap'}));
     if (provider === 'google') return providerSelect() + input('Gmail address', 'email', {type:'email'})
       + '<label class="setup-checkbox"><input type="checkbox" name="calendar" '+(draft().calendar ? 'checked' : '')+'> Include Google Calendar (read-only)</label><p>Sign in on Google’s page and approve access. Google integration must be configured once in Settings.</p>';
     return providerSelect() + input('Account label', 'label', {help:'A name to recognize this account, such as Personal Gmail.'})
@@ -64,20 +72,33 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
   function credentials() {
     if (provider === 'gmail') return `<p>Office fills in Gmail’s mail servers and detects All Mail and Trash automatically. This connects email only; Google Calendar uses the separate Google sign-in option.</p>
       <p>Turn on 2-Step Verification in your Google Account, then <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">create an app password</a> for Office. Paste that password below. Your normal Google password will not work. App passwords may be unavailable for work or school accounts, security-key-only verification, or Advanced Protection.</p>`
-      + input('Google app password', 'password', {type:'password', help:'Enter the 16-letter app password. Spaces between groups are removed automatically. No Google integration setup is needed.'});
+      + input('Google app password', 'password', {type:'password', required:!existing, help:existing?passwordHelp:'Enter the 16-letter app password. Spaces between groups are removed automatically. No Google integration setup is needed.'});
     if (provider === 'imap') {
       return `<p>Find these settings in your email provider’s mail-client instructions. Office currently supports implicit TLS on ports 993 and 465.</p>`
         + input('IMAP server (TLS 993)', 'host', {placeholder:'imap.example.com', help:'Enter the hostname only, without a protocol or port.'})
         + input('SMTP server (TLS 465)', 'smtp', {placeholder:'smtp.example.com', help:'Sending currently uses the same username and password as IMAP.'})
         + input('Username', 'username', {help:'Usually your full email address. Confirm with your provider.'})
-        + input('Password / app password', 'password', {type:'password', help:'Use an app password if your provider requires one.'})
+        + input('Password / app password', 'password', {type:'password', required:!existing, help:passwordHelp})
         + input('Existing IMAP archive folder', 'archiveFolder', {help:'Use the exact server path, such as INBOX.Archive. The default Archive can detect a unique server archive folder. Test connection checks the folder and MOVE support without moving mail.'})
-        + input('Existing IMAP trash folder', 'trashFolder', {help:'Default Trash detects a unique server-designated trash folder. Custom paths must match an existing folder; Office never creates one.'});
+        + input('Existing IMAP trash folder', 'trashFolder', {help:'Default Trash detects a unique server-designated trash folder. Custom paths must match an existing folder; Office never creates one.'})
+        + (calendarStatus ? calendarSettings() : '');
     }
     return `<p>Your provider supplies the full URL for an individual calendar collection. Its home page or account-discovery URL is not sufficient.</p>`
-      + input('Calendar collection URL', 'url', {type:'url', placeholder:'https://calendar.example.com/calendars/user/personal/', help:'Use the final HTTPS collection URL on port 443 or 8443; redirects are not followed.'})
+      + input('Calendar collection URL', 'url', {type:'url', placeholder:'https://calendar.example.com/calendars/user/personal/', help:'Use the final HTTPS collection URL on port 443, 8443, or 2080.'})
       + input('Username', 'username')
-      + input('Password / app password', 'password', {type:'password', help:'Use an app password if your provider requires one.'});
+      + input('Password / app password', 'password', {type:'password', required:!existing, help:passwordHelp});
+  }
+
+  function calendarSettings() {
+    const status=calendarStatus!;
+    const summary=status.calendars.length ? status.calendars.map(calendar=>calendar.label).join(', ')
+      : status.checked ? 'No calendars found yet.' : 'Office will look for calendars on the next sync.';
+    return '<h4>Calendars</h4>'
+      + input('CalDAV server or collection URL','calendarUrl',{type:'url',required:false,help:'Leave blank for automatic discovery. Saving a URL allows Office to use the mailbox login on that calendar server.'})
+      + `<p role="status">${escape(summary)}</p>`
+      + (status.approval ? `<p>Allow Office to use the mailbox login at ${escape(new URL(status.approval).host)} by using this URL and saving.</p><button type="button" data-setup="calendar-url">Use discovered URL</button>` : '')
+      + (status.error ? `<p class="error">${escape(status.error)}</p>` : '')
+      + '<button type="button" data-setup="find-calendars">Find calendars</button><small>Searches using the saved account settings.</small>';
   }
 
   function checks() {
@@ -140,7 +161,11 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
     busy = true;
     render(false);
     try {
-      const response = await request('account-save', payload());
+      let response = await request('account-save', payload());
+      if (response.confirmation) {
+        if (!window.confirm(response.confirmation)) { busy=false; render(false); return; }
+        response=await request('account-save',{...payload(),confirmChange:true});
+      }
       savedId = response.id;
       for (const data of Object.values(drafts)) if ('password' in data) data.password = '';
       // Settings can refresh behind the modal. Saving never initiates sync or sends mail.
@@ -151,6 +176,21 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
     } catch(cause) { const error=asError(cause);
       busy = false;
       if (!closed) { render(false); setError(error.message); }
+    }
+  }
+
+  async function findCalendars() {
+    capture();
+    busy=true;
+    render(false);
+    try {
+      calendarStatus=await request('account-find-calendars',{id:existing!.id});
+      await onCalendarUpdate?.();
+      busy=false;
+      if (!closed) { render(false); dialog.querySelector<HTMLButtonElement>('[data-setup="find-calendars"]')?.focus(); }
+    } catch(cause) {
+      busy=false;
+      if (!closed) { render(false); setError(asError(cause).message); }
     }
   }
 
@@ -166,8 +206,8 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
 
   function render(focus=true) {
     const complete = !!savedId;
-    const title = complete ? 'Account saved' : 'Add an account';
-    const method = mode && !complete ? `<div class="setup-method" role="group" aria-label="Setup method">
+    const title = complete ? 'Account saved' : existing ? 'Edit account' : 'Add an account';
+    const method = mode && !complete && !existing ? `<div class="setup-method" role="group" aria-label="Setup method">
       <button type="button" data-mode="guided" aria-pressed="${mode === 'guided'}">Guided setup</button>
       <button type="button" data-mode="manual" aria-pressed="${mode === 'manual'}">Manual setup</button></div>` : '';
     let body;
@@ -180,24 +220,24 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
       body = `<h3 id="setup-step-title" tabindex="-1">How would you like to set up your account?</h3>
         <div class="setup-options"><button type="button" data-mode="guided" aria-label="Guided setup" aria-describedby="setup-guided-description"><strong>Guided setup</strong><span id="setup-guided-description">Follow provider-specific steps, check your settings, and review before saving.</span><small>Recommended</small></button>
         <button type="button" data-mode="manual" aria-label="Manual setup" aria-describedby="setup-manual-description"><strong>Manual setup</strong><span id="setup-manual-description">Enter all connection settings directly.</span></button></div>`;
-    } else if (provider === 'google') {
+    } else if (provider === 'google' && !existing) {
       body = `<h3 id="setup-step-title" tabindex="-1">Connect your Google account</h3><form id="account-form" class="setup-form">${identity()}<p id="account-error" class="error" role="alert" tabindex="-1"></p><div class="dialog-actions"><button type="submit" class="primary">Connect with Google</button></div></form>`;
     } else {
       const names = steps();
       const isReview = mode === 'guided' && step === names.length - 1;
-      const content = mode === 'manual' ? identity()+credentials()
+      const content = mode === 'manual' ? identity()+(provider==='google' ? '<p>Use Authorize in Accounts to manage access to Gmail and Google Calendar.</p>' : credentials())
         : step === 0 ? identity()
         : isReview ? review() : credentials();
       body = `${mode === 'guided' ? `<ol class="setup-progress" aria-label="Setup progress">${names.map((name,index) => `<li ${index === step ? 'aria-current="step"' : ''}>${index+1}. ${name}</li>`).join('')}</ol>` : ''}
         <h3 id="setup-step-title" tabindex="-1">${mode === 'manual' ? 'Connection settings' : names[step]}</h3>
         <form id="account-form" class="setup-form">
           ${content}
-          ${mode === 'manual' ? `${checks()}<button type="button" data-setup="test">Test connection</button>` : ''}
+          ${mode === 'manual' && provider!=='google' ? `${checks()}<button type="button" data-setup="test">Test connection</button>` : ''}
           ${mode === 'guided' && !isReview && step > 0 ? `${checks()}<button type="button" data-setup="test">Test connection</button>` : ''}
           <p id="account-error" class="error" role="alert" tabindex="-1"></p>
           <div class="dialog-actions">
             ${mode === 'guided' && step > 0 ? '<button type="button" data-setup="back">Back</button>' : ''}
-            <button type="submit" class="primary">${mode === 'manual' || isReview ? 'Save account' : 'Next'}</button>
+            <button type="submit" class="primary">${existing ? 'Save changes' : mode === 'manual' || isReview ? 'Save account' : 'Next'}</button>
           </div>
           <span id="setup-live" class="setup-feedback" role="status" aria-live="polite">${busy ? 'Checking or saving…' : ''}</span>
         </form>`;
@@ -229,7 +269,7 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
         event.preventDefault();
         if (busy || !validateVisible()) return;
         capture();
-        if (provider === 'google') void connectGoogle();
+        if (provider === 'google' && !existing) void connectGoogle();
         else if (mode === 'manual' || step === steps().length - 1) void save();
         else {
           if (step === 0 && provider === 'imap' && !draft().username) draft().username = draft().email;
@@ -242,6 +282,15 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
     if (back) back.onclick = () => { capture(); step--; render(); };
     const test = dialog.querySelector<HTMLButtonElement>('[data-setup="test"]')!;
     if (test) test.onclick = () => void runCheck();
+    const find = dialog.querySelector<HTMLButtonElement>('[data-setup="find-calendars"]');
+    if (find) find.onclick = () => void findCalendars();
+    const useUrl = dialog.querySelector<HTMLButtonElement>('[data-setup="calendar-url"]');
+    if (useUrl) useUrl.onclick = () => {
+      const field=dialog.querySelector<HTMLInputElement>('#setup-calendarUrl')!;
+      field.value=calendarStatus!.approval!;
+      field.dispatchEvent(new Event('input',{bubbles:true}));
+      field.focus();
+    };
     if (focus) {
       dialog.scrollTop = 0;
       (dialog.querySelector<HTMLElement>('#setup-step-title')! || dialog.querySelector<HTMLButtonElement>('button')!)?.focus({preventScroll:true});
@@ -258,11 +307,12 @@ export function openAccountSetup({dialog, request, onSaved}: {dialog: HTMLDialog
     dialog.classList.remove('account-setup');
     dialog.removeAttribute('aria-busy');
     if (!dialog.open) dialog.replaceChildren();
-    const target = document.contains(previouslyFocused) ? previouslyFocused : document.querySelector<HTMLButtonElement>('#add-account')!;
+    const target = document.contains(previouslyFocused) ? previouslyFocused
+      : (existing && document.querySelector<HTMLButtonElement>(`[data-edit-account="${CSS.escape(existing.id)}"]`)) || document.querySelector<HTMLButtonElement>('#add-account');
     target?.focus();
     previouslyFocused = null;
   }, {once:true});
   render(false);
   dialog.showModal();
-  dialog.querySelector<HTMLButtonElement>('[data-mode="guided"]')!?.focus();
+  dialog.querySelector<HTMLElement>(existing?'#setup-label':'[data-mode="guided"]')?.focus();
 }

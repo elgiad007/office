@@ -1,8 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {agendaEventLabel,calendarDate,dayKey,addDays,eventBounds,eventsOn,timedLayout,upcomingEvents} from '../public/calendar.js';
+import {agendaEventLabel,calendarDate,dayKey,addDays,eventBounds,eventsOn,timedLayout,upcomingEvents,calendarSources} from '../public/calendar.js';
 process.env.TZ='America/New_York';
 const event=(id,start,end)=>({id,title:id,meta:{start,end}});
+test('discovered collections are separate Calendar sources even before events arrive',()=>{
+ const accounts=[{id:'mailbox',type:'imap',label:'Mailbox',calendar:{calendars:[
+   {id:'work',label:'Work'}, {id:'personal',label:'Personal'},
+ ]}}];
+ const rows=[{meta:{account:'mailbox',calendarSource:'work'}},{meta:{calendarSource:'restored'}}];
+ assert.deepEqual(calendarSources(rows,accounts).map(({id,label})=>[id,label]),[
+   ['local','Local calendar'],['work','Work'],['personal','Personal'],
+ ]);
+});
 test('agenda labels show end times and durations for timed and all-day events',()=>{
  const label=(start,end)=>agendaEventLabel(eventBounds(event('label',start,end)),'en-US');
  assert.equal(label('2026-11-06T14:00','2026-11-06T15:30'),'Fri, Nov 6 · 2:00 PM–3:30 PM (1.5 hours)');

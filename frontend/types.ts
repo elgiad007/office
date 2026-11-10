@@ -10,6 +10,7 @@ export interface Attachment {part: string; name: string; type: string; size: num
 export interface ItemMeta {
   remote?: boolean;
   account?: string;
+  calendarSource?: string;
   folder?: string;
   serverFolder?: string;
   labelIds?: string[];
@@ -67,7 +68,20 @@ export interface MailFolder {
 export interface Account {
   id: string; type: 'imap' | 'google' | 'caldav'; label: string;
   gmailImap?: boolean;
+  calendar?: AccountCalendarStatus;
   folders?: MailFolder[]; last_sync?: string | null; error?: string | null;
+}
+export interface AccountCalendarStatus {
+  calendars: {id:string; label:string}[];
+  checked?: number;
+  approval?: string;
+  error?: string | null;
+}
+export interface AccountEditDetails {
+  id: string; version: string; type: Account['type']; label: string;
+  gmailImap: boolean; username: string;
+  email?: string; host?: string; smtp?: string; archiveFolder?: string; trashFolder?: string;
+  url?: string; calendarUrl?: string; calendarStatus?: AccountCalendarStatus;
 }
 export interface Preferences {
   swipe?: import('./swipe.js').SwipePreferences;
@@ -146,7 +160,9 @@ export interface ApiResponses {
   'mail-export-batch': { warning: string | null };
   'mail-files': {record: OfficeRecord; attachments: Attachment[]};
   sync: { count: number; more?: boolean };
-  'account-test': CheckResult; 'account-save': { id: string };
+  'account-test': CheckResult; 'account-save': { id: string; confirmation?: string };
+  'account-details': AccountEditDetails;
+  'account-find-calendars': AccountCalendarStatus;
   'account-delete': { ok: boolean };
   'google-connect': { url: string }; 'google-settings': GoogleSettings;
   preferences: { ok: boolean };

@@ -277,6 +277,7 @@ try {
             if ($row['type']==='imap' && imap_is_gmail(['config'=>$config])) {
                 $row['gmailImap']=true;
             }
+            if (imap_calendar_eligible($row+['config'=>$config])) $row['calendar']=imap_calendar_status($row['id']);
             $row['folders']=setting('mail-folders:'.$row['id'],[]);
         }
         unset($row); json_response(['accounts'=>$rows]);
@@ -358,17 +359,48 @@ try {
     }
     if ($route==='account-save' && $method==='POST') {
         if (!extension_loaded('openssl')) fail('OpenSSL is required for encrypted account credentials.');
+        if (isset($input['id'])) {
+            session_write_close();
+            json_response(update_account_settings($input));
+        }
         $account=validate_account_input($input);
         $id=bin2hex(random_bytes(16)); db()->prepare('INSERT INTO accounts(id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute([$id,$account['label'],$account['type'],json_encode($account['config']),encrypt_secret($account['credentials'])]); json_response(['id'=>$id]);
     }
+    if ($route==='account-details' && $method==='POST') {
+        $a=account((string)($input['id']??''));
+        $details=account_edit_details($a);
+        if (imap_calendar_eligible($a)) $details['calendarStatus']=imap_calendar_status($a['id']);
+        json_response($details);
+    }
     if ($route==='account-test' && $method==='POST') {
-        $account=validate_account_input($input);
+        $account=isset($input['id'])?account_edit_input($input,account((string)$input['id'])):validate_account_input($input);
         session_write_close();
         json_response(check_account_connection($account));
     }
+    if ($route==='account-find-calendars' && $method==='POST') {
+        $id=(string)($input['id']??'');
+        session_write_close();
+        $status=with_account_mail_lock('sync:'.$id,static function() use ($id) {
+            $a=account($id);
+            if (!imap_calendar_eligible($a)) fail('This account does not support CalDAV discovery.');
+            sync_imap_calendars($a,true);
+            return imap_calendar_status($id);
+        });
+        json_response($status);
+    }
     if ($route==='account-delete' && $method==='POST') {
-        $a=account((string)($input['id']??'')); $db=db(); $db->beginTransaction();
-        $q=$db->prepare("DELETE FROM records WHERE json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1"); $q->execute([$a['id']]); $db->prepare('DELETE FROM accounts WHERE id=?')->execute([$a['id']]); $db->prepare('DELETE FROM settings WHERE key=?')->execute(['gmail-spam-grant:'.$a['id']]); $db->commit(); json_response(['ok'=>true]);
+        $id=(string)($input['id']??''); session_write_close();
+        with_account_mail_lock('sync:'.$id,static fn()=>with_account_mail_lock($id,static function() use ($id) {
+            account($id);
+            $db=db(); $db->beginTransaction();
+            try {
+                $db->prepare("DELETE FROM records WHERE json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1")->execute([$id]);
+                $db->prepare('DELETE FROM accounts WHERE id=?')->execute([$id]);
+                $db->prepare('DELETE FROM settings WHERE key IN (?,?)')->execute(['gmail-spam-grant:'.$id,'caldav-discovery:'.$id]);
+                $db->commit();
+            } catch(Throwable $e) { $db->rollBack(); throw $e; }
+        }));
+        json_response(['ok'=>true]);
     }
     if ($route==='google-connect' && $method==='POST') {
         json_response(['url'=>start_google_connection($input)]);
@@ -379,10 +411,23 @@ try {
         $a=account((string)($input['id']??'')); session_write_close();
         try {
             $operation=function() use (&$a,$repair,$batches) {
-                $count=match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair,$batches),'caldav'=>sync_caldav($a) };
-                if ($a['type']!=='caldav') {
-                    apply_mail_blocks($a);
-                    apply_mail_rules($a);
+                $a=account($a['id']);
+                try {
+                    $count=match($a['type']) { 'google'=>sync_google($a,$repair),'imap'=>sync_imap($a,$repair,$batches),'caldav'=>sync_caldav($a) };
+                    if ($a['type']!=='caldav') {
+                        apply_mail_blocks($a);
+                        apply_mail_rules($a);
+                    }
+                } finally {
+                    if (imap_calendar_eligible($a)) {
+                        try { sync_imap_calendars($a); }
+                        catch(Throwable $e) {
+                            $key='caldav-discovery:'.$a['id']; $state=setting($key,[]);
+                            $state['synced']=time(); $state['syncError']='Calendar sync failed. Use Find calendars in account settings to retry.';
+                            set_setting($key,$state);
+                            error_log('Portable Office calendar sync: '.$e->getMessage());
+                        }
+                    }
                 }
                 return $count;
             };

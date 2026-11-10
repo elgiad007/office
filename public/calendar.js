@@ -59,7 +59,22 @@ export function timedLayout(rows, day) {
     return entries;
 }
 const colors = ['#3a8c72', '#5579c6', '#b56c96', '#bb8436', '#7d70b4', '#43959e'];
-export function calendarSources(rows, accounts) { const ids = Array.from(new Set(['local', ...accounts.filter(a => a.type === 'google' || a.type === 'caldav').map(a => a.id), ...rows.map(r => r.meta.account || 'local')])); return ids.map((id, index) => ({ id, label: id === 'local' ? 'Local calendar' : accounts.find(a => a.id === id)?.label || id, color: colors[index % colors.length] })); }
+const calendarSourceId = (record) => record.meta.account ? record.meta.calendarSource || record.meta.account : 'local';
+export function calendarSources(rows, accounts) {
+    const sources = new Map([['local', 'Local calendar']]);
+    for (const account of accounts) {
+        if (account.type === 'google' || account.type === 'caldav')
+            sources.set(account.id, account.label);
+        for (const calendar of account.calendar?.calendars ?? [])
+            sources.set(calendar.id, calendar.label);
+    }
+    for (const row of rows) {
+        const id = calendarSourceId(row);
+        if (!sources.has(id))
+            sources.set(id, id);
+    }
+    return Array.from(sources, ([id, label]) => ({ id, label })).map((source, index) => ({ ...source, color: colors[index % colors.length] }));
+}
 export function createCalendar(env) {
     let anchor = calendarDate(dayKey(new Date()));
     let chosenView;
@@ -74,11 +89,11 @@ export function createCalendar(env) {
         let selectedRendered = false;
         const compact = env.compact();
         const view = env.query() ? 'agenda' : chosenView || (compact ? 'agenda' : 'month');
-        const sources = calendarSources(env.allRows(), env.accounts()), rows = env.rows().filter(r => !hidden.has(r.meta.account || 'local'));
+        const sources = calendarSources(env.allRows(), env.accounts()), rows = env.rows().filter(r => !hidden.has(calendarSourceId(r)));
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1), monthStart = addDays(first, -first.getDay());
         const start = view === 'month' ? monthStart : view === 'week' ? addDays(anchor, -anchor.getDay()) : anchor;
         const days = Array.from({ length: view === 'month' ? 42 : view === 'week' ? 7 : 1 }, (_, i) => addDays(start, i));
-        const color = (r) => sources.find(s => s.id === (r.meta.account || 'local'))?.color || colors[0];
+        const color = (r) => sources.find(s => s.id === calendarSourceId(r))?.color || colors[0];
         const event = (r, day, style = '') => {
             const selected = env.current() === r.id, id = selected && !selectedRendered ? 'id="selected-item"' : '';
             if (selected)
@@ -155,7 +170,7 @@ export function createCalendar(env) {
     function ensureVisible(id, reveal = false) { if (reveal) {
         const item = env.allRows().find(r => r.id === id);
         if (item)
-            hidden.delete(item.meta.account || 'local');
+            hidden.delete(calendarSourceId(item));
     } const row = env.rows().find(r => r.id === id); if (!row)
         return; if (!isVisible(row))
         return; if (!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)) {
@@ -168,7 +183,7 @@ export function createCalendar(env) {
             chosenView = 'agenda';
         render();
     } }
-    function isVisible(record) { return !hidden.has(record.meta.account || 'local'); }
+    function isVisible(record) { return !hidden.has(calendarSourceId(record)); }
     const position = () => ({ anchor, chosenView, hidden: [...hidden], compactSourcesOpen });
     function restorePosition(view) {
         ({ anchor, chosenView, compactSourcesOpen } = view);

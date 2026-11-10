@@ -43,10 +43,12 @@ function validate_account_input(array $input): array {
     }
     if ($type === 'caldav') {
         $config['url'] = trim($text('url'));
-        $url = parse_url($config['url']);
-        if (!$url || ($url['scheme'] ?? '') !== 'https' || empty($url['host']) || isset($url['user']) || isset($url['pass']) || isset($url['fragment']) || !in_array($url['port'] ?? 443, [443,8443], true)) {
-            fail('Use an HTTPS calendar collection URL on port 443 or 8443, without embedded credentials.');
-        }
+        caldav_validate_url($config['url'], 'calendar collection');
+    }
+    if ($type === 'imap' && imap_calendar_eligible(['type'=>$type,'config'=>$config])) {
+        $calendarUrl = trim($text('calendarUrl'));
+        if ($calendarUrl !== '') caldav_validate_url($calendarUrl, 'CalDAV server or collection');
+        $config['calendarUrl'] = $calendarUrl;
     }
     if ($type === 'google') {
         $config['redirect'] = trim($text('redirect'));
@@ -59,6 +61,100 @@ function validate_account_input(array $input): array {
     }
     if (strlen(json_encode([$config, $credentials], JSON_THROW_ON_ERROR)) > 16000) fail('Account settings too large.');
     return ['type' => $type, 'label' => $label, 'config' => $config, 'credentials' => $credentials];
+}
+
+function account_edit_version(array $a): string {
+    return hash('sha256',json_encode([$a['label'],$a['config'],$a['type']==='google'?'':$a['secret']],JSON_THROW_ON_ERROR));
+}
+
+function account_edit_details(array $a): array {
+    $fields=match($a['type']) {
+        'imap'=>['email','host','smtp','archiveFolder','trashFolder','calendarUrl'],
+        'caldav'=>['url'],
+        'google'=>['email'],
+    };
+    return ['id'=>$a['id'],'type'=>$a['type'],'label'=>$a['label'],'version'=>account_edit_version($a),
+        'gmailImap'=>$a['type']==='imap' && imap_is_gmail($a),'username'=>$a['credentials']['username']??'']
+        +array_intersect_key($a['config'],array_flip($fields));
+}
+
+function account_edit_input(array $input,array $saved): array {
+    if (($input['version']??null)!==account_edit_version($saved)) fail('Account settings changed. Close and reopen the editor.',409);
+    if ($saved['type']==='google') {
+        $label=is_string($input['label']??null)?trim($input['label']):'';
+        if (!$label || strlen($label)>200) fail('Enter an account label of up to 200 bytes.');
+        return array_replace($saved,['label'=>$label]);
+    }
+    $input['type']=$saved['type'];
+    if (($input['password']??'')==='') $input['password']=$saved['credentials']['password'];
+    if ($saved['type']==='imap' && imap_is_gmail($saved)) {
+        $email=$input['email']??null;
+        if (!is_string($email) || strcasecmp(trim($email),$saved['config']['email'])!==0) fail('Connect a new Gmail account to use a different address.');
+        $input=array_replace($input,array_intersect_key(account_edit_details($saved),array_flip(['email','host','smtp','username','archiveFolder','trashFolder'])));
+        if ($input['password']!==$saved['credentials']['password']) {
+            $password=is_string($input['password'])?str_replace(' ','',trim($input['password'])):'';
+            if (!preg_match('/^[a-zA-Z]{16}$/D',$password)) fail('Enter the 16-letter Google app password.');
+            $input['password']=$password;
+        }
+    }
+    $edited=validate_account_input($input);
+    $edited['config']=array_replace($saved['config'],$edited['config']);
+    return $edited;
+}
+
+function update_account_settings(array $input): array {
+    $id=(string)($input['id']??'');
+    return with_account_mail_lock('sync:'.$id,fn()=>with_account_mail_lock($id,function()use($id,$input){
+        $saved=account($id);
+        $edited=account_edit_input($input,$saved);
+        if ($saved['type']==='google') {
+            db()->prepare('UPDATE accounts SET label=? WHERE id=?')->execute([$edited['label'],$id]);
+            return ['id'=>$id];
+        }
+        $before=$saved['config']; $after=$edited['config'];
+        $loginChanged=($saved['credentials']['username']??'')!==($edited['credentials']['username']??'');
+        $mailboxChanged=$saved['type']==='imap' && ($loginChanged || strcasecmp($before['host'],$after['host'])!==0);
+        $collectionChanged=$saved['type']==='caldav' && ($loginChanged || $before['url']!==$after['url']);
+        $calendarServerChanged=$mailboxChanged || ($before['calendarUrl']??'')!==($after['calendarUrl']??'') ||
+            ($saved['type']==='imap' && strcasecmp($before['email'],$after['email'])!==0);
+        if (($mailboxChanged || $collectionChanged || $calendarServerChanged) && ($input['confirmChange']??false)!==true) {
+            $message=$mailboxChanged?'Switch mailboxes and replace this account’s downloaded mail and calendars?'
+                :($collectionChanged?'Switch calendar connections and replace this account’s downloaded events?':'Change calendar discovery settings and replace this account’s downloaded calendars?');
+            return ['id'=>$id,'confirmation'=>$message];
+        }
+        $folderChanged=$saved['type']==='imap' && (($before['archiveFolder']??'Archive')!==$after['archiveFolder'] || ($before['trashFolder']??'Trash')!==$after['trashFolder']);
+        $credentialsChanged=$edited['credentials']!==$saved['credentials'];
+        $defaults=$saved['type']==='imap'?['archiveFolder'=>'Archive','trashFolder'=>'Trash','calendarUrl'=>'']:[];
+        $connectionChanged=$credentialsChanged || ($before+$defaults)!=($after+$defaults);
+        $db=db(); $db->beginTransaction();
+        try {
+            $secret=$credentialsChanged?encrypt_secret($edited['credentials']):$saved['secret'];
+            $db->prepare('UPDATE accounts SET label=?,config=?,secret=?,last_sync=?,error=? WHERE id=?')->execute([
+                $edited['label'],json_encode($after,JSON_THROW_ON_ERROR),$secret,$connectionChanged?null:$saved['last_sync'],$connectionChanged?null:$saved['error'],$id]);
+            if ($mailboxChanged || $collectionChanged || $calendarServerChanged) {
+                $delete=$db->prepare("DELETE FROM records WHERE kind=? AND json_extract(meta,'$.account')=? AND json_extract(meta,'$.remote')=1");
+                if ($mailboxChanged) {
+                    $delete->execute(['mail',$id]);
+                    mail_undo_prune();
+                    $db->prepare("DELETE FROM mail_undo WHERE json_extract(payload,'$.before.meta.account')=?")->execute([$id]);
+                }
+                if ($collectionChanged || $calendarServerChanged) $delete->execute(['calendar',$id]);
+            }
+            $clear=$db->prepare('DELETE FROM settings WHERE key=?');
+            if ($mailboxChanged || $folderChanged) {
+                foreach (['imap-checkpoints','imap-repair','mail-folders','mail-pending'] as $key) $clear->execute([$key.':'.$id]);
+            }
+            if ($mailboxChanged) $clear->execute(['gmail-spam-grant:'.$id]);
+            if ($calendarServerChanged) $clear->execute(['caldav-discovery:'.$id]);
+            elseif ($saved['type']==='imap' && $credentialsChanged) {
+                $discovery=setting('caldav-discovery:'.$id,[]);
+                unset($discovery['checked'],$discovery['synced'],$discovery['error']);
+                set_setting('caldav-discovery:'.$id,$discovery);
+            }
+            $db->commit();
+        } catch (Throwable $e) { $db->rollBack(); throw $e; }
+        return ['id'=>$id];
+    }));
 }
 
 function check_account_connection(array $account): array {
@@ -108,15 +204,8 @@ function check_account_connection(array $account): array {
             if (!class_exists('DOMDocument')) fail('The DOM extension is required for CalDAV.');
             $xml = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
             $auth = base64_encode($account['credentials']['username'].':'.$account['credentials']['password']);
-            $response = web_request($account['config']['url'], 'PROPFIND', ['Depth: 0', 'Content-Type: application/xml; charset=utf-8', 'Authorization: Basic '.$auth], $xml);
-            $document = new DOMDocument();
-            $previous = libxml_use_internal_errors(true);
-            try {
-                if (!$document->loadXML($response['body'], LIBXML_NONET) || $document->doctype) fail('The server did not return valid CalDAV properties.');
-            } finally { libxml_clear_errors(); libxml_use_internal_errors($previous); }
-            $xpath = new DOMXPath($document);
-            $xpath->registerNamespace('d', 'DAV:');
-            $xpath->registerNamespace('c', 'urn:ietf:params:xml:ns:caldav');
+            $response = web_request($account['config']['url'], 'PROPFIND', ['Depth: 0', 'Content-Type: application/xml; charset=utf-8', 'Authorization: Basic '.$auth], $xml,8388608,true);
+            $xpath = caldav_xpath($response['body']);
             if (!$xpath->query('//d:propstat[contains(d:status," 200 ")]/d:prop/d:resourcetype/c:calendar')->length) fail('This URL is not a readable calendar collection. Use the collection URL supplied by your provider.');
         });
     }

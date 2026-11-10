@@ -20,4 +20,6 @@ Use **Import** for an `.ics` file and **Export** to share events as ICS. When th
 
 Google Calendar and CalDAV events appear as read-only cached copies. Sync covers the previous week through the next 90 days, up to 100 events. Google supplies expanded instances. Office shows recurrence information for imported and CalDAV series without generating extra occurrences locally. Manage invitations, recurring series edits, and reminders in your calendar provider.
 
+Calendars discovered from non-Google IMAP accounts appear as individual sources. To retry discovery or approve a separate calendar hostname, open **Settings → Accounts** and edit the mail account.
+
 See [Accounts and sync](accounts-and-sync.md) to connect a calendar.

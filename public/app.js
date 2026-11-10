@@ -536,7 +536,7 @@ async function api(route, data, signal) {
             payload = { ...payload, revision: result.record.revision };
     }
     const account = route === 'mail-undo' ? payload?.account : ['mail-action', 'mail-files'].includes(route) ? expected?.meta.account || latestMail(payload?.id)?.meta.account
-        : route === 'sync' ? payload?.id : ['mail-content', 'mail-export-batch', 'mail-folder-sync', 'mail-folders', 'mail-folder-manage'].includes(route) ? payload?.account : null;
+        : ['sync', 'account-save', 'account-find-calendars'].includes(route) ? payload?.id : ['mail-content', 'mail-export-batch', 'mail-folder-sync', 'mail-folders', 'mail-folder-manage'].includes(route) ? payload?.account : null;
     const names = { 'mail-undo': 'Undoing mail deletion', 'mail-action': ({ trash: 'Moving mail to Trash', archive: 'Archiving mail', restore: 'Restoring mail to Inbox', read: 'Marking mail read', unread: 'Marking mail unread', move: 'Moving mail', discard: 'Discarding cached copy', 'keep-local': 'Saving local copy' })[payload?.action || ''] || 'Updating mail', sync: 'Synchronizing mail', 'mail-folders': 'Discovering folders', 'mail-folder-sync': 'Refreshing folder', 'mail-folder-manage': 'Updating folders', 'account-test': 'Testing connection', save: 'Saving item', delete: 'Deleting item', restore: 'Restoring backup', import: 'Importing items', 'import-items': 'Importing items' };
     const label = state.accounts.find(row => row.id === account)?.label;
     const tracking = activity.queued(names[route] ? (label ? label + ': ' : '') + names[route] + '…' : null);
@@ -585,7 +585,7 @@ async function api(route, data, signal) {
     };
     if (!account)
         return await trackedRun();
-    const queueAccount = ['sync', 'mail-folder-sync'].includes(route) ? 'sync:' + account : account;
+    const queueAccount = ['sync', 'mail-folder-sync', 'account-save', 'account-find-calendars'].includes(route) ? 'sync:' + account : account;
     const previous = mailAccountQueue.get(queueAccount) || Promise.resolve();
     const pending = previous.catch(() => { }).then(trackedRun);
     mailAccountQueue.set(queueAccount, pending);
@@ -3752,7 +3752,12 @@ function selectSettingsPage(page) {
 }
 function settingsAccountStatus(account) {
     const checked = account.last_sync ? 'Last checked ' + timestampLabel(account.last_sync, new Date(account.last_sync).toLocaleString()) : 'Not checked yet';
-    return checked + (account.error ? ' · ' + e(account.error) : '');
+    const calendar = account.calendar;
+    const count = calendar?.calendars.length ?? 0;
+    const calendarMessage = calendar?.approval ? 'Calendar connection needs approval in Edit'
+        : calendar?.error ? 'Calendar connection needs attention in Edit'
+            : count ? count + (count === 1 ? ' calendar connected' : ' calendars connected') : '';
+    return checked + (account.error ? ' · ' + e(account.error) : '') + (calendarMessage ? ' · ' + e(calendarMessage) : '');
 }
 function refreshSettingsAccountStatus() {
     for (const status of document.querySelectorAll('#settings-accounts [data-account-status]')) {
@@ -3810,9 +3815,9 @@ function renderSettings(entryVersion) {
       <section class="card" id="mail-rules-panel"><h2>Mail Rules</h2><p>Loading rules…</p></section>
     </section>
     <section class="settings-grid" id="settings-accounts" data-settings-page="accounts"${settingsPage === 'accounts' ? '' : ' hidden'}>
-      <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small data-account-status="${e(a.id)}">${settingsAccountStatus(a)}</small></div><div class="actions">${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet mobile-icon-button" data-remove-account="${a.id}" aria-label="Remove account ${e(a.label)}">${mobileActionLabel('close', 'Remove')}</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account" class="mobile-icon-button" aria-label="Add account">${mobileActionLabel('add', '+ Add account')}</button></section>
+      <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small data-account-status="${e(a.id)}">${settingsAccountStatus(a)}</small></div><div class="actions"><button data-edit-account="${e(a.id)}" aria-label="Edit account ${e(a.label)}">Edit</button>${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet mobile-icon-button" data-remove-account="${a.id}" aria-label="Remove account ${e(a.label)}">${mobileActionLabel('close', 'Remove')}</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account" class="mobile-icon-button" aria-label="Add account">${mobileActionLabel('add', '+ Add account')}</button></section>
       <section class="card" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section>
-      <section class="card"><details><summary>Sync and connection details</summary><p>Office checks accounts every two minutes while the app is visible and you’ve used it in the last two minutes. You can also choose Sync now. Inbox, Archive, Trash and Junk: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. CalDAV requires the calendar collection URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, use the Google integration settings.</p></details></section>
+      <section class="card"><details><summary>Sync and connection details</summary><p>Office checks accounts every two minutes while the app is visible and you’ve used it in the last two minutes. You can also choose Sync now. Inbox, Archive, Trash and Junk: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. Office looks for CalDAV calendars on non-Google IMAP accounts. Edit the account to retry or enter a calendar URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, use the Google integration settings.</p></details></section>
     </section>
     <section class="settings-grid" id="settings-connections" data-settings-page="connections"${settingsPage === 'connections' ? '' : ' hidden'}>
       <section class="card"><h2>Link autocomplete</h2><form id="link-preferences">
@@ -3948,7 +3953,8 @@ function renderSettings(entryVersion) {
     };
     renderUpdateStatus();
     document.querySelector('#restore').onclick = () => void attempt(() => importFile(true));
-    document.querySelector('#add-account').onclick = accountDialog;
+    document.querySelector('#add-account').onclick = () => void accountDialog();
+    document.querySelectorAll('[data-edit-account]').forEach(b => b.onclick = () => void attempt(() => accountDialog(b.dataset.editAccount)));
     document.querySelector('#keep-recovery').onchange = event => void attempt(async () => { state.prefs = { ...state.prefs, keepRecoveryCopies: event.target.checked }; await api('preferences', { preferences: state.prefs }); notice('Recovery preference saved.'); });
     document.querySelectorAll('[data-repair-account]').forEach(b => b.onclick = () => void repairMail(b.dataset.repairAccount, b));
     document.querySelectorAll('[data-google]').forEach(b => b.onclick = () => void attempt(async () => { const r = await api('google-connect', { id: b.dataset.google }); location.href = r.url; }));
@@ -3972,11 +3978,17 @@ function focusSettingsCategory(category = settingsPage) {
     button?.focus({ preventScroll: true });
     button?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
-function accountDialog() {
-    openAccountSetup({ dialog, request: api, onSaved: async () => {
-            state.accounts = (await api('accounts')).accounts;
-            renderSettings();
-        } });
+async function accountDialog(id) {
+    if (dialog.open)
+        return;
+    const existing = id ? await api('account-details', { id }) : undefined;
+    if (dialog.open || state.app !== 'settings')
+        return;
+    const refresh = async () => {
+        state.accounts = (await api('accounts')).accounts;
+        renderSettings();
+    };
+    openAccountSetup({ dialog, request: api, existing, onSaved: refresh, onCalendarUpdate: refresh });
 }
 const itemMenus = installItemMenus({ confirmDeletion: connections.confirmDeletion, state, e, commit: leaveEditor, renderList, selectRecord, enterEdit, api, load, mailDeletionReload, deleteMailImmediately, notice, confirmation, attempt, exportRecords, setMailRead, waitForMailRead: id => pendingMailReads.get(id), capturePane: () => { const pane = activePane(); return () => restorePane(pane); }, mouseSelection: () => { keyboardSelection = false; }, fileMail: () => fileMail(mailFolderEnv()) });
 const pendingSwipeActions = new Map();

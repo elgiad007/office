@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__.'/mail-sync.php';
 require_once __DIR__.'/activity.php';
+require_once __DIR__.'/caldav.php';
 
 function public_host(string $host): string {
     if (!preg_match('/^[a-zA-Z0-9.-]{1,253}$/D',$host)) fail('Use a public DNS hostname.');
@@ -10,18 +11,18 @@ function public_host(string $host): string {
     foreach ($ips as $ip) if (!public_ipv4($ip)) fail('Private/reserved servers are not supported.');
     return $ips[0];
 }
-function web_request(string $url, string $method='GET', array $headers=[], ?string $body=null,int $limit=8388608): array {
+function web_request(string $url, string $method='GET', array $headers=[], ?string $body=null,int $limit=8388608,bool $dav=false,int $timeout=30,bool $returnStatus=false): array {
     if (!extension_loaded('curl')) fail('The cURL extension is required for this connector.');
     $p=parse_url($url);
     if (!$p || ($p['scheme']??'')!=='https' || empty($p['host']) || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) fail('Use an HTTPS endpoint without embedded credentials.');
-    $port=(int)($p['port']??443); if (!in_array($port,[443,8443],true)) fail('HTTPS ports 443 or 8443 are supported.');
+    $port=(int)($p['port']??443); if (!in_array($port,$dav?CALDAV_PORTS:[443,8443],true)) fail('Unsupported HTTPS port.');
     $ip=public_host($p['host']); $ch=curl_init($url); $response='';
-    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>5,CURLOPT_TIMEOUT=>30,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_PROXY=>'',CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response,$limit) { if (strlen($response)+strlen($chunk)>$limit) return 0; $response.=$chunk; return strlen($chunk); }]);
+    curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>min(5,$timeout),CURLOPT_TIMEOUT=>$timeout,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_PROXY=>'',CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response,$limit) { if (strlen($response)+strlen($chunk)>$limit) return 0; $response.=$chunk; return strlen($chunk); }]);
     if ($body!==null) curl_setopt($ch,CURLOPT_POSTFIELDS,$body);
     $ok=curl_exec($ch); $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
     if ($ok===false) fail('Provider connection failed or exceeded its response limit.');
-    if ($status<200 || $status>=300) fail('Provider returned HTTP '.$status.'. Check the account permissions and endpoint.');
-    return ['status'=>$status,'body'=>$response];
+    if (!$returnStatus && ($status<200 || $status>=300)) fail('Provider returned HTTP '.$status.'. Check the account permissions and endpoint.');
+    return ['status'=>$status,'body'=>$response,'location'=>$returnStatus?(curl_getinfo($ch,CURLINFO_REDIRECT_URL)?:''):''];
 }
 function google_json(string $url,string $token,string $method='GET',?array $body=null): array {
     $r=web_request($url,$method,['Authorization: Bearer '.$token,'Content-Type: application/json'],$body===null?null:json_encode($body,JSON_THROW_ON_ERROR));
@@ -63,20 +64,19 @@ function sync_google(array &$a,bool $repair=false): int {
     }
     return $count;
 }
-function sync_caldav(array $a): int {
+function sync_caldav(array $a,?array $calendar=null,int $timeout=30): int {
     if (!class_exists('DOMDocument')) fail('The DOM extension is required for CalDAV.');
     $start=gmdate('Ymd\T000000\Z',time()-7*86400); $end=gmdate('Ymd\T000000\Z',time()+90*86400);
     $xml='<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="'.$start.'" end="'.$end.'"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>';
     $auth=base64_encode($a['credentials']['username'].':'.$a['credentials']['password']);
-    $r=web_request($a['config']['url'],'REPORT',['Depth: 1','Content-Type: application/xml; charset=utf-8','Authorization: Basic '.$auth],$xml);
-    $doc=new DOMDocument(); $previous=libxml_use_internal_errors(true);
-    try { if (!$doc->loadXML($r['body'],LIBXML_NONET) || $doc->doctype) fail('Invalid calendar response.'); }
-    finally { libxml_clear_errors(); libxml_use_internal_errors($previous); }
-    $xp=new DOMXPath($doc); $xp->registerNamespace('d','DAV:'); $xp->registerNamespace('c','urn:ietf:params:xml:ns:caldav'); $count=0;
+    $r=web_request($calendar['url']??$a['config']['url'],'REPORT',['Depth: 1','Content-Type: application/xml; charset=utf-8','Authorization: Basic '.$auth],$xml,8388608,true,$timeout);
+    $xp=caldav_xpath($r['body']); $count=0;
+    $meta=$calendar===null?[]:['calendarSource'=>$calendar['id']];
+    $prefix=$calendar===null?'':$calendar['id'].':';
     foreach ($xp->query('//d:response') as $node) {
-        $ics=$xp->evaluate('string(.//c:calendar-data)',$node); if (!$ics) continue;
+        $ics=$xp->evaluate('string(d:propstat[contains(d:status," 200 ")]/d:prop/c:calendar-data)',$node); if (!$ics) continue;
         $href=$xp->evaluate('string(d:href)',$node);
-        foreach (parse_ics($ics) as $index=>$e) { cache_remote($a,$href.'#'.$index,'calendar',$e['title'],$e['body'],$e['meta']+['raw'=>$ics]); $count++; if ($count>=100) break 2; }
+        foreach (parse_ics($ics) as $index=>$e) { cache_remote($a,$prefix.$href.'#'.$index,'calendar',$e['title'],$e['body'],$e['meta']+$meta+['raw'=>$ics]); $count++; if ($count>=100) break 2; }
     }
     return $count;
 }

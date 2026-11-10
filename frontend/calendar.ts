@@ -47,7 +47,19 @@ export function timedLayout(rows: OfficeRecord[],day: Date) {
   for(const entry of entries){if(group.length&&entry.start>=Math.max(...ends))finish();let column=ends.findIndex(end=>end<=entry.start);if(column<0)column=ends.length;entry.column=column;ends[column]=entry.end;group.push(entry);}finish();return entries;
 }
 const colors=['#3a8c72','#5579c6','#b56c96','#bb8436','#7d70b4','#43959e'];
-export function calendarSources(rows: OfficeRecord[],accounts: Account[]) {const ids=Array.from(new Set(['local',...accounts.filter(a=>a.type==='google'||a.type==='caldav').map(a=>a.id),...rows.map(r=>r.meta.account||'local')]));return ids.map((id,index)=>({id,label:id==='local'?'Local calendar':accounts.find(a=>a.id===id)?.label||id,color:colors[index%colors.length]}));}
+const calendarSourceId=(record:OfficeRecord)=>record.meta.account ? record.meta.calendarSource||record.meta.account : 'local';
+export function calendarSources(rows: OfficeRecord[],accounts: Account[]) {
+  const sources=new Map([['local','Local calendar']]);
+  for(const account of accounts) {
+    if(account.type==='google'||account.type==='caldav')sources.set(account.id,account.label);
+    for(const calendar of account.calendar?.calendars??[])sources.set(calendar.id,calendar.label);
+  }
+  for(const row of rows) {
+    const id=calendarSourceId(row);
+    if(!sources.has(id))sources.set(id,id);
+  }
+  return Array.from(sources,([id,label])=>({id,label})).map((source,index)=>({...source,color:colors[index%colors.length]}));
+}
 interface Environment {query:()=>string;allRows:()=>OfficeRecord[];rows:()=>OfficeRecord[];accounts:()=>Account[];current:()=>string|undefined;compact:()=>boolean;create:(start:string,end:string)=>Promise<void>;before:()=>Promise<void>;error:(action:()=>Promise<void>)=>void}
 export function createCalendar(env:Environment) {
   let anchor=calendarDate(dayKey(new Date()));
@@ -60,11 +72,11 @@ export function createCalendar(env:Environment) {
     let selectedRendered=false;
     const compact=env.compact();
     const view=env.query()?'agenda':chosenView||(compact?'agenda':'month');
-    const sources=calendarSources(env.allRows(),env.accounts()),rows=env.rows().filter(r=>!hidden.has(r.meta.account||'local'));
+    const sources=calendarSources(env.allRows(),env.accounts()),rows=env.rows().filter(r=>!hidden.has(calendarSourceId(r)));
     const first=new Date(anchor.getFullYear(),anchor.getMonth(),1),monthStart=addDays(first,-first.getDay());
     const start=view==='month'?monthStart:view==='week'?addDays(anchor,-anchor.getDay()):anchor;
     const days=Array.from({length:view==='month'?42:view==='week'?7:1},(_,i)=>addDays(start,i));
-    const color=(r:OfficeRecord)=>sources.find(s=>s.id===(r.meta.account||'local'))?.color||colors[0];
+    const color=(r:OfficeRecord)=>sources.find(s=>s.id===calendarSourceId(r))?.color||colors[0];
     const event=(r:OfficeRecord,day?:Date,style='')=>{
       const selected=env.current()===r.id,id=selected&&!selectedRendered?'id="selected-item"':'';
       if(selected)selectedRendered=true;
@@ -120,8 +132,8 @@ export function createCalendar(env:Environment) {
     if(focusAttribute)host.querySelector<HTMLElement>(`[${focusAttribute.name}="${CSS.escape(focusAttribute.value)}"]`)?.focus({preventScroll:true});
   }
   function showAgendaDate() {document.querySelector('[data-agenda-date]')?.scrollIntoView({block:'nearest'});}
-  function ensureVisible(id:string,reveal=false) {if(reveal){const item=env.allRows().find(r=>r.id===id);if(item)hidden.delete(item.meta.account||'local');}const row=env.rows().find(r=>r.id===id);if(!row)return;if(!isVisible(row))return;if(!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)){const bounds=eventBounds(row);if(bounds){anchor=calendarDate(dayKey(bounds.start));chosenView='day';}else chosenView='agenda';render();}}
-  function isVisible(record:OfficeRecord){return !hidden.has(record.meta.account||'local');}
+  function ensureVisible(id:string,reveal=false) {if(reveal){const item=env.allRows().find(r=>r.id===id);if(item)hidden.delete(calendarSourceId(item));}const row=env.rows().find(r=>r.id===id);if(!row)return;if(!isVisible(row))return;if(!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)){const bounds=eventBounds(row);if(bounds){anchor=calendarDate(dayKey(bounds.start));chosenView='day';}else chosenView='agenda';render();}}
+  function isVisible(record:OfficeRecord){return !hidden.has(calendarSourceId(record));}
   const position=()=>({anchor,chosenView,hidden:[...hidden],compactSourcesOpen});
   function restorePosition(view: ReturnType<typeof position>) {
     ({anchor,chosenView,compactSourcesOpen}=view);
