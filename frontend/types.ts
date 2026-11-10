@@ -18,6 +18,8 @@ export interface ItemMeta {
   calendarZone?: string;
   calendarRules?: string;
   calendarExtra?: string;
+  calendarExtraOmitted?: boolean;
+  calendarOriginalRemote?: boolean;
   calendarManaged?: string;
   calendarGuests?: boolean;
   calendarAbsent?: boolean;
@@ -187,12 +189,13 @@ export interface ConnectionItem {id:string;kind:string;title:string;excerpt:stri
 export interface ConnectionEdge {a:string;b:string;created:string;archived?:boolean}
 export interface ConnectionGroup {id:string;title:string;kind:string;items:number;links:number;archivedLinks?:number}
 export interface ConnectionList {links:ConnectionEdge[];items:ConnectionItem[];more:boolean;total?:number;activeTotal?:number;archivedTotal?:number;groups?:ConnectionGroup[];itemTotal?:number;groupTotal?:number}
-export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${string}` | `history&${string}` | `connection-search&${string}` | `connections&${string}`;
+export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${string}` | `history&${string}` | `connection-search&${string}` | `connections&${string}` | `calendar-original&${string}`;
 export type ApiResponse<R extends ApiRoute> = R extends keyof ApiResponses ? ApiResponses[R]
   : R extends `connection-search&${string}` ? {items:ConnectionItem[]}
   : R extends `connections&${string}` ? ConnectionList
   : R extends `records&${string}` ? RecordList
   : R extends `record&${string}` ? {record: OfficeRecord}
+  : R extends `calendar-original&${string}` ? {ics: string}
   : {revisions: {revision: number; snapshot: OfficeRecord}[]};
 /** Requests are serialized as JSON; individual endpoints validate their payloads in PHP. */
 export type ApiData = object;

@@ -5,6 +5,7 @@ const GOOGLE_CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.ev
 const CALENDAR_CORE_ICS = ['SUMMARY','DESCRIPTION','LOCATION','DTSTART','DTEND','DURATION'];
 const CALENDAR_RECURRENCE_ICS = ['RRULE','RDATE','EXDATE'];
 const CALENDAR_MANAGED_ICS = ['UID','RECURRENCE-ID','DTSTAMP','CREATED','LAST-MODIFIED','SEQUENCE','ORGANIZER'];
+const CALENDAR_EXTRA_LIMIT = 1000000;
 
 function google_can_edit_calendar(array $account): bool {
     return ($account['config']['calendar']??true) && in_array(GOOGLE_CALENDAR_WRITE_SCOPE,explode(' ',$account['credentials']['scope']??''),true);
@@ -42,6 +43,13 @@ function caldav_report_events(string $body): array {
 
 function calendar_etag(string $etag): bool {
     return preg_match('/^"[\x21\x23-\x7e\x80-\xff]*"$/D',$etag)===1;
+}
+
+function caldav_strong_etag(string $etag): string {
+    if (calendar_etag($etag)) return $etag;
+    // Some CalDAV servers omit quotes in both DAV:getetag and the HTTP header.
+    // Accept a single bare token, excluding weak tags, wildcards and tag lists.
+    return preg_match('/^[A-Za-z0-9][A-Za-z0-9._:+-]*$/D',$etag) ? '"'.$etag.'"' : '';
 }
 
 function caldav_event_address(string $collection,string $href): string {
@@ -106,6 +114,23 @@ function calendar_caldav_fields(array $parsed,array $component,array $metadata):
         'calendarManaged'=>implode("\n",$parts['managed']),
         'calendarGuests'=>preg_match('/^ATTENDEE[;:]/mi',implode("\n",$parts['extra']))===1,
     ]+$metadata;
+    $meta=&$parsed['meta'];
+    if (strlen($meta['calendarExtra'])>CALENDAR_EXTRA_LIMIT) {
+        unset($meta['calendarExtra']);
+        $meta['calendarExtraOmitted']=true;
+    }
+    // Leave room for the account and source fields appended at publication.
+    $limit=2*1024*1024-8192;
+    if (strlen(json_encode($meta))>$limit) {
+        if (isset($meta['rawIcs'])) {
+            unset($meta['rawIcs']);
+            $meta['calendarOriginalRemote']=true;
+        }
+        if (isset($meta['calendarExtra']) && strlen(json_encode($meta))>$limit) {
+            unset($meta['calendarExtra']);
+            $meta['calendarExtraOmitted']=true;
+        }
+    }
     return $parsed;
 }
 
@@ -116,11 +141,13 @@ function caldav_calendar_rows(array $resources,array $expanded,string $collectio
         $components=calendar_ics_events(calendar_ics_lines($resource['ics']));
         $repeat=count($components)>1 || preg_match('/^(?:RRULE|RDATE|RECURRENCE-ID)[;:]/mi',$resource['ics']);
         try { caldav_event_address($collection,$href); $safe=true; } catch (HttpError) { $safe=false; }
-        $meta=['calendarHref'=>$href,'calendarEtag'=>$resource['etag'],'calendarWritable'=>$safe && $resource['writable'] && calendar_etag($resource['etag']),
+        $etag=caldav_strong_etag($resource['etag']);
+        $meta=['calendarHref'=>$href,'calendarEtag'=>$etag,'calendarWritable'=>$safe && $resource['writable'] && $etag!=='',
             'calendarSeries'=>$repeat?$href:'','calendarOccurrence'=>''];
         if ($source!==null) $meta['calendarSource']=$source;
         $expansion=$expanded[$href]??null;
-        $instances=$repeat && $expansion && $expansion['etag']===$resource['etag'] && !preg_match('/^(?:RRULE|RDATE|EXDATE)[;:]/mi',$expansion['ics'])?parse_ics($expansion['ics']):[];
+        $sameVersion=$expansion && ($expansion['etag']===$resource['etag'] || ($etag!=='' && caldav_strong_etag($expansion['etag'])===$etag));
+        $instances=$repeat && $sameVersion && !preg_match('/^(?:RRULE|RDATE|EXDATE)[;:]/mi',$expansion['ics'])?parse_ics($expansion['ics']):[];
         if (!$instances) {
             foreach ($original as $index=>$event) {
                 if (!isset($components[$index])) continue;
@@ -216,7 +243,7 @@ function calendar_provider_response(array $response): array {
 
 function calendar_checked_changes(mixed $input): array {
     if (!is_array($input) || !$input) fail('There are no event changes to save.');
-    $limits=['title'=>500,'body'=>1000000,'location'=>2000,'start'=>40,'end'=>40,'calendarZone'=>200,'calendarRules'=>16384,'calendarExtra'=>1000000];
+    $limits=['title'=>500,'body'=>1000000,'location'=>2000,'start'=>40,'end'=>40,'calendarZone'=>200,'calendarRules'=>16384,'calendarExtra'=>CALENDAR_EXTRA_LIMIT];
     foreach ($input as $key=>$value) {
         if (!isset($limits[$key]) || !is_string($value) || strlen($value)>$limits[$key] || str_contains($value,"\0")) fail('Invalid calendar field.');
     }
@@ -280,13 +307,14 @@ function calendar_ics_text(string $value): string {
 function calendar_ics_render(array $lines): string {
     $folded=[];
     foreach ($lines as $line) {
-        while (strlen($line)>75) {
-            $cut=75;
+        $length=strlen($line); $offset=0; $width=75;
+        while ($length-$offset>$width) {
+            $cut=$offset+$width;
             while ((ord($line[$cut]) & 0xc0)===0x80) $cut--;
-            $folded[]=substr($line,0,$cut);
-            $line=' '.substr($line,$cut);
+            $folded[]=($offset===0?'':' ').substr($line,$offset,$cut-$offset);
+            $offset=$cut; $width=74;
         }
-        $folded[]=$line;
+        $folded[]=($offset===0?'':' ').substr($line,$offset);
     }
     return implode("\r\n",$folded)."\r\n";
 }
@@ -406,6 +434,22 @@ function calendar_caldav_collection(array $account,array $meta): array {
     fail('This CalDAV collection is no longer connected.',409);
 }
 
+function calendar_caldav_resource(array $account,array $meta,callable $request): array {
+    $collection=calendar_caldav_collection($account,$meta);
+    $url=caldav_event_address($collection['url'],$meta['calendarHref']);
+    $headers=['Authorization: Basic '.base64_encode($account['credentials']['username'].':'.$account['credentials']['password'])];
+    $response=calendar_provider_response($request($url,'GET',$headers,null,8388608,true,15,true));
+    return [$collection,$url,$headers,$response];
+}
+
+function calendar_original_request(string $id): array {
+    $record=get_record($id); $meta=$record['meta'];
+    if ($record['kind']!=='calendar' || empty($meta['remote']) || empty($meta['calendarHref']) || empty($meta['account'])) fail('No connected CalDAV event was found.',404);
+    $account=account($meta['account']);
+    [, , , $response]=calendar_caldav_resource($account,$meta,'web_request');
+    return ['ics'=>$response['body']];
+}
+
 function calendar_provider_event(array $record,array &$account,bool $series,?array $changes,?string $version,bool $confirmed,string $browserZone,?callable $request=null): array {
     $request??='web_request';
     $meta=$record['meta'];
@@ -431,12 +475,9 @@ function calendar_provider_event(array $record,array &$account,bool $series,?arr
         return ['refresh'=>fn()=>sync_google_calendar($account,$token)];
     }
 
-    $collection=calendar_caldav_collection($account,$meta);
-    $url=caldav_event_address($collection['url'],$meta['calendarHref']);
-    $headers=['Authorization: Basic '.base64_encode($account['credentials']['username'].':'.$account['credentials']['password'])];
-    $response=calendar_provider_response($request($url,'GET',$headers,null,8388608,true,15,true));
-    $etag=$response['etag'];
-    if ($etag!==($version??$meta['calendarEtag']) || !calendar_etag($etag)) fail('The CalDAV event changed. Refresh it before saving again.',409);
+    [$collection,$url,$headers,$response]=calendar_caldav_resource($account,$meta,$request);
+    $etag=caldav_strong_etag($response['etag']);
+    if ($etag==='' || $etag!==($version??$meta['calendarEtag'])) fail('The CalDAV event changed. Refresh it before saving again.',409);
     $raw=$response['body']; $lines=calendar_ics_lines($raw);
     $events=calendar_ics_events($lines); $parsed=parse_ics($raw); $zones=ics_timezones(implode("\n",$lines));
     $identity=$series?'':($meta['calendarOccurrence']??'');
@@ -457,6 +498,7 @@ function calendar_provider_event(array $record,array &$account,bool $series,?arr
     $target=calendar_caldav_fields($parsed[$index],$events[$index],array_replace($meta,['calendarOccurrence'=>$identity]));
     if ($createException) $target['meta']=array_replace($target['meta'],array_intersect_key($meta,array_flip(['start','end','calendarOccurrence'])));
     if ($changes===null) return array_replace($record,$target);
+    if (!empty($target['meta']['calendarExtraOmitted']) && isset($changes['calendarExtra'])) fail('The additional iCalendar properties exceed the editor’s size limit.');
     if ((!empty($target['meta']['calendarGuests']) || preg_match('/^ATTENDEE[;:]/mi',$changes['calendarExtra']??'')) && !$confirmed) fail('Confirm saving this event with guests.');
     $body=calendar_patch_caldav($raw,$events[$index],$target,$changes,$createException,$browserZone);
     calendar_provider_response($request($url,'PUT',[...$headers,'Content-Type: text/calendar; charset=utf-8','If-Match: '.$etag],$body,8388608,true,15,true));

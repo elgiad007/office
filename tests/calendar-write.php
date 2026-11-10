@@ -68,10 +68,16 @@ END:VEVENT
 END:VCALENDAR
 ICS;
 $origin='https://calendar.example.test'; $collection=$origin.'/work'; $href='/work/meeting.ics'; $etag='"dav-1"';
-$resources=[$href=>['ics'=>$raw,'etag'=>$etag,'writable'=>true]];
+$resources=[$href=>['ics'=>$raw,'etag'=>trim($etag,'"'),'writable'=>true]];
 $expandedResources=[$href=>['ics'=>$expanded,'etag'=>$etag,'writable'=>true]];
 $rows=caldav_calendar_rows($resources,$expandedResources,$collection,null);
 expect_calendar(count($rows)===3 && isset($rows[$href.'#0']),'Expansion includes the first occurrence and skips the excluded week.');
+expect_calendar($rows[$href.'#0']['meta']['calendarWritable'] && $rows[$href.'#0']['meta']['calendarEtag']===$etag,'An unquoted CalDAV version enables editing and is normalized in the cache.');
+foreach (['','*','W/"dav-1"','dav-1, dav-2',"dav-1\r\nInjected: value"] as $unsafeTag) {
+    expect_calendar(caldav_strong_etag($unsafeTag)==='','Unsafe or weak version tags cannot be used for writes.');
+}
+$readOnly=caldav_calendar_rows([$href=>array_replace($resources[$href],['writable'=>false])],$expandedResources,$collection,null);
+expect_calendar(!$readOnly[$href.'#0']['meta']['calendarWritable'],'An unquoted version does not override read-only privileges.');
 $instance=$rows[$href.'#instance:2026-03-08T13:00:00Z'];
 expect_calendar($instance['meta']['end']==='2026-03-08T14:00:00+00:00','Expanded event duration survives DST.');
 expect_calendar($rows[$href.'#instance:2026-03-22T13:00:00Z']['title']==='Moved meeting','Moved occurrence keeps its original identity.');
@@ -93,7 +99,7 @@ $calls=[]; $written='';
 $request=static function(string $url,string $method,array $headers,?string $body)use(&$calls,&$written,$origin,$href,$etag,$raw):array {
     expect_calendar($url===$origin.$href,'Write target is the provider resource inside the connected collection.');
     $calls[]=$method;
-    if ($method==='GET') return ['status'=>200,'etag'=>$etag,'body'=>$raw];
+    if ($method==='GET') return ['status'=>200,'etag'=>trim($etag,'"'),'body'=>$raw];
     expect_calendar($method==='PUT' && in_array('If-Match: '.$etag,$headers,true),'CalDAV uses conditional PUT.');
     $written=$body;
     return ['status'=>204,'body'=>''];
@@ -109,6 +115,19 @@ expect_calendar($preview['meta']['calendarOccurrence']==='' && $preview['meta'][
 $calls=[];
 calendar_rejects(fn()=>calendar_provider_event($record,$account,true,['title'=>'Conflicting edit'],'"old"',false,'UTC',$request),409);
 expect_calendar($calls===['GET'],'Conflict never writes the stale event.');
+$attachment='ATTACH;ENCODING=BASE64;VALUE=BINARY:'.str_repeat('A',2200000);
+$largeRaw=str_replace("X-CUSTOM;LANGUAGE=en:Keep this\n",$attachment."\n",$raw);
+$large=caldav_calendar_rows([$href=>array_replace($resources[$href],['ics'=>$largeRaw])],[],$collection,null)[$href.'#0'];
+expect_calendar($large['meta']['calendarWritable'] && $large['meta']['calendarExtraOmitted'] && $large['meta']['calendarOriginalRemote'],'Oversized events retain editability without duplicating the attachment in the cache.');
+validate_record($large+['kind'=>'calendar']);
+$largeRecord=$large+['id'=>'large-id','kind'=>'calendar'];
+$largeRecord['meta']['remote']=true;
+$largeRequest=static function(string $url,string $method,array $headers,?string $body)use($etag,$largeRaw,$attachment):array {
+    if ($method==='GET') return ['status'=>200,'etag'=>trim($etag,'"'),'body'=>$largeRaw];
+    expect_calendar(in_array($attachment,calendar_ics_lines($body),true),'A normal edit preserves the oversized attachment.');
+    return ['status'=>204,'body'=>''];
+};
+calendar_provider_event($largeRecord,$account,false,['title'=>'Edited event'],$etag,false,'UTC',$largeRequest);
 $rangeRecord=$rows[$href.'#instance:2026-03-22T13:00:00Z']+['id'=>'range-id','kind'=>'calendar'];
 $rangeRecord['meta']['remote']=true;
 $rangeRequest=static function(string $url,string $method)use($etag,$raw):array {

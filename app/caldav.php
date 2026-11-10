@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 const CALDAV_PORTS = [443, 8443, 2080];
+const CALDAV_CACHE_TAG_FORMAT = 1;
 
 function repair_cached_caldav_dates(): void {
     $key='caldav-date-repair';
@@ -238,7 +239,7 @@ function sync_imap_calendars(array $a,bool $force=false): int {
     $key='caldav-discovery:'.$a['id'];
     $state=setting($key,[]);
     $now=time(); $deadline=microtime(true)+16;
-    if (!$force && ($state['synced']??0)>$now-300) return 0;
+    if (!$force && ($state['synced']??0)>$now-300 && ($state['cacheTagFormat']??0)===CALDAV_CACHE_TAG_FORMAT) return 0;
     $calendars=$state['discovered']??[];
     if ($force || ($state['checked']??0)<$now-($calendars?604800:86400)) {
         $result=discover_caldav($a,caldav_candidates($a),min($deadline-5,microtime(true)+10));
@@ -258,6 +259,7 @@ function sync_imap_calendars(array $a,bool $force=false): int {
     $removed=array_diff(array_column($state['calendars']??[],'id'),array_column($calendars,'id'));
     $state['calendars']=$calendars;
     $state['synced']=$now;
+    $state['cacheTagFormat']=CALDAV_CACHE_TAG_FORMAT;
     $state['syncError']=null;
     $db=db(); $db->beginTransaction();
     try {

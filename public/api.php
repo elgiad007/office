@@ -194,6 +194,10 @@ try {
         session_write_close();
         json_response(calendar_edit_request($input,$route==='calendar-save'));
     }
+    if ($route==='calendar-original' && $method==='GET') {
+        session_write_close();
+        json_response(calendar_original_request((string)($_GET['id']??'')));
+    }
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.
         if (!empty($input['meta']['remote'])) fail('Provider records cannot be edited locally.');

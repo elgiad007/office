@@ -1371,7 +1371,8 @@ function detailContent(r: OfficeRecord) {
     const advanced=m.calendarExtra!==undefined?`<details><summary>CalDAV properties</summary>
       <p class="muted">iCalendar properties for attendees, reminders, availability, privacy, categories, links, attachments, and custom fields.</p>
       <label>Additional iCalendar properties<textarea name="calendarExtra" rows="6" ${disabled}>${e(m.calendarExtra)}</textarea></label>
-      ${m.calendarManaged?`<label>Provider-managed properties<textarea readonly rows="3">${e(m.calendarManaged)}</textarea></label>`:''}</details>`:'';
+      ${m.calendarManaged?`<label>Provider-managed properties<textarea readonly rows="3">${e(m.calendarManaged)}</textarea></label>`:''}</details>`
+      :m.calendarExtraOmitted?'<p class="muted">The additional iCalendar properties exceed the editor’s size limit. Office preserves them when saving.</p>':'';
     content+=`<div id="calendar-event-error" class="error" role="alert"></div>
       ${scope}${series||m.calendarSeries&&!m.calendarOccurrence?'<p class="recurrence-note">You are editing the entire series.</p>':m.calendarOccurrence?'<p class="recurrence-note">Recurring event · this occurrence</p>':''}
       <label class="check-label"><input type="checkbox" name="allDay" ${allDay?'checked':''} ${disabled}> All day</label>
@@ -1382,7 +1383,7 @@ function detailContent(r: OfficeRecord) {
         </label>
         ${field('Location','location',m.location,'text',disabled)}
         ${writable?field('Event time zone (times shown in your local zone)','calendarZone',m.calendarZone):''}
-      </div>${rules}${advanced}${m.rawIcs||m.raw?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence&&!writable?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}</p>`:''}`;
+      </div>${rules}${advanced}${m.rawIcs||m.raw||m.calendarOriginalRemote?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence&&!writable?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}</p>`:''}`;
   }
   if (state.app==='mail') content+=`<div class="fields">${field('To (one recipient)','to',m.to,'email','required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount&&!mailAccounts().some(a=>a.id===m.sendAccount)?`<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>`:''}${mailAccounts().map(a=>`<option value="${a.id}" ${m.sendAccount===a.id?'selected':''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
   if (state.app==='documents') content+=`<div class="document-content">${mobileDisclosure('document-formatting','Formatting',undefined,'formatting')}<div id="document-formatting" class="rich-toolbar mobile-collapsible" role="toolbar" aria-label="Document formatting"><button type="button" data-format="bold" aria-label="Bold"><b>B</b></button><button type="button" data-format="italic" aria-label="Italic"><i>I</i></button><button type="button" data-format="formatBlock" data-value="h1">Heading 1</button><button type="button" data-format="formatBlock" data-value="h2">Heading 2</button><button type="button" data-format="formatBlock" data-value="p">Paragraph</button><button type="button" data-format="insertUnorderedList">List</button><button type="button" data-format="insertOrderedList">1. List</button><button type="button" data-format="table">Table</button><button type="button" data-action="link">Link</button><button type="button" data-action="image">Image</button><button type="button" data-format="undo">Undo</button><button type="button" data-format="redo">Redo</button><button type="button" data-action="text">Plain text</button><button type="button" data-action="print">Print / PDF</button></div><div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="Document content" aria-multiline="true">${safeDocument(r.body)}</div></div><p class="muted">Basic formatting · HTML / plain text export · Vim navigation outside the editing area</p>`;
@@ -2386,7 +2387,11 @@ async function handleClick(event: MouseEvent) {
     if(action==='logout')await signOut();
     if(action==='message-headers')await viewMessageHeaders();
     if(action==='eml'){const record=await fullMailRecord(state.current!);download(record.title+'.eml',originalMail(record),'message/rfc822');}
-    if(action==='original-ics')download(state.current!.title+'.ics',state.current!.meta.rawIcs||state.current!.meta.raw||'','text/calendar');
+    if(action==='original-ics'){
+      const record=state.current!;
+      const ics=record.meta.rawIcs||record.meta.raw||(await api(`calendar-original&id=${encodeURIComponent(record.id)}`)).ics;
+      download(record.title+'.ics',ics,'text/calendar');
+    }
     if(action==='read')await readMail();
     if(action==='archive')await archiveLocal();
     if(action==='reply'){const original=state.current!;const r=original.meta.headerOnly?await fullMailRecord(original):original;if(state.current?.id!==original.id)return;const match=(r.meta.from||'').match(/<([^>]+)>/);await createRecord({title:/^Re:/i.test(r.title)?r.title:'Re: '+r.title,body:'\n\nOn '+(r.meta.date||'')+', '+(r.meta.from||'')+' wrote:\n'+r.body.split('\n').map(l=>'> '+l).join('\n'),meta:{to:match?match[1]:r.meta.from}},{keepMailList:true,focusBody:true});}
