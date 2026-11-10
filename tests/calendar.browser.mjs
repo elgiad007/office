@@ -30,6 +30,29 @@ export async function testCalendar(page,url){
  if(addGoogle)accounts.push({id:'google',type:'google',label:'Personal'});
  const responses={sync:{count:0},'google-settings':{configured:false},'mail-junk-settings':{rules:[],folder:'Junk'},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences},accounts:{accounts},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
+  const initialRows=rows;
+  const navigationEvent=(id,hours)=>({id,kind:'calendar',title:id,body:'Notes',revision:1,meta:{
+   start:new Date(+now+hours*3600000).toISOString(),end:new Date(+now+(hours+0.5)*3600000).toISOString(),
+  }});
+  const hiddenEvent=navigationEvent('Hidden upcoming event',1);
+  Object.assign(hiddenEvent.meta,{remote:true,account:'caldav'});
+  rows=[initialRows.find(row=>row.id==='past'),navigationEvent('previous',-1),hiddenEvent,
+   navigationEvent('upcoming',2),navigationEvent('following',3)];
+  const selectWithKey=async (key,id)=>{
+   await page.keyboard.press(key);
+   await page.locator(`#selected-item[data-id="${id}"]`).waitFor();
+  };
+  await page.goto(url+'#calendar');await page.reload();
+  await page.locator('[data-source=caldav]').uncheck();
+  await page.locator('#main').focus();
+  await selectWithKey('j','upcoming');
+  await selectWithKey('j','following');
+  await selectWithKey('k','upcoming');
+  await page.reload();await page.locator('.calendar-month').waitFor();
+  await page.locator('#main').focus();
+  await selectWithKey('k','previous');
+  await selectWithKey('k','past');
+  rows=initialRows;
   await page.goto(url+'#calendar');await page.reload();await page.locator('.calendar-month').waitFor();
   await page.getByRole('button',{name:'Rename calendar Work',exact:true}).click();
   await page.getByRole('textbox',{name:'Calendar alias',exact:true}).fill('Work schedule');

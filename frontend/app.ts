@@ -3519,7 +3519,22 @@ document.addEventListener('keydown',event=>{
       const context=mailQueryContext();mailListLimit=key==='G'?mailPage.total:mailListLimit+100;await refreshMailQuery();
       if(state.app!=='mail'||context!==mailQueryContext())return;rows=navigableRows();
     }
-    const index=rows.findIndex(r=>r.id===state.current?.id);const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(backwards?-1:1)));if(rows[next])return selectRecord(rows[next].id,true);
+    const index=rows.findIndex(r=>r.id===state.current?.id);
+    if(state.app==='calendar'&&!state.search.trim()&&index<0&&(action==='down'||action==='up')){
+      const now=Date.now();
+      let closest: OfficeRecord|undefined, closestDistance=Infinity;
+      for(const row of rows){
+        const offset=+calendarDate(row.meta.start||'')-now;
+        const distance=Math.abs(offset);
+        if((backwards?offset<0:offset>=0)&&distance<closestDistance){
+          closest=row;
+          closestDistance=distance;
+        }
+      }
+      if(closest)return selectRecord(closest.id,true);
+      return;
+    }
+    const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(backwards?-1:1)));if(rows[next])return selectRecord(rows[next].id,true);
   },true);}
 });
 document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view,.sidebar')&&target.id!=='command-input'&&editable(target))setMode('insert');});
