@@ -6,11 +6,14 @@ const event=(id,start,end)=>({id,title:id,meta:{start,end}});
 test('discovered collections are separate Calendar sources even before events arrive',()=>{
  const accounts=[{id:'mailbox',type:'imap',label:'Mailbox',calendar:{calendars:[
    {id:'work',label:'Work'}, {id:'personal',label:'Personal'},
- ]}}];
+ ]}},{id:'hosting',type:'imap',label:'Hosting',calendar:{calendars:[{id:'host-cal',label:'Calendar'}]}}];
  const rows=[{meta:{account:'mailbox',calendarSource:'work'}},{meta:{calendarSource:'restored'}}];
  assert.deepEqual(calendarSources(rows,accounts).map(({id,label})=>[id,label]),[
-   ['local','Local calendar'],['work','Work'],['personal','Personal'],
+   ['local','Local calendar'],['work','Mailbox — Work'],['personal','Mailbox — Personal'],['host-cal','Hosting'],
  ]);
+ const aliased=calendarSources(rows,accounts,{'host-cal':'Custom name'}).find(source=>source.id==='host-cal');
+ assert.equal(aliased.label,'Custom name');
+ assert.equal(aliased.originalLabel,'Hosting');
 });
 test('agenda labels show end times and durations for timed and all-day events',()=>{
  const label=(start,end)=>agendaEventLabel(eventBounds(event('label',start,end)),'en-US');

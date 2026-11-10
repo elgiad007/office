@@ -52,7 +52,11 @@ export function calendarSources(rows: OfficeRecord[],accounts: Account[],aliases
   const sources=new Map([['local','Local calendar']]);
   for(const account of accounts) {
     if(account.type==='google'||account.type==='caldav')sources.set(account.id,account.label);
-    for(const calendar of account.calendar?.calendars??[])sources.set(calendar.id,calendar.label);
+    const calendars=account.calendar?.calendars??[];
+    for(const calendar of calendars) {
+      const label=calendars.length===1?account.label:`${account.label} — ${calendar.label}`;
+      sources.set(calendar.id,label);
+    }
   }
   for(const row of rows) {
     const id=calendarSourceId(row);
