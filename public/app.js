@@ -153,7 +153,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys(), openItem: openActivityRecord, onSessionExpired: () => void lockExpiredSession() });
 let remoteSenderIcons = false, lastSessionActivity = Date.now();
-const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, current: () => state.current?.id, compact: () => phoneLayout.matches, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
+const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, aliases: () => state.prefs.calendarAliases, rename: renameCalendar, current: () => state.current?.id, compact: () => phoneLayout.matches, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
 const connections = createConnections({ api, icon, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
@@ -2508,6 +2508,52 @@ catch (cause) {
     notice(error.message, true);
 } }
 function modal(title, body) { dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector('[data-close]').onclick = () => dialog.close(); dialog.showModal(); }
+function renameCalendar(source) {
+    const alias = state.prefs.calendarAliases?.[source.id] ?? '';
+    modal('Rename calendar', `<form id="calendar-alias-form">
+    ${field('Calendar alias', 'alias', alias, 'text', 'maxlength="80" aria-describedby="calendar-alias-help"')}
+    <p id="calendar-alias-help">Leave blank to use ${e(source.originalLabel)}. This name is only used in Office.</p>
+    <p id="calendar-alias-error" class="error" role="alert"></p>
+    <div class="dialog-actions"><button type="submit" class="primary">Save alias</button></div>
+  </form>`);
+    const form = dialog.querySelector('#calendar-alias-form');
+    const input = form.elements.namedItem('alias');
+    const save = form.querySelector('button');
+    const close = dialog.querySelector('[data-close]');
+    const preventBusyClose = (event) => { if (save.disabled)
+        event.preventDefault(); };
+    dialog.addEventListener('cancel', preventBusyClose);
+    dialog.addEventListener('close', () => {
+        dialog.removeEventListener('cancel', preventBusyClose);
+        document.querySelector(`[data-rename-calendar="${CSS.escape(source.id)}"]`)?.focus();
+    }, { once: true });
+    input.focus();
+    input.select();
+    form.onsubmit = async (event) => {
+        event.preventDefault();
+        if (save.disabled)
+            return;
+        const value = input.value.trim();
+        const calendarAliases = { ...state.prefs.calendarAliases };
+        if (value)
+            calendarAliases[source.id] = value;
+        else
+            delete calendarAliases[source.id];
+        save.disabled = close.disabled = true;
+        try {
+            await api('preferences', { preferences: { ...state.prefs, calendarAliases } });
+            state.prefs = { ...state.prefs, calendarAliases };
+            calendar.render();
+            dialog.close();
+        }
+        catch (cause) {
+            form.querySelector('#calendar-alias-error').textContent = asError(cause).message;
+        }
+        finally {
+            save.disabled = close.disabled = false;
+        }
+    };
+}
 function confirmation(title, message, action, confirmLabel = title) { modal(title, `<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(confirmLabel)}</button></div>`); dialog.querySelector('#cancel').onclick = () => dialog.close(); dialog.querySelector('#cancel').focus(); dialog.querySelector('#confirm').onclick = async () => { dialog.close(); await attempt(action); }; }
 let passwordConfirmation;
 function confirmOwnerPassword() {

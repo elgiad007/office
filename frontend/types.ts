@@ -84,6 +84,7 @@ export interface AccountEditDetails {
   url?: string; calendarUrl?: string; calendarStatus?: AccountCalendarStatus;
 }
 export interface Preferences {
+  calendarAliases?: Record<string,string>;
   swipe?: import('./swipe.js').SwipePreferences;
   showElapsedTime?: boolean;
   activityLogLevel?: 'summary' | 'warnings' | 'detailed';

@@ -163,6 +163,7 @@ try {
         $kind=$_GET['kind']??''; if (!in_array($kind,KINDS,true)) fail('Unknown application.');
         session_write_close();
         if($kind==='mail' && ($_GET['view']??'')==='1')json_response(mail_list_page($_GET));
+        if($kind==='calendar')repair_cached_caldav_dates();
         $db=db();$q=$db->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC');$q->execute([$kind]);
         if($kind==='mail' && ($_GET['summaries']??'')==='1'){
             $cached=[];$files=$db->query('SELECT record_id,part,name,type,size FROM mail_files ORDER BY rowid');

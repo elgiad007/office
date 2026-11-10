@@ -3,6 +3,42 @@ declare(strict_types=1);
 
 const CALDAV_PORTS = [443, 8443, 2080];
 
+function repair_cached_caldav_dates(): void {
+    $key='caldav-date-repair';
+    $version=class_exists('IntlTimeZone')?2:1;
+    if ((int)setting($key,0)>=$version) return;
+    $db=db(); $db->exec('BEGIN IMMEDIATE');
+    try {
+        if ((int)setting($key,0)<$version) {
+            $ids=$db->query("SELECT id FROM records WHERE kind='calendar' AND json_extract(meta,'$.remote')=1
+                AND COALESCE(json_extract(meta,'$.rawIcs'),json_extract(meta,'$.raw'),'')<>''
+                AND (COALESCE(json_extract(meta,'$.start'),'')='' OR COALESCE(json_extract(meta,'$.end'),'')='')")->fetchAll(PDO::FETCH_COLUMN);
+            $read=$db->prepare('SELECT meta FROM records WHERE id=?');
+            $write=$db->prepare('UPDATE records SET meta=?,revision=revision+1 WHERE id=?');
+            foreach ($ids as $id) {
+                $read->execute([$id]);
+                $meta=json_decode($read->fetchColumn(),true,64,JSON_THROW_ON_ERROR);
+                if (!preg_match('/#(\d+)$/D',$meta['source']??'',$part)) continue;
+                $raw=$meta['rawIcs']??$meta['raw'];
+                $parsed=parse_ics($raw)[(int)$part[1]]['meta']??[];
+                $changed=false;
+                foreach (['start','end'] as $field) {
+                    if (empty($meta[$field]) && !empty($parsed[$field])) {
+                        $meta[$field]=$parsed[$field];
+                        $changed=true;
+                    }
+                }
+                if ($changed) $write->execute([json_encode($meta,JSON_THROW_ON_ERROR),$id]);
+            }
+            set_setting($key,$version);
+        }
+        $db->exec('COMMIT');
+    } catch (Throwable $e) {
+        $db->exec('ROLLBACK');
+        throw $e;
+    }
+}
+
 function imap_calendar_eligible(array $a): bool {
     return $a['type']==='imap' && !imap_is_gmail($a)
         && !preg_match('/@(?:gmail|googlemail)\.com$/i',$a['config']['email']??'');

@@ -106,28 +106,38 @@ function parse_eml(string $raw): array {
     if ($attachments!==null) $parsed['meta']['hasAttachments']=$attachments;
     return json_decode(json_encode($parsed,JSON_INVALID_UTF8_SUBSTITUTE|JSON_THROW_ON_ERROR),true,64,JSON_THROW_ON_ERROR);
 }
+require_once __DIR__.'/ical-timezone.php';
 function ics_unescape(string $value): string { return str_replace(['\\n','\\N','\\,','\\;','\\\\'],["\n","\n",',',';','\\'],$value); }
-function ics_date(string $value,?string $zone=null): string {
+function ics_date(string $value,?string $zone=null,array $zones=[]): string {
     try {
         if (preg_match('/^\d{8}$/D',$value)) return substr($value,0,4).'-'.substr($value,4,2).'-'.substr($value,6,2);
         if (!preg_match('/^\d{8}T\d{6}Z?$/D',$value)) return '';
         if (!str_ends_with($value,'Z') && !$zone) return substr($value,0,4).'-'.substr($value,4,2).'-'.substr($value,6,2).'T'.substr($value,9,2).':'.substr($value,11,2).':'.substr($value,13,2);
-        $d=new DateTimeImmutable($value,new DateTimeZone($zone ?: 'UTC')); return $d->format('c');
+        if (str_ends_with($value,'Z')) return (new DateTimeImmutable($value,new DateTimeZone('UTC')))->format('c');
+        $wall=ics_wall_time($value);
+        if ($wall===null) return '';
+        if (isset($zones[$zone]) && ($offset=ics_embedded_offset($zones[$zone],$wall))!==null) {
+            return gmdate('Y-m-d\TH:i:s\Z',$wall-$offset);
+        }
+        $native=ics_native_timezone($zone);
+        return $native ? (new DateTimeImmutable($value,$native))->format('c') : '';
     } catch (Throwable) { return ''; }
 }
 function parse_ics(string $raw): array {
     $original=$raw; $raw=preg_replace('/\r?\n[ \t]/','',$raw); $events=[]; $event=null; $nested=0;
+    $zones=ics_timezones($raw);
     foreach (preg_split('/\r?\n/',$raw) as $line) {
         if ($line==='BEGIN:VEVENT') { $event=['title'=>'Untitled event','body'=>'','meta'=>[]]; $nested=0; continue; }
         if ($line==='END:VEVENT' && $event!==null) { $event['meta']['rawIcs']=$original; $events[]=$event; $event=null; continue; }
         if ($event===null) continue;
         if (str_starts_with($line,'BEGIN:')) { $nested++; continue; } if (str_starts_with($line,'END:')) { $nested--; continue; } if ($nested>0) continue;
-        $p=strpos($line,':'); if ($p===false) continue; $property=substr($line,0,$p); $key=strtoupper(explode(';',$property)[0]); $value=substr($line,$p+1); $zone=null;
-        if (preg_match('/;TZID="?([^;"\r\n]+)/i',$property,$m)) $zone=$m[1];
+        if (!preg_match('/^((?:[^":]++|"[^"]*")*+):(.*)$/D',$line,$property)) continue;
+        $key=strtoupper(explode(';',$property[1])[0]); $value=$property[2]; $zone=null;
+        if (preg_match('/;TZID=(?:"([^"]+)"|([^;]+))/i',$property[1],$m)) $zone=$m[1]!==''?$m[1]:$m[2];
         if ($key==='SUMMARY') $event['title']=ics_unescape($value);
         if ($key==='DESCRIPTION') $event['body']=ics_unescape($value);
-        if ($key==='DTSTART') $event['meta']['start']=ics_date($value,$zone);
-        if ($key==='DTEND') $event['meta']['end']=ics_date($value,$zone);
+        if ($key==='DTSTART') $event['meta']['start']=ics_date($value,$zone,$zones);
+        if ($key==='DTEND') $event['meta']['end']=ics_date($value,$zone,$zones);
         if ($key==='LOCATION') $event['meta']['location']=ics_unescape($value);
         if ($key==='UID') $event['meta']['uid']=$value;
         if ($key==='RRULE') $event['meta']['recurrence']=$value;

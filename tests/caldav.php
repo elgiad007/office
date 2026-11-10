@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 require __DIR__.'/../app/connectors.php';
+require __DIR__.'/../app/formats.php';
 
 function expect_caldav(bool $ok,string $message): void {
     if (!$ok) throw new RuntimeException($message);
@@ -49,3 +50,43 @@ foreach (['http://example.test/','https://a:b@example.test/','https://example.te
     catch (HttpError) { /* Expected. */ }
 }
 echo "PASS CalDAV discovery, collection filtering, and credential boundaries.\n";
+
+$ics=<<<'ICS'
+BEGIN:VCALENDAR
+BEGIN:VTIMEZONE
+TZID:Example:Custom
+BEGIN:STANDARD
+DTSTART:19001104T020000
+TZOFFSETFROM:-0300
+TZOFFSETTO:-0400
+RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:19000311T020000
+TZOFFSETFROM:-0400
+TZOFFSETTO:-0300
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU
+END:DAYLIGHT
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTART;TZID="Example:Custom":20260709T090000
+DTEND;TZID="Example:Custom":20260709T100000
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID=Eastern Standard Time:20261109T090000
+RRULE:FREQ=WEEKLY
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID="Example:Custom":20261101T013000
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID="Example:Custom":20260308T023000
+END:VEVENT
+END:VCALENDAR
+ICS;
+$events=array_column(parse_ics($ics),'meta');
+expect_caldav($events[0]['start']==='2026-07-09T12:00:00Z' && $events[0]['end']==='2026-07-09T13:00:00Z','Embedded observances must resolve both event dates.');
+expect_caldav($events[1]['start']==='2026-11-09T09:00:00-05:00' && $events[1]['recurrence']==='FREQ=WEEKLY','Windows time zones must map without losing recurrence.');
+expect_caldav($events[2]['start']==='2026-11-01T04:30:00Z','A repeated hour should use its first occurrence.');
+expect_caldav($events[3]['start']==='2026-03-08T06:30:00Z','A skipped hour should use the offset before the transition.');
+echo "PASS embedded time-zone rules, Windows time-zone mapping, and DST edges.\n";

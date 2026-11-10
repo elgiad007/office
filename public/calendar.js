@@ -60,7 +60,7 @@ export function timedLayout(rows, day) {
 }
 const colors = ['#3a8c72', '#5579c6', '#b56c96', '#bb8436', '#7d70b4', '#43959e'];
 const calendarSourceId = (record) => record.meta.account ? record.meta.calendarSource || record.meta.account : 'local';
-export function calendarSources(rows, accounts) {
+export function calendarSources(rows, accounts, aliases = {}) {
     const sources = new Map([['local', 'Local calendar']]);
     for (const account of accounts) {
         if (account.type === 'google' || account.type === 'caldav')
@@ -73,7 +73,10 @@ export function calendarSources(rows, accounts) {
         if (!sources.has(id))
             sources.set(id, id);
     }
-    return Array.from(sources, ([id, label]) => ({ id, label })).map((source, index) => ({ ...source, color: colors[index % colors.length] }));
+    return Array.from(sources, ([id, originalLabel], index) => ({
+        id, originalLabel, label: aliases && Object.hasOwn(aliases, id) && typeof aliases[id] === 'string' && aliases[id].trim() ? aliases[id] : originalLabel,
+        color: colors[index % colors.length],
+    }));
 }
 export function createCalendar(env) {
     let anchor = calendarDate(dayKey(new Date()));
@@ -85,11 +88,12 @@ export function createCalendar(env) {
         if (!host)
             return;
         const focused = document.activeElement;
-        const focusAttribute = focused && host.contains(focused) ? Array.from(focused.attributes).find(a => ['data-period', 'data-view', 'data-source', 'data-jump'].includes(a.name)) : undefined;
+        const focusAttribute = focused && host.contains(focused) ? Array.from(focused.attributes).find(a => ['data-period', 'data-view', 'data-source', 'data-rename-calendar', 'data-jump'].includes(a.name)) : undefined;
         let selectedRendered = false;
         const compact = env.compact();
         const view = env.query() ? 'agenda' : chosenView || (compact ? 'agenda' : 'month');
-        const sources = calendarSources(env.allRows(), env.accounts()), rows = env.rows().filter(r => !hidden.has(calendarSourceId(r)));
+        const sources = calendarSources(env.allRows(), env.accounts(), env.aliases()), rows = env.rows().filter(r => !hidden.has(calendarSourceId(r)));
+        const sourceRows = sources.map(s => `<div class="calendar-source"><label><input type="checkbox" data-source="${e(s.id)}" ${hidden.has(s.id) ? '' : 'checked'} data-calendar-style="accent-color:${s.color}"><span aria-hidden="true" data-calendar-style="color:${s.color}">●</span><span class="calendar-source-name">${e(s.label)}</span></label><button type="button" class="quiet" data-rename-calendar="${e(s.id)}" aria-label="Rename calendar ${e(s.label)}">Rename</button></div>`).join('');
         const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1), monthStart = addDays(first, -first.getDay());
         const start = view === 'month' ? monthStart : view === 'week' ? addDays(anchor, -anchor.getDay()) : anchor;
         const days = Array.from({ length: view === 'month' ? 42 : view === 'week' ? 7 : 1 }, (_, i) => addDays(start, i));
@@ -141,7 +145,7 @@ export function createCalendar(env) {
         else
             content = `<div class="calendar-time-scroll"><div class="calendar-time-grid" data-calendar-style="--day-count:${days.length}"><div class="calendar-time-label">All day</div>${days.map(d => `<section class="calendar-all-day"><strong>${e(d.toLocaleDateString(undefined, { weekday: 'short' }))}</strong>${dayButton(d)}${eventsOn(rows, d).filter(r => dateOnly(r.meta.start)).map(r => event(r, d)).join('')}</section>`).join('')}<div class="calendar-hours">${Array.from({ length: 24 }, (_, h) => `<span>${String(h).padStart(2, '0')}:00</span>`).join('')}</div>${days.map(d => `<div class="calendar-time-day">${Array.from({ length: 24 }, (_, h) => `<button class="calendar-slot" data-slot="${dayKey(d)}T${String(h).padStart(2, '0')}:00" aria-label="New event ${dayKey(d)} ${h}:00"></button>`).join('')}${timedLayout(rows, d).map(x => event(x.record, d, `position:absolute;top:${x.start / 60 * 48}px;height:${Math.max(20, (x.end - x.start) / 60 * 48)}px;left:${x.column / x.columns * 100}%;width:${100 / x.columns}%`)).join('')}</div>`).join('')}</div></div>`;
         const undated = rows.filter(r => !eventBounds(r));
-        host.innerHTML = `<div class="calendar-toolbar"><div><button data-period="today">Today</button><button data-period="prev" ${env.query() ? 'disabled' : ''} aria-label="Previous period">‹</button><button data-period="next" ${env.query() ? 'disabled' : ''} aria-label="Next period">›</button></div><h2 aria-live="polite">${e(title)}</h2><div role="group" aria-label="Calendar view">${['month', 'week', 'day', 'agenda'].map(v => `<button data-view="${v}" aria-pressed="${view === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div></div><div class="calendar-layout"><aside class="calendar-sidebar"><strong>${e(first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))}</strong><div class="calendar-mini">${mini}</div><details class="calendar-sources" ${!compact || compactSourcesOpen ? 'open' : ''}><summary>Calendars</summary>${sources.map(s => `<label><input type="checkbox" data-source="${e(s.id)}" ${hidden.has(s.id) ? '' : 'checked'} data-calendar-style="accent-color:${s.color}"><span data-calendar-style="color:${s.color}">●</span> ${e(s.label)}</label>`).join('')}<p class="muted">Cached events only. Connected calendars are read only.</p></details></aside><div id="items" class="calendar-board list-pane" role="region" aria-label="Calendar events">${content}${view !== 'agenda' && undated.length ? `<section class="calendar-undated"><h3>Unscheduled</h3>${undated.map(r => event(r)).join('')}</section>` : ''}</div></div>`;
+        host.innerHTML = `<div class="calendar-toolbar"><div><button data-period="today">Today</button><button data-period="prev" ${env.query() ? 'disabled' : ''} aria-label="Previous period">‹</button><button data-period="next" ${env.query() ? 'disabled' : ''} aria-label="Next period">›</button></div><h2 aria-live="polite">${e(title)}</h2><div role="group" aria-label="Calendar view">${['month', 'week', 'day', 'agenda'].map(v => `<button data-view="${v}" aria-pressed="${view === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div></div><div class="calendar-layout"><aside class="calendar-sidebar"><strong>${e(first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))}</strong><div class="calendar-mini">${mini}</div><details class="calendar-sources" ${!compact || compactSourcesOpen ? 'open' : ''}><summary>Calendars</summary>${sourceRows}<p class="muted">Cached events only. Connected calendars are read only.</p></details></aside><div id="items" class="calendar-board list-pane" role="region" aria-label="Calendar events">${content}${view !== 'agenda' && undated.length ? `<section class="calendar-undated"><h3>Unscheduled</h3>${undated.map(r => event(r)).join('')}</section>` : ''}</div></div>`;
         const sourceMenu = host.querySelector('details');
         sourceMenu.ontoggle = () => { if (compact)
             compactSourcesOpen = sourceMenu.open; };
@@ -161,6 +165,9 @@ export function createCalendar(env) {
             hidden.delete(b.dataset.source);
         else
             hidden.add(b.dataset.source); render(); });
+        host.querySelectorAll('[data-rename-calendar]').forEach((button, index) => {
+            button.onclick = () => env.error(async () => { await env.before(); env.rename(sources[index]); });
+        });
         host.querySelectorAll('[data-jump]').forEach(b => b.onclick = () => env.error(async () => { await env.before(); anchor = calendarDate(b.dataset.jump); chosenView = 'day'; render(); }));
         host.querySelectorAll('[data-day],[data-slot]').forEach(b => b.onclick = () => { const start = b.dataset.slot || b.dataset.day; env.error(() => env.create(start, dateOnly(start) ? dayKey(addDays(calendarDate(start), 1)) : new Date(+calendarDate(start) + 3600000).toISOString())); });
         if (focusAttribute)

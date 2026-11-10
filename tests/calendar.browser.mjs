@@ -7,13 +7,27 @@ export async function testCalendar(page,url){
  let rows=Array.from({length:5},(_,i)=>({id:'cal-'+i,kind:'calendar',title:'Event '+i,body:'Notes',revision:1,meta:{start:day+'T09:00:00',end:day+'T10:00:00'}}));
  rows.push({id:'remote',kind:'calendar',title:'Remote event',body:'Read only',revision:1,meta:{start:day,end:day,remote:true,account:'caldav'}});
  rows.push({id:'past',kind:'calendar',title:'Past event',body:'Notes',revision:1,meta:{start:'2000-01-01',end:'2000-01-02',remote:true,account:'caldav'}});
- const saved=[];let nextSaveError='';const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
+ const saved=[];let nextSaveError='';let preferences={theme:'dark'};const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
  await page.route(routes,async route=>{const action=new URL(route.request().url()).searchParams.get('r');if(action==='save'){
   if(nextSaveError){const error=nextSaveError;nextSaveError='';await route.fulfill({status:400,json:{error}});return;}
   const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||`created-${saved.length}`,revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;
- }const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark'}},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
+ }if(action==='preferences'){preferences=route.request().postDataJSON().preferences;await route.fulfill({json:{ok:true}});return;}
+ const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
   await page.goto(url+'#calendar');await page.reload();await page.locator('.calendar-month').waitFor();
+  await page.getByRole('button',{name:'Rename calendar Work',exact:true}).click();
+  await page.getByRole('textbox',{name:'Calendar alias',exact:true}).fill('Work schedule');
+  await page.getByRole('button',{name:'Save alias',exact:true}).click();
+  await page.getByRole('checkbox',{name:'Work schedule',exact:true}).waitFor();
+  assert.deepEqual(preferences.calendarAliases,{caldav:'Work schedule'});
+  await page.reload();await page.getByRole('checkbox',{name:'Work schedule',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Rename calendar Work schedule',exact:true}).click();
+  const alias=page.getByRole('textbox',{name:'Calendar alias',exact:true});
+  assert.equal(await alias.inputValue(),'Work schedule');
+  await alias.fill('');
+  await page.getByRole('button',{name:'Save alias',exact:true}).click();
+  await page.getByRole('checkbox',{name:'Work',exact:true}).waitFor();
+  assert.deepEqual(preferences.calendarAliases,{});
   const closeEvent=page.getByRole('button',{name:'Close event',exact:true});
   assert.equal(await closeEvent.count(),0);
   assert.equal(await page.locator('.calendar-date.today').getAttribute('data-day'),day);

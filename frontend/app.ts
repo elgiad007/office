@@ -137,7 +137,7 @@ function rememberSelection() {
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys(),openItem:openActivityRecord,onSessionExpired:()=>void lockExpiredSession()});
 let remoteSenderIcons=false,lastSessionActivity=Date.now();
-const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
+const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,aliases:()=>state.prefs.calendarAliases,rename:renameCalendar,current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
 const connections=createConnections({api,icon,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
@@ -1748,6 +1748,44 @@ function enterEdit(preferTitle=false) {
 function setMode(mode: string) {state.mode=mode;const m=document.querySelector<HTMLElement>('#mode')!;if(m)m.textContent=mode.toUpperCase();}
 async function attempt<T>(fn: () => T | Promise<T>) { try{return await fn();}catch(cause) { if(cause instanceof DraftCancelled)return;const error=asError(cause);notice(error.message,true);} }
 function modal(title: string,body: string) { dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector<HTMLElement>('[data-close]')!.onclick=()=>dialog.close(); dialog.showModal(); }
+function renameCalendar(source:{id:string;label:string;originalLabel:string}) {
+  const alias=state.prefs.calendarAliases?.[source.id]??'';
+  modal('Rename calendar',`<form id="calendar-alias-form">
+    ${field('Calendar alias','alias',alias,'text','maxlength="80" aria-describedby="calendar-alias-help"')}
+    <p id="calendar-alias-help">Leave blank to use ${e(source.originalLabel)}. This name is only used in Office.</p>
+    <p id="calendar-alias-error" class="error" role="alert"></p>
+    <div class="dialog-actions"><button type="submit" class="primary">Save alias</button></div>
+  </form>`);
+  const form=dialog.querySelector<HTMLFormElement>('#calendar-alias-form')!;
+  const input=form.elements.namedItem('alias') as HTMLInputElement;
+  const save=form.querySelector<HTMLButtonElement>('button')!;
+  const close=dialog.querySelector<HTMLButtonElement>('[data-close]')!;
+  const preventBusyClose=(event:Event)=>{if(save.disabled)event.preventDefault();};
+  dialog.addEventListener('cancel',preventBusyClose);
+  dialog.addEventListener('close',()=>{
+    dialog.removeEventListener('cancel',preventBusyClose);
+    document.querySelector<HTMLButtonElement>(`[data-rename-calendar="${CSS.escape(source.id)}"]`)?.focus();
+  },{once:true});
+  input.focus();input.select();
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    if(save.disabled)return;
+    const value=input.value.trim();
+    const calendarAliases={...state.prefs.calendarAliases};
+    if(value)calendarAliases[source.id]=value;else delete calendarAliases[source.id];
+    save.disabled=close.disabled=true;
+    try {
+      await api('preferences',{preferences:{...state.prefs,calendarAliases}});
+      state.prefs={...state.prefs,calendarAliases};
+      calendar.render();
+      dialog.close();
+    } catch(cause) {
+      form.querySelector<HTMLElement>('#calendar-alias-error')!.textContent=asError(cause).message;
+    } finally {
+      save.disabled=close.disabled=false;
+    }
+  };
+}
 function confirmation(title: string,message: string,action: () => unknown,confirmLabel=title) { modal(title,`<p>${e(message)}</p><div class="dialog-actions"><button id="cancel">Cancel</button><button class="primary" id="confirm">${e(confirmLabel)}</button></div>`); dialog.querySelector<HTMLElement>('#cancel')!.onclick=()=>dialog.close();dialog.querySelector<HTMLElement>('#cancel')!.focus();dialog.querySelector<HTMLElement>('#confirm')!.onclick=async()=>{dialog.close();await attempt(action);}; }
 let passwordConfirmation: Promise<boolean> | undefined;
 function confirmOwnerPassword(): Promise<boolean> {
