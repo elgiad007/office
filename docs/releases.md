@@ -36,7 +36,7 @@ You can also run the release builder from PowerShell:
 
 Pass `-ExpectedSha256` to override the saved value. If you use `-WindowsRuntimeArchive` to select a PHP ZIP, also pass `-ExpectedSha256` for that archive. To bundle portable Apache in the Windows ZIP, also supply `-ApacheRuntimeArchive` and `-ApacheExpectedSha256`.
 
-For a manual unsigned release of version `0.1.0`, upload `portable-office-v0.1.0-hosting.zip`, `portable-office-v0.1.0-windows.zip`, and `SHA256SUMS.txt` from `dist/release-v0.1.0/`. Use tag `v0.1.0` and select the commit that matches the packaged files. To rebuild the same version, move its existing release folder first.
+For a manual unsigned release of version `0.1.0`, upload `portable-office-v0.1.0-hosting.zip`, `portable-office-v0.1.0-windows.zip`, and `SHA256SUMS.txt` from `dist/release-v0.1.0/`. Use tag `v0.1.0` and select the commit that matches the packaged files. When you rebuild the same version, enter `y` at the overwrite prompt to replace the existing release after the new build succeeds. Press Enter to cancel and keep the existing release.
 
 ## Publish a signed release
 

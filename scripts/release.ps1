@@ -44,55 +44,93 @@ if ($version -cnotmatch '\A(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-
 $tag = "v$version"
 $dist = Join-Path $officeRoot 'dist'
 $release = Join-Path $dist "release-$tag"
-if (Test-Path -LiteralPath $release) { throw "Release output already exists at $release. Move it before rebuilding $tag." }
-
-$staging = Join-Path $dist ('.release-' + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $staging -Force | Out-Null
-$windowsZip = "portable-office-$tag-windows.zip"
-$hostingZip = "portable-office-$tag-hosting.zip"
-$packager = Join-Path $PSScriptRoot 'package.ps1'
-$windowsOptions = @{
-    WindowsRuntimeArchive = $WindowsRuntimeArchive
-    ExpectedSha256 = $ExpectedSha256
-    ApacheRuntimeArchive = $ApacheRuntimeArchive
-    ApacheExpectedSha256 = $ApacheExpectedSha256
-    DestinationPath = Join-Path $staging $windowsZip
-    ReleasePublicKeyFile = $ReleasePublicKeyFile
+New-Item -ItemType Directory -Path $dist -Force | Out-Null
+$lockPath = Join-Path $dist ".release-$tag.lock"
+try {
+    $releaseLock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
+} catch [IO.IOException] {
+    throw "Could not lock the release folder for $tag. Check whether another build is running. $($_.Exception.Message)"
 }
 
-& $packager @windowsOptions
-& $packager -DestinationPath (Join-Path $staging $hostingZip) -ReleasePublicKeyFile $ReleasePublicKeyFile
-
-$assets=@{}
-$checksums = foreach ($platform in @('hosting','windows')) {
-    $name="portable-office-$tag-$platform.zip"
-    $file=Get-Item -LiteralPath (Join-Path $staging $name)
-    $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    $assets[$platform]=@{sha256=$hash;size=$file.Length}
-    "$hash  $name"
-}
-$checksums | Set-Content -LiteralPath (Join-Path $staging 'SHA256SUMS.txt') -Encoding Ascii
-if ($SigningKeyFile) {
-    $payload=[Text.Encoding]::UTF8.GetBytes((@{format=1;version=$version;assets=$assets} | ConvertTo-Json -Depth 5 -Compress))
-    $signer=[Security.Cryptography.RSA]::Create()
-    $verifier=[Security.Cryptography.RSA]::Create()
-    try {
-        $signer.ImportFromPem((Get-Content -Raw -LiteralPath $SigningKeyFile))
-        $verifier.ImportFromPem((Get-Content -Raw -LiteralPath $ReleasePublicKeyFile))
-        $algorithm=[Security.Cryptography.HashAlgorithmName]::SHA256
-        $padding=[Security.Cryptography.RSASignaturePadding]::Pkcs1
-        $signature=$signer.SignData($payload,$algorithm,$padding)
-        if ($signer.KeySize -lt 3072 -or !$verifier.VerifyData($payload,$signature,$algorithm,$padding)) {
-            throw 'Use a matching RSA signing key pair of at least 3072 bits.'
+$buildId = [Guid]::NewGuid().ToString('N')
+$staging = Join-Path $dist ".release-$buildId"
+$backup = Join-Path $dist ".previous-release-$tag-$buildId"
+try {
+    $existing = Get-Item -LiteralPath $release -Force -ErrorAction SilentlyContinue
+    if ($existing) {
+        if (!$existing.PSIsContainer -or ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Release output path is not a regular directory: $release"
         }
-        @{payload=[Convert]::ToBase64String($payload);signature=[Convert]::ToBase64String($signature)} |
-            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $staging 'office-update.json') -Encoding Ascii
-    } finally {
-        $signer.Dispose()
-        $verifier.Dispose()
+        $answer = Read-Host "Release $tag already exists. Overwrite it? [y/N]"
+        if ($answer -notmatch '^\s*y(es)?\s*$') {
+            Write-Host "Build canceled. Existing release kept at $release"
+            return
+        }
     }
-}
-[IO.Directory]::Move($staging, $release)
 
-Write-Host "Suggested GitHub tag: $tag"
-Write-Host "Upload the ZIPs, SHA256SUMS.txt, and office-update.json (if signed) from $release"
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+    $windowsZip = "portable-office-$tag-windows.zip"
+    $hostingZip = "portable-office-$tag-hosting.zip"
+    $packager = Join-Path $PSScriptRoot 'package.ps1'
+    $windowsOptions = @{
+        WindowsRuntimeArchive = $WindowsRuntimeArchive
+        ExpectedSha256 = $ExpectedSha256
+        ApacheRuntimeArchive = $ApacheRuntimeArchive
+        ApacheExpectedSha256 = $ApacheExpectedSha256
+        DestinationPath = Join-Path $staging $windowsZip
+        ReleasePublicKeyFile = $ReleasePublicKeyFile
+    }
+
+    & $packager @windowsOptions
+    & $packager -DestinationPath (Join-Path $staging $hostingZip) -ReleasePublicKeyFile $ReleasePublicKeyFile
+
+    $assets=@{}
+    $checksums = foreach ($platform in @('hosting','windows')) {
+        $name="portable-office-$tag-$platform.zip"
+        $file=Get-Item -LiteralPath (Join-Path $staging $name)
+        $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $assets[$platform]=@{sha256=$hash;size=$file.Length}
+        "$hash  $name"
+    }
+    $checksums | Set-Content -LiteralPath (Join-Path $staging 'SHA256SUMS.txt') -Encoding Ascii
+    if ($SigningKeyFile) {
+        $payload=[Text.Encoding]::UTF8.GetBytes((@{format=1;version=$version;assets=$assets} | ConvertTo-Json -Depth 5 -Compress))
+        $signer=[Security.Cryptography.RSA]::Create()
+        $verifier=[Security.Cryptography.RSA]::Create()
+        try {
+            $signer.ImportFromPem((Get-Content -Raw -LiteralPath $SigningKeyFile))
+            $verifier.ImportFromPem((Get-Content -Raw -LiteralPath $ReleasePublicKeyFile))
+            $algorithm=[Security.Cryptography.HashAlgorithmName]::SHA256
+            $padding=[Security.Cryptography.RSASignaturePadding]::Pkcs1
+            $signature=$signer.SignData($payload,$algorithm,$padding)
+            if ($signer.KeySize -lt 3072 -or !$verifier.VerifyData($payload,$signature,$algorithm,$padding)) {
+                throw 'Use a matching RSA signing key pair of at least 3072 bits.'
+            }
+            @{payload=[Convert]::ToBase64String($payload);signature=[Convert]::ToBase64String($signature)} |
+                ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $staging 'office-update.json') -Encoding Ascii
+        } finally {
+            $signer.Dispose()
+            $verifier.Dispose()
+        }
+    }
+    if ($existing) { [IO.Directory]::Move($release, $backup) }
+    try {
+        [IO.Directory]::Move($staging, $release)
+    } catch {
+        if ($existing) {
+            try { [IO.Directory]::Move($backup, $release) }
+            catch { throw "Could not restore the previous release automatically. It is saved at $backup. $($_.Exception.Message)" }
+        }
+        throw
+    }
+    if ($existing) { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Continue }
+
+    Write-Host "Suggested GitHub tag: $tag"
+    Write-Host "Upload the ZIPs, SHA256SUMS.txt, and office-update.json (if signed) from $release"
+} finally {
+    try {
+        if (Test-Path -LiteralPath $staging -PathType Container) {
+            Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction Continue
+        }
+    } finally { $releaseLock.Dispose() }
+}
