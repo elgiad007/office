@@ -133,6 +133,7 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .calendar-toolbar > div { display:flex; flex-wrap:wrap; gap:4px; max-width:100%; }
 .calendar-toolbar > div button { min-width:0; }
 .calendar-workspace, #calendar-surface { max-width:100%; min-width:0; }
+#calendar-surface { padding-inline: clamp(8px, 1.25vw, 24px); }
 .calendar-toolbar button[aria-pressed="true"] { background: var(--wash); color: var(--accent); }
 .calendar-layout { display: grid; grid-template-columns: 185px minmax(0,1fr); gap: 18px; }
 .calendar-sidebar { padding: 12px 0; font-size: 13px; }
