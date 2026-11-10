@@ -141,6 +141,11 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .calendar-source { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; margin: 6px 0; }
 .calendar-source > label { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .calendar-source-name { overflow-wrap: anywhere; }
+.calendar-source-rename { width: 26px; height: 26px; padding: 0; }
+.calendar-source-rename .mobile-control-icon { display: block; width: 15px; height: 15px; }
+@media (pointer: coarse) {
+  .calendar-source-rename { width: 36px; height: 36px; }
+}
 .calendar-sidebar input { width: auto; }
 .calendar-mini { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); margin-top: 12px; }
 .calendar-mini button { padding: 5px 0; font-size: 11px; border: 0; }

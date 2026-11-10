@@ -22,6 +22,6 @@ Google Calendar and CalDAV events appear as read-only cached copies. Sync covers
 
 Calendars discovered from non-Google IMAP accounts appear as individual sources. To retry discovery or approve a separate calendar hostname, open **Settings → Accounts** and edit the mail account.
 
-Discovered CalDAV calendars use the mail account’s name by default. When an account has multiple calendars, Office adds the provider’s calendar name after the account name. Choose **Rename** beside any calendar in the Calendar sidebar to set an Office-only alias. Clear the alias to restore the default name.
+Discovered CalDAV calendars use the mail account’s name by default. When an account has multiple calendars, Office adds the provider’s calendar name after the account name. Choose the pencil button beside any calendar in the sidebar to set an Office-only alias. Clear the alias to restore the default name.
 
 See [Accounts and sync](accounts-and-sync.md) to connect a calendar.

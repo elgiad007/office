@@ -68,7 +68,7 @@ export function calendarSources(rows: OfficeRecord[],accounts: Account[],aliases
   }));
 }
 type CalendarSource=ReturnType<typeof calendarSources>[number];
-interface Environment {query:()=>string;allRows:()=>OfficeRecord[];rows:()=>OfficeRecord[];accounts:()=>Account[];aliases:()=>Record<string,string>|undefined;rename:(source:CalendarSource)=>void;current:()=>string|undefined;compact:()=>boolean;create:(start:string,end:string)=>Promise<void>;before:()=>Promise<void>;error:(action:()=>Promise<void>)=>void}
+interface Environment {query:()=>string;allRows:()=>OfficeRecord[];rows:()=>OfficeRecord[];accounts:()=>Account[];aliases:()=>Record<string,string>|undefined;rename:(source:CalendarSource)=>void;renameIcon:string;current:()=>string|undefined;compact:()=>boolean;create:(start:string,end:string)=>Promise<void>;before:()=>Promise<void>;error:(action:()=>Promise<void>)=>void}
 export function createCalendar(env:Environment) {
   let anchor=calendarDate(dayKey(new Date()));
   let chosenView: CalendarView | undefined;
@@ -81,7 +81,7 @@ export function createCalendar(env:Environment) {
     const compact=env.compact();
     const view=env.query()?'agenda':chosenView||(compact?'agenda':'month');
     const sources=calendarSources(env.allRows(),env.accounts(),env.aliases()),rows=env.rows().filter(r=>!hidden.has(calendarSourceId(r)));
-    const sourceRows=sources.map(s=>`<div class="calendar-source"><label><input type="checkbox" data-source="${e(s.id)}" ${hidden.has(s.id)?'':'checked'} data-calendar-style="accent-color:${s.color}"><span aria-hidden="true" data-calendar-style="color:${s.color}">●</span><span class="calendar-source-name">${e(s.label)}</span></label><button type="button" class="quiet" data-rename-calendar="${e(s.id)}" aria-label="Rename calendar ${e(s.label)}">Rename</button></div>`).join('');
+    const sourceRows=sources.map(s=>`<div class="calendar-source"><label><input type="checkbox" data-source="${e(s.id)}" ${hidden.has(s.id)?'':'checked'} data-calendar-style="accent-color:${s.color}"><span aria-hidden="true" data-calendar-style="color:${s.color}">●</span><span class="calendar-source-name">${e(s.label)}</span></label><button type="button" class="quiet calendar-source-rename" data-rename-calendar="${e(s.id)}" aria-label="Rename calendar ${e(s.label)}" title="Rename calendar">${env.renameIcon}</button></div>`).join('');
     const first=new Date(anchor.getFullYear(),anchor.getMonth(),1),monthStart=addDays(first,-first.getDay());
     const start=view==='month'?monthStart:view==='week'?addDays(anchor,-anchor.getDay()):anchor;
     const days=Array.from({length:view==='month'?42:view==='week'?7:1},(_,i)=>addDays(start,i));

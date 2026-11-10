@@ -137,7 +137,7 @@ function rememberSelection() {
 const root=document.querySelector<HTMLElement>('#app')!, dialog=document.querySelector<HTMLDialogElement>('#dialog')!;
 const activity=createActivity({csrf:()=>state.csrf,keys:()=>keys(),openItem:openActivityRecord,onSessionExpired:()=>void lockExpiredSession()});
 let remoteSenderIcons=false,lastSessionActivity=Date.now();
-const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,aliases:()=>state.prefs.calendarAliases,rename:renameCalendar,current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
+const calendar=createCalendar({query:()=>state.search,allRows:()=>state.rows,rows:()=>filteredRows(),accounts:()=>state.accounts,aliases:()=>state.prefs.calendarAliases,rename:renameCalendar,renameIcon:mobileIcon('edit'),current:()=>state.current?.id,compact:()=>phoneLayout.matches,create:(start,end)=>createRecord({meta:{start,end}}),before:leaveEditor,error:action=>{void attempt(action);}});
 const connections=createConnections({api,icon,keys:()=>keys(),current:()=>state.current?.id,open:openConnectedRecord,closed:restoreConnectionsFocus,modal,dialog,notice,command:value=>openCommand(value),confirmation,attempt});
 let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
