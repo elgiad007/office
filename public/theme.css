@@ -460,6 +460,13 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .top-agenda-events button { display: grid; justify-items: start; gap: 3px; text-align: start; }
 .top-agenda-events strong { font-size: 13px; }
 .top-agenda-events :is(strong, small) { overflow-wrap: anywhere; min-width: 0; }
+.calendar-search-form { display: grid; gap: 8px; }
+.calendar-search-form p { margin: 0; }
+.calendar-search-form button { justify-self: start; }
+.calendar-search-dates { display: flex; flex-wrap: wrap; gap: 8px; }
+#calendar-search-results:not([hidden]) { display: grid; gap: 4px; }
+#calendar-search-results button { display: grid; justify-items: start; text-align: left; overflow-wrap: anywhere; }
+.calendar-search-description { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 480px) {
   .top-agenda summary { font-size: 11px; padding-inline: 4px; }
 }

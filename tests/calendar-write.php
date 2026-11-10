@@ -4,6 +4,7 @@ putenv('OFFICE_DATA_DIR='.dirname(__DIR__).'/.runtime/calendar-write-'.bin2hex(r
 require __DIR__.'/../app/bootstrap.php';
 require __DIR__.'/../app/connectors.php';
 require __DIR__.'/../app/formats.php';
+require __DIR__.'/../app/calendar-search.php';
 
 function expect_calendar(bool $ok,string $message): void {
     if (!$ok) throw new RuntimeException($message);
@@ -167,4 +168,17 @@ $google['credentials']['scope']='https://www.googleapis.com/auth/calendar.readon
 expect_calendar(!google_calendar_fields($event,true,$google)['meta']['calendarWritable'],'Legacy Google grants keep the editor read-only.');
 calendar_rejects(fn()=>calendar_provider_response(['status'=>412]),409);
 calendar_rejects(fn()=>calendar_provider_response(['status'=>403]),403);
+$range=calendar_search_range('2026-03-08','2026-03-08','America/New_York');
+expect_calendar($range[1]->getTimestamp()-$range[0]->getTimestamp()===23*3600,'Search dates follow the browser time zone across DST.');
+calendar_rejects(fn()=>calendar_search_range('2026-02-30','2026-03-08'),400);
+calendar_rejects(fn()=>calendar_search_range('2025-01-01','2026-03-08'),400);
+$report='<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response>'
+    .'<d:href>/work/meeting.ics</d:href><d:propstat><d:status>HTTP/1.1 200 OK</d:status><d:prop>'
+    .'<c:calendar-data>'.htmlspecialchars($raw,ENT_XML1).'</c:calendar-data></d:prop></d:propstat></d:response>'
+    .'<d:response><d:href>/work/missing.ics</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response></d:multistatus>';
+[$matches,$warning]=calendar_search_caldav_results($report,'work',null,'weekly',false);
+expect_calendar(count($matches)===1 && $matches[0]['recurring'] && $matches[0]['id']===remote_id('work','/work/meeting.ics#0'),'All-date CalDAV search finds a matching series and identifies its stored counterpart.');
+expect_calendar($warning!=='','CalDAV search reports partial responses.');
+[$matches]=calendar_search_caldav_results($report,'work',null,'moved',true);
+expect_calendar(count($matches)===1 && $matches[0]['id']===null,'An occurrence in an expanded response is identified by its dates, without using a stored component index.');
 echo "PASS Calendar expansion, CalDAV field preservation and conditional writes, Google series editing, and conflicts.\n";

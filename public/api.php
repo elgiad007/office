@@ -3,6 +3,7 @@ declare(strict_types=1);
 require dirname(__DIR__).'/app/bootstrap.php';
 require dirname(__DIR__).'/app/formats.php';
 require dirname(__DIR__).'/app/connectors.php';
+require dirname(__DIR__).'/app/calendar-search.php';
 require dirname(__DIR__).'/app/account-setup.php';
 require dirname(__DIR__).'/app/google.php';
 require dirname(__DIR__).'/app/mail-folders.php';
@@ -193,6 +194,10 @@ try {
     if (in_array($route,['calendar-series','calendar-save'],true) && $method==='POST') {
         session_write_close();
         json_response(calendar_edit_request($input,$route==='calendar-save'));
+    }
+    if ($route==='calendar-search' && $method==='POST') {
+        session_write_close();
+        json_response(calendar_search_request($input));
     }
     if ($route==='calendar-original' && $method==='GET') {
         session_write_close();

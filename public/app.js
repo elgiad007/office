@@ -20,7 +20,7 @@ import { taskView, taskViewPreferences, taskPriority, taskDue } from './task-vie
 import { bindChecklist, checklistContent, checklistEntry, checklistProgress, moveChecklistFocus } from './checklist.js';
 import { renderMailListCopy, renderMailListIcon, bindMailFavicons, bindMailListSettings } from './mail-list.js';
 import { createActivity } from './activity.js';
-import { addDays, agendaEventLabel, calendarDate, createCalendar, dateOnly, dayKey, upcomingEvents } from './calendar.js';
+import { addDays, agendaEventLabel, calendarDate, calendarDisplayFields, calendarDisplayLimit, calendarSources, connectedCalendarSources, createCalendar, dateOnly, dayKey, upcomingEvents } from './calendar.js';
 import { timestampLabel, configureTimeLabels, refreshTimeLabels } from './time-labels.js';
 import { panelSplitter, setupPanelSizing } from './panel-sizing.js';
 import { mobileActionLabel, mobileDisclosure, mobileIcon, phoneLayout, setDisclosure } from './mobile-layout.js';
@@ -153,7 +153,7 @@ function rememberSelection() {
 const root = document.querySelector('#app'), dialog = document.querySelector('#dialog');
 const activity = createActivity({ csrf: () => state.csrf, keys: () => keys(), openItem: openActivityRecord, onSessionExpired: () => void lockExpiredSession() });
 let remoteSenderIcons = false, lastSessionActivity = Date.now();
-const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, aliases: () => state.prefs.calendarAliases, rename: renameCalendar, renameIcon: mobileIcon('edit'), current: () => state.current?.id, compact: () => phoneLayout.matches, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
+const calendar = createCalendar({ query: () => state.search, allRows: () => state.rows, rows: () => filteredRows(), accounts: () => state.accounts, aliases: () => state.prefs.calendarAliases, display: () => state.prefs.calendarDisplay, rename: renameCalendar, renameIcon: mobileIcon('edit'), current: () => state.current?.id, compact: () => phoneLayout.matches, create: (start, end) => createRecord({ meta: { start, end } }), before: leaveEditor, error: action => { void attempt(action); } });
 const connections = createConnections({ api, icon, keys: () => keys(), current: () => state.current?.id, open: openConnectedRecord, closed: restoreConnectionsFocus, modal, dialog, notice, command: value => openCommand(value), confirmation, attempt });
 let pendingLinkedSource;
 let unsavedDraft = null;
@@ -731,6 +731,14 @@ function setupTopAgenda() {
     const trigger = agenda.querySelector('summary');
     const events = agenda.querySelector('.top-agenda-events');
     let request = 0;
+    let upcoming = [];
+    let visible = 0;
+    function renderAgenda() {
+        const rows = upcoming.slice(0, visible);
+        const more = upcoming.length - visible;
+        events.innerHTML = rows.map(({ record, ...bounds }) => `<button type="button" data-agenda-event="${e(record.id)}"><strong>${e(record.title || 'Untitled event')}</strong><small>${e(agendaEventLabel(bounds))}</small></button>`).join('') + (more > 0 ? `<button type="button" data-header-agenda-more>Show more (${more} remaining)</button>` : '')
+            || '<p role="status">No events in the next seven days.</p>';
+    }
     async function loadAgenda() {
         const version = ++request;
         const isCurrent = () => agenda.isConnected && agenda.open && version === request;
@@ -739,10 +747,9 @@ function setupTopAgenda() {
             const { records } = await api('records&kind=calendar');
             if (!isCurrent())
                 return;
-            events.innerHTML = upcomingEvents(records, new Date()).map(entry => {
-                const { record } = entry;
-                return `<button type="button" data-agenda-event="${e(record.id)}"><strong>${e(record.title || 'Untitled event')}</strong><small>${e(agendaEventLabel(entry))}</small></button>`;
-            }).join('') || '<p role="status">No events in the next seven days.</p>';
+            upcoming = upcomingEvents(records, new Date());
+            visible = calendarDisplayLimit('header', state.prefs.calendarDisplay);
+            renderAgenda();
         }
         catch {
             if (isCurrent())
@@ -769,6 +776,13 @@ function setupTopAgenda() {
         if (button.hasAttribute('data-agenda-retry')) {
             trigger.focus();
             void loadAgenda();
+            return;
+        }
+        if (button.hasAttribute('data-header-agenda-more')) {
+            const firstNew = visible;
+            visible += calendarDisplayLimit('header', state.prefs.calendarDisplay);
+            renderAgenda();
+            events.querySelectorAll('[data-agenda-event]')[firstNew]?.focus();
             return;
         }
         agenda.open = false;
@@ -834,7 +848,7 @@ function inMailView(record) {
         return folder === 'Junk' && !record.meta.remote;
     return folder === state.mailFolder;
 }
-function matchingRows() { const q = state.search.toLocaleLowerCase(); return state.rows.filter(r => !swipeHidesRow(r.id) && (state.app !== 'calendar' || calendar.isVisible(r)) && (state.app !== 'mail' || inMailView(r)) && (!q || searchableText(r).includes(q))); }
+function matchingRows() { const q = (state.app === 'calendar' ? state.search.trim() : state.search).toLocaleLowerCase(); return state.rows.filter(r => !swipeHidesRow(r.id) && (state.app !== 'calendar' || q || calendar.isVisible(r)) && (state.app !== 'mail' || inMailView(r)) && (!q || searchableText(r).includes(q))); }
 function filteredRows() { const rows = matchingRows(); return state.app === 'mail' ? mailView(rows, state.prefs.mailView).rows : state.app === 'tasks' ? taskView(rows, state.prefs.taskView).rows : rows; }
 function navigableRows() { return state.app === 'mail' ? mailView(matchingRows(), state.prefs.mailView).visible : state.app === 'tasks' ? taskView(matchingRows(), state.prefs.taskView).visible : filteredRows(); }
 async function deleteMailImmediately(rows, operation, undoable = false) {
@@ -1220,7 +1234,7 @@ function renderAppHeader() {
     const toolbar = document.querySelector('#app-toolbar');
     const a = apps[state.app];
     toolbar.hidden = state.app === 'mail' || state.app === 'settings';
-    toolbar.innerHTML = toolbar.hidden ? '' : `${state.app === 'calendar' ? `<input id="search" type="search" aria-label="Search calendar" placeholder="Search cached events" value="${e(state.search)}">` : ''}<div class="header-action-group">${headerAction('new', 'New ' + a.singular)}${headerAction('import', 'Import')}${headerAction('export-all', 'Export')}</div>`;
+    toolbar.innerHTML = toolbar.hidden ? '' : `${state.app === 'calendar' ? `<input id="search" type="search" aria-label="Search calendar" placeholder="Search calendar events" value="${e(state.search)}">` : ''}<div class="header-action-group">${headerAction('new', 'New ' + a.singular)}${headerAction('import', 'Import')}${headerAction('export-all', 'Export')}</div>`;
 }
 let fullScreenItemId;
 let mobileItemOpen = false;
@@ -2729,6 +2743,104 @@ catch (cause) {
     notice(error.message, true);
 } }
 function modal(title, body) { dialog.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${e(title)}</h2><button class="quiet" data-close aria-label="Close dialog">✕</button></div>${body}`; dialog.querySelector('[data-close]').onclick = () => dialog.close(); dialog.showModal(); }
+function openCalendarSearch() {
+    const calendars = calendarSources(state.rows, state.accounts, state.prefs.calendarAliases);
+    const sources = connectedCalendarSources(state.accounts, calendars);
+    modal('Search connected calendars', `<form class="calendar-search-form">
+    <label>Search terms<input type="search" name="query" required maxlength="256" value="${e(state.search.trim())}"></label>
+    <p>Leave dates blank to search all dates and find recurring series. Enter both dates to find individual occurrences in that range (up to 366 days).</p>
+    <div class="calendar-search-dates"><label>From<input type="date" name="from"></label><label>Through<input type="date" name="through"></label></div>
+    <button class="primary">Search</button>
+  </form><p id="calendar-search-status" role="status"></p><ul id="calendar-search-warnings"></ul>
+  <div id="calendar-search-results"></div><section id="calendar-search-preview" hidden></section>`);
+    const form = dialog.querySelector('form');
+    const status = dialog.querySelector('#calendar-search-status');
+    const warnings = dialog.querySelector('#calendar-search-warnings');
+    const results = dialog.querySelector('#calendar-search-results');
+    const preview = dialog.querySelector('#calendar-search-preview');
+    let controller;
+    dialog.addEventListener('close', () => controller?.abort(), { once: true });
+    function appendMatch(match, label) {
+        const start = calendarDate(match.start);
+        const date = Number.isFinite(+start) ? start.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'No date';
+        const subtitle = [date, label, match.recurring ? 'Recurring series' : ''].filter(Boolean).join(' · ');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.innerHTML = `<strong>${e(match.title)}</strong><small>${e(subtitle)}</small>`;
+        button.onclick = () => {
+            const end = calendarDate(match.end);
+            const when = Number.isFinite(+start) && Number.isFinite(+end) && end > start
+                ? agendaEventLabel({ start, end, allDay: dateOnly(match.start) }) : date;
+            const stored = match.id && state.rows.some(row => row.id === match.id);
+            preview.innerHTML = `<button type="button" data-search-back>Back to results</button><h3>${e(match.title)}</h3>
+        <p>${e(label)} · ${e(when)}${match.recurring ? ' · Recurring series' : ''}</p>
+        ${match.location ? `<p>${e(match.location)}</p>` : ''}${match.body ? `<p class="calendar-search-description">${e(match.body)}</p>` : ''}
+        ${stored ? '<button type="button" data-search-open>Open stored event</button>' : ''}`;
+            results.hidden = true;
+            preview.hidden = false;
+            const back = preview.querySelector('[data-search-back]');
+            back.onclick = () => { preview.hidden = true; results.hidden = false; button.focus(); };
+            back.focus();
+            const open = preview.querySelector('[data-search-open]');
+            if (open)
+                open.onclick = () => { dialog.close(); void attempt(() => openConnectedRecord(match.id)); };
+        };
+        results.append(button);
+    }
+    async function search() {
+        controller?.abort();
+        const signal = (controller = new AbortController()).signal;
+        results.replaceChildren();
+        warnings.replaceChildren();
+        preview.hidden = true;
+        results.hidden = false;
+        const fields = new FormData(form);
+        const query = String(fields.get('query') ?? '').trim();
+        const from = String(fields.get('from') ?? ''), through = String(fields.get('through') ?? '');
+        const days = (Date.parse(through) - Date.parse(from)) / 86400000 + 1;
+        if (!query || !!from !== !!through || from && (days < 1 || days > 366)) {
+            status.textContent = query ? 'Choose both dates in order, up to 366 days apart.' : 'Enter search terms.';
+            return;
+        }
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        let count = 0;
+        for (const { label, ...source } of sources) {
+            status.textContent = `Searching ${label}… ${count} matches so far.`;
+            const warn = (message) => {
+                const entry = document.createElement('li');
+                entry.textContent = `${label} — ${message}`;
+                warnings.append(entry);
+            };
+            try {
+                let page = '';
+                const seen = new Set();
+                do {
+                    const result = await api('calendar-search', { ...source, query, from, through, timeZone, page }, signal);
+                    if (signal.aborted || !form.isConnected)
+                        return;
+                    for (const match of result.matches) {
+                        appendMatch(match, label);
+                        count++;
+                    }
+                    if (result.warning)
+                        warn(result.warning);
+                    page = result.next;
+                    if (page && seen.has(page))
+                        throw Error('The provider repeated a search page.');
+                    seen.add(page);
+                } while (page);
+            }
+            catch (cause) {
+                if (signal.aborted || !form.isConnected)
+                    return;
+                warn(asError(cause).message);
+            }
+        }
+        status.textContent = sources.length ? `${count} ${count === 1 ? 'match' : 'matches'} from connected calendars.` : 'No connected calendars are available.';
+    }
+    form.onsubmit = event => { event.preventDefault(); void search(); };
+    void search();
+}
 function renameCalendar(source) {
     const alias = state.prefs.calendarAliases?.[source.id] ?? '';
     modal('Rename calendar', `<form id="calendar-alias-form">
@@ -3386,6 +3498,10 @@ async function handleClick(event) {
             return;
         }
         const action = button.dataset.action;
+        if (action === 'calendar-search') {
+            openCalendarSearch();
+            return;
+        }
         if (action === 'mobile-back') {
             await backFromMobileItem();
             return;
@@ -3913,7 +4029,7 @@ function renderJunkSettings() {
     select.onchange = () => void render();
     void render();
 }
-const settingsPages = [['appearance', 'Appearance'], ['mail', 'Mail'], ['mail-rules', 'Mail Rules'], ['accounts', 'Accounts'], ['activity-log', 'Activity Log'], ['connections', 'Connections'], ['keyboard', 'Keyboard'], ['backups', 'Backups'], ['swipe', 'Swipe Actions'], ['updates', 'Updates']];
+const settingsPages = [['appearance', 'Appearance'], ['mail', 'Mail'], ['mail-rules', 'Mail Rules'], ['calendar', 'Calendar'], ['accounts', 'Accounts'], ['activity-log', 'Activity Log'], ['connections', 'Connections'], ['keyboard', 'Keyboard'], ['backups', 'Backups'], ['swipe', 'Swipe Actions'], ['updates', 'Updates']];
 let updateInstalling = false;
 let updateChecking = false;
 let updateRelease;
@@ -4084,6 +4200,12 @@ function renderSettings(entryVersion) {
     <section class="settings-grid" id="settings-mail-rules" data-settings-page="mail-rules"${settingsPage === 'mail-rules' ? '' : ' hidden'}>
       <section class="card" id="mail-rules-panel"><h2>Mail Rules</h2><p>Loading rules…</p></section>
     </section>
+    <section class="settings-grid" id="settings-calendar" data-settings-page="calendar"${settingsPage === 'calendar' ? '' : ' hidden'}>
+      <section class="card"><h2>Calendar display</h2><form id="calendar-preferences">
+        ${calendarDisplayFields.map(({ name, label, max }) => `<label>${label}<input type="number" name="${name}" min="1" max="${max}" step="1" required value="${calendarDisplayLimit(name, p.calendarDisplay)}"></label>`).join('')}
+        <button class="primary">Save calendar preferences</button>
+      </form></section>
+    </section>
     <section class="settings-grid" id="settings-accounts" data-settings-page="accounts"${settingsPage === 'accounts' ? '' : ' hidden'}>
       <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small data-account-status="${e(a.id)}">${settingsAccountStatus(a)}</small></div><div class="actions"><button data-edit-account="${e(a.id)}" aria-label="Edit account ${e(a.label)}">Edit</button>${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>${a.googleCalendarEnabled === false ? `<button data-google="${a.id}" data-enable-calendar>Enable Calendar</button>` : ''}` : ''}<button class="danger quiet mobile-icon-button" data-remove-account="${a.id}" aria-label="Remove account ${e(a.label)}">${mobileActionLabel('close', 'Remove')}</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account" class="mobile-icon-button" aria-label="Add account">${mobileActionLabel('add', '+ Add account')}</button></section>
       <section class="card" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section>
@@ -4169,6 +4291,17 @@ function renderSettings(entryVersion) {
     bindMailListSettings(document.querySelector('#mail-list-settings'), p.mailList, async (layout) => { await attempt(async () => { const preferences = { ...state.prefs, mailList: layout }; await api('preferences', { preferences }); state.prefs = preferences; notice('List appearance saved.'); }); });
     void renderGoogleSettings(document.querySelector('#google-integration'), api);
     document.querySelector('#preferences').onsubmit = ev => { ev.preventDefault(); void attempt(async () => { const form = ev.target, preferences = { ...state.prefs, ...Object.fromEntries(new FormData(form)), showElapsedTime: form.elements.namedItem('showElapsedTime').checked }; await api('preferences', { preferences }); state.prefs = preferences; applyTheme(); notice('Preferences saved.'); }); };
+    document.querySelector('#calendar-preferences').onsubmit = event => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const calendarDisplay = { month: Number(form.get('month')), agenda: Number(form.get('agenda')), header: Number(form.get('header')) };
+        void attempt(async () => {
+            const preferences = { ...state.prefs, calendarDisplay };
+            await api('preferences', { preferences });
+            state.prefs = preferences;
+            notice('Calendar preferences saved.');
+        });
+    };
     document.querySelector('#swipe-preferences').onsubmit = event => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);

@@ -6,7 +6,9 @@
 
 Open **Calendar** in the sidebar, press `g 2`, or enter `:calendar`. Choose **Month** for a broad view, **Week** or **Day** for time slots, or **Agenda** for a list. Use **Today**, the previous and next controls, or the mini calendar to change the date. In Month view, select **+ more** to see the rest of a busy day.
 
-Use **Calendars** to show or hide local events and individual account calendars. Search from the Calendar view to find events, or choose the clock in the Office header to open **Upcoming agenda** and jump to an event.
+Use **Calendars** to show or hide local events and individual account calendars. Search from Calendar to find events stored in Office across all dates, including hidden calendars. Choose **Search connected calendars** below the search heading to look up events directly on your connected Google primary calendar and CalDAV calendars. Leave the dates blank to search all dates and find recurring series, or enter both dates to find individual occurrences in a range of up to 366 days. Select a match to view its details.
+
+In **Settings → Calendar**, choose how many events to show per day in Month view and per batch in Calendar Agenda and the header’s **Upcoming agenda**. Choose **Show more** to reveal another batch. Open the header agenda from the clock to see events in the next seven days.
 
 ## Create an event
 

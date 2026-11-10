@@ -98,6 +98,7 @@ export interface AccountEditDetails {
 }
 export interface Preferences {
   calendarAliases?: Record<string,string>;
+  calendarDisplay?: {month:number;agenda:number;header:number};
   swipe?: import('./swipe.js').SwipePreferences;
   showElapsedTime?: boolean;
   activityLogLevel?: 'summary' | 'warnings' | 'detailed';
@@ -149,6 +150,9 @@ export interface Status {
   remoteSenderIcons?: boolean;
 }
 export interface MutationResult { record: OfficeRecord; removedIds?: string[] }
+export interface CalendarSearchMatch {
+  id: string|null; title: string; body: string; start: string; end: string; location: string; recurring: boolean;
+}
 export interface MailActionResult { record: OfficeRecord | null; removedIds?: string[]; undoToken?: string }
 export interface ApiError extends Error { status?: number; code?: string; record?: OfficeRecord }
 export interface ApiResponses {
@@ -180,6 +184,7 @@ export interface ApiResponses {
   'account-delete': { ok: boolean };
   'google-connect': { url: string }; 'google-settings': GoogleSettings;
   'calendar-series': {record: OfficeRecord}; 'calendar-save': {warning?: string};
+  'calendar-search': {matches: CalendarSearchMatch[]; next: string; warning: string};
   preferences: { ok: boolean };
   import: { count: number }; 'import-items': { count: number }; restore: { count: number; preferences?: Preferences };
 }

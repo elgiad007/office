@@ -7,7 +7,7 @@ export async function testCalendar(page,url){
  let rows=Array.from({length:5},(_,i)=>({id:'cal-'+i,kind:'calendar',title:'Event '+i,body:'Notes',revision:1,meta:{start:day+'T09:00:00',end:day+'T10:00:00'}}));
  rows.push({id:'remote',kind:'calendar',title:'Remote event',body:'Read only',revision:1,meta:{start:day,end:day,remote:true,account:'caldav'}});
  rows.push({id:'past',kind:'calendar',title:'Past event',body:'Notes',revision:1,meta:{start:'2000-01-01',end:'2000-01-02',remote:true,account:'caldav'}});
- const saved=[],providerSaves=[];let nextSaveError='';let preferences={theme:'dark'};const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
+ const saved=[],providerSaves=[],searches=[];let nextSaveError='';let preferences={theme:'dark'},addGoogle=false;const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
  await page.route(routes,async route=>{const action=new URL(route.request().url()).searchParams.get('r');if(action==='save'){
   if(nextSaveError){const error=nextSaveError;nextSaveError='';await route.fulfill({status:400,json:{error}});return;}
   const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||`created-${saved.length}`,revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;
@@ -20,7 +20,15 @@ export async function testCalendar(page,url){
   rows=rows.map(row=>row.id===input.id?{...row,body:input.changes.body??row.body,revision:row.revision+1}:row);
   await route.fulfill({json:{}});return;
  }if(action==='preferences'){preferences=route.request().postDataJSON().preferences;await route.fulfill({json:{ok:true}});return;}
- const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
+ if(action==='calendar-search'){
+  const request=route.request().postDataJSON();searches.push(request);
+  if(request.account==='caldav'){await route.fulfill({status:503,json:{error:'Provider unavailable.'}});return;}
+  const matches=request.page?[{id:'provider-only',title:'Past provider event',body:'Historic notes',location:'Old office',start:'1999-01-01',end:'1999-01-02',recurring:!request.from}]:[];
+  await route.fulfill({json:{matches,next:request.page?'':'next-page',warning:''}});return;
+ }
+ const accounts=[{id:'caldav',type:'caldav',label:'Work'}];
+ if(addGoogle)accounts.push({id:'google',type:'google',label:'Personal'});
+ const responses={sync:{count:0},'google-settings':{configured:false},'mail-junk-settings':{rules:[],folder:'Junk'},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences},accounts:{accounts},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
   await page.goto(url+'#calendar');await page.reload();await page.locator('.calendar-month').waitFor();
   await page.getByRole('button',{name:'Rename calendar Work',exact:true}).click();
@@ -157,5 +165,61 @@ export async function testCalendar(page,url){
   await page.getByText(conflict,{exact:true}).waitFor();
   assert.equal(providerSaves.at(-1).scope,'series');assert.equal(providerSaves.at(-1).version,'"series"');
   assert.equal(await recurrence.inputValue(),'RRULE:FREQ=WEEKLY;COUNT=5');
+  addGoogle=true;
+  const tomorrow=dayKey(addDays(now,1));
+  const yesterday=dayKey(addDays(now,-1));
+  addEvent('earlier-event',yesterday+'T09:00',yesterday+'T10:00');
+  addEvent('upcoming-one',tomorrow+'T09:00',tomorrow+'T10:00');
+  addEvent('upcoming-two',tomorrow+'T11:00',tomorrow+'T12:00');
+  await page.reload();
+  await page.locator('[data-app=settings]').click();
+  await page.getByRole('button',{name:'Calendar settings',exact:true}).click();
+  const settings=page.locator('#calendar-preferences');
+  for(const name of ['month','agenda','header'])await settings.locator(`[name=${name}]`).fill('1');
+  await settings.getByRole('button',{name:'Save calendar preferences'}).click();
+  await page.getByText('Calendar preferences saved.',{exact:true}).waitFor();
+  assert.deepEqual(preferences.calendarDisplay,{month:1,agenda:1,header:1});
+  await page.reload();
+  await page.locator('[data-app=calendar]').click();
+  await page.locator('[data-view=month]').click();
+  const cell=page.locator('.calendar-day').filter({has:page.locator(`[data-day="${day}"]`)});
+  assert.equal(await cell.locator('.calendar-event').count(),1);
+  await cell.locator('.calendar-more').click();
+  assert.ok(await page.locator('.calendar-time-day .calendar-event').count()>1);
+  await page.locator('[data-view=agenda]').click();
+  assert.equal(await page.locator('.calendar-agenda .calendar-event').count(),1);
+  await page.locator('[data-agenda-more]').click();
+  assert.equal(await page.locator('.calendar-agenda .calendar-event').count(),2);
+  if(yesterday.slice(0,7)===day.slice(0,7)){
+   await page.locator('[data-agenda-earlier]').click();
+   await page.locator('.calendar-agenda [data-id=earlier-event]').waitFor();
+  }
+  await page.locator('#top-agenda summary').click();
+  await page.locator('[data-header-agenda-more]').waitFor();
+  assert.equal(await page.locator('[data-agenda-event]').count(),1);
+  await page.locator('[data-header-agenda-more]').click();
+  assert.equal(await page.locator('[data-agenda-event]').count(),2);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-source=caldav]').uncheck();
+  await page.getByRole('searchbox',{name:'Search calendar',exact:true}).fill('Event');
+  assert.ok(await page.locator('.calendar-agenda .calendar-event').count()>1,'Search ignores the agenda display count.');
+  await page.getByRole('searchbox',{name:'Search calendar',exact:true}).fill('  Past event  ');
+  await page.locator('[data-id=past]').waitFor();
+  assert.match(await page.locator('.calendar-agenda').innerText(),/Work/);
+  await page.getByRole('button',{name:'Search connected calendars',exact:true}).click();
+  await page.getByText('1 match from connected calendars.',{exact:true}).waitFor();
+  await page.getByText('Work — Provider unavailable.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/Past provider event.*Recurring series/}).click();
+  await page.getByText('Historic notes',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Open stored event'}).count(),0);
+  await page.getByLabel('From',{exact:true}).fill('1999-01-01');
+  await page.getByLabel('Through',{exact:true}).fill('1999-01-31');
+  await page.getByRole('button',{name:'Search',exact:true}).click();
+  await page.getByRole('button',{name:/Past provider event/}).waitFor();
+  assert.deepEqual(searches.map(({account,page,from})=>[account,page,from]),[
+   ['caldav','',''],['google','',''],['google','next-page',''],
+   ['caldav','','1999-01-01'],['google','','1999-01-01'],['google','next-page','1999-01-01'],
+  ]);
+  await page.keyboard.press('Escape');
  }finally{await page.unroute(routes);}
 }
