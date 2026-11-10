@@ -4,8 +4,11 @@ export async function testCalendar(page,url){
  let rows=Array.from({length:5},(_,i)=>({id:'cal-'+i,kind:'calendar',title:'Event '+i,body:'Notes',revision:1,meta:{start:day+'T09:00:00',end:day+'T10:00:00'}}));
  rows.push({id:'remote',kind:'calendar',title:'Remote event',body:'Read only',revision:1,meta:{start:day,end:day,remote:true,account:'caldav'}});
  rows.push({id:'past',kind:'calendar',title:'Past event',body:'Notes',revision:1,meta:{start:'2000-01-01',end:'2000-01-02',remote:true,account:'caldav'}});
- const saved=[];const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
- await page.route(routes,async route=>{const action=new URL(route.request().url()).searchParams.get('r');if(action==='save'){const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||'created',revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;}const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark'}},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
+ const saved=[];let nextSaveError='';const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
+ await page.route(routes,async route=>{const action=new URL(route.request().url()).searchParams.get('r');if(action==='save'){
+  if(nextSaveError){const error=nextSaveError;nextSaveError='';await route.fulfill({status:400,json:{error}});return;}
+  const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||'created',revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;
+ }const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark'}},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
   await page.goto(url+'#calendar');await page.reload();await page.locator('.calendar-month').waitFor();
   const closeEvent=page.getByRole('button',{name:'Close event',exact:true});
@@ -23,7 +26,7 @@ export async function testCalendar(page,url){
   await page.locator('[data-view=month]').click();await page.locator(`.calendar-day [data-day="${day}"]`).click();await page.locator('#detail [name=start]').waitFor();assert.equal(await page.locator('#detail [name=start]').inputValue(),day);assert.equal(await page.locator('#detail [name=start]').getAttribute('type'),'date');
   await page.keyboard.press('Escape');await page.getByRole('dialog').getByRole('button',{name:'Cancel',exact:true}).click();await closeEvent.waitFor();
   const start=page.locator('#detail [name=start]'),end=page.locator('#detail [name=end]');
-  const endError=page.locator('#calendar-end-error'),save=page.getByRole('button',{name:'Save',exact:true});
+  const endError=page.locator('#detail #calendar-event-error'),save=page.getByRole('button',{name:'Save',exact:true});
   const beforeDraft=saved.length;
   await start.fill('2040-11-20');assert.equal(await end.inputValue(),'2040-11-21');
   await end.fill('2040-11-09');assert.equal(await end.inputValue(),'2040-11-09');
@@ -31,8 +34,15 @@ export async function testCalendar(page,url){
   await page.keyboard.press('Control+s');assert.equal(saved.length,beforeDraft);
   await end.fill('2040-11-22');await start.fill('2040-11-21');
   assert.equal(await end.inputValue(),'2040-11-22');assert.equal(await endError.textContent(),'');
-  await page.locator('#detail [name=title]').fill('All day saved');await save.click();
+  await page.locator('#detail [name=title]').fill('All day saved');
+  const rejection='Could not save this event.';
+  nextSaveError=rejection;await save.click();
+  await page.locator('#detail').getByText(rejection,{exact:true}).waitFor();
+  assert.ok(!(await page.locator('#notice').textContent()).includes(rejection));
+  assert.equal(await end.inputValue(),'2040-11-22');
+  await save.click();
   await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
+  assert.equal(await endError.textContent(),'');
   assert.equal(saved.length,beforeDraft+1);
   assert.equal(saved.at(-1).meta.start,'2040-11-21');assert.equal(saved.at(-1).meta.end,'2040-11-22');
   await closeEvent.click();await page.getByRole('button',{name:'New event',exact:true}).click();

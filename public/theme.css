@@ -125,8 +125,8 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
   .connection-map-note,.connections-view [role="status"] { font-size:11px; line-height:1.3; }
 }
 /* Calendar workspace */
-.calendar-date-fields { align-items: start; }
-#calendar-end-error:not(:empty) { margin-top: 4px; font-size: 13px; }
+#calendar-event-error:empty { position: absolute; }
+#calendar-event-error:not(:empty) { border: 1px solid var(--danger); border-radius: 6px; padding: 9px 11px; font-size: 13px; }
 .calendar-workspace { position: relative; flex: 1; min-height: 0; }
 .calendar-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 0; }
 .calendar-toolbar h2 { font-size: 21px; margin: 0; min-width: 0; overflow-wrap: anywhere; }

@@ -142,6 +142,7 @@ const connections=createConnections({api,icon,keys:()=>keys(),current:()=>state.
 let pendingLinkedSource: {draft:string;source:string}|undefined;
 let unsavedDraft: OfficeRecord | null=null;
 class DraftCancelled extends Error {}
+let calendarSaveFailure: {id: string; message: string} | undefined;
 const isUnsavedDraft=()=>!!unsavedDraft && state.current===unsavedDraft;
 interface MailDraftOrigin {folder: string; scope: MailScope | null; search: string; selectedId?: string}
 const mailDraftOrigins=new Map<string,MailDraftOrigin>();
@@ -1351,12 +1352,13 @@ function detailContent(r: OfficeRecord) {
   if (state.app==='contacts') content+=`<div class="fields">${field('Email','email',m.email,'email')}${field('Phone','phone',m.phone,'tel')}${field('Company','company',m.company)}${field('Group','group',m.group)}</div>`;
   if (state.app==='calendar') {
     const allDay=dateOnly(m.start), type=allDay?'date':'datetime-local';
-    content+=`<label class="check-label"><input type="checkbox" name="allDay" ${allDay?'checked':''} ${disabled}> All day</label>
-      <div class="fields calendar-date-fields">
+    content+=`<div id="calendar-event-error" class="error" role="alert"></div>
+      <label class="check-label"><input type="checkbox" name="allDay" ${allDay?'checked':''} ${disabled}> All day</label>
+      <div class="fields">
         ${field('Start (local time)','start',allDay?m.start:localInput(m.start),type,disabled)}
-        <div><label><span id="calendar-end-label">${calendarEndLabel(allDay)}</span>
-          <input name="end" type="${type}" value="${e((allDay?m.end:localInput(m.end))||'')}" aria-describedby="calendar-end-error" ${disabled}>
-        </label><div id="calendar-end-error" class="error" role="alert"></div></div>
+        <label><span id="calendar-end-label">${calendarEndLabel(allDay)}</span>
+          <input name="end" type="${type}" value="${e((allDay?m.end:localInput(m.end))||'')}" ${disabled}>
+        </label>
         ${field('Location','location',m.location,'text',disabled)}
       </div>${m.rawIcs||m.raw?'<button type="button" data-action="original-ics">Download original ICS</button>':''}${m.recurrence?`<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>`:''}`;
   }
@@ -1374,6 +1376,7 @@ function bindCalendarDates(form: HTMLFormElement) {
   const end=form.querySelector<HTMLInputElement>('[name="end"]')!;
   const allDay=form.querySelector<HTMLInputElement>('[name="allDay"]')!;
   form.oninput=event=>{
+    calendarSaveFailure=undefined;
     if(event.target===allDay){
       for(const input of [start,end]){
         const value=input.value;
@@ -1401,10 +1404,16 @@ function validateCalendarEnd() {
   if(!end)return true;
   const start=end.form!.querySelector<HTMLInputElement>('[name="start"]')!;
   const invalid=!!(start.value&&end.value&&calendarDate(end.value)<=calendarDate(start.value));
-  const error=end.form!.querySelector('#calendar-end-error')!;
-  const message=invalid?'End must be after start.':'';
+  const error=end.form!.querySelector('#calendar-event-error')!;
+  const message=invalid?'End must be after start.':calendarSaveFailure?.id===state.current.id?calendarSaveFailure.message:'';
   if(error.textContent!==message)error.textContent=message;
-  if(invalid)end.setAttribute('aria-invalid','true');else end.removeAttribute('aria-invalid');
+  if(invalid){
+    end.setAttribute('aria-invalid','true');
+    end.setAttribute('aria-describedby',error.id);
+  }else{
+    end.removeAttribute('aria-invalid');
+    end.removeAttribute('aria-describedby');
+  }
   return !invalid;
 }
 function workbook(r: OfficeRecord) {
@@ -1479,6 +1488,7 @@ async function commit(explicit=false): Promise<void> {
   const taskOrder=state.app==='tasks'?[...document.querySelectorAll<HTMLElement>('#items [data-id]')].map(el=>el.dataset.id!):[];
   const taskPane=activePane();
   const firstSave=isUnsavedDraft(),payload=structuredClone(state.current); state.dirty=false; const id=payload.id;
+  if(payload.kind==='calendar')calendarSaveFailure=undefined;
   const input=firstSave?{kind:payload.kind,title:payload.title,body:payload.body,meta:payload.meta,...(pendingLinkedSource?.draft===id?{linkedTo:pendingLinkedSource.source}:{})}:payload;
   state.savePromise=(async()=>{try { const result=await api('save',input); if(state.current?.id===id) {
     if(firstSave){
@@ -1493,7 +1503,17 @@ async function commit(explicit=false): Promise<void> {
     const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent=state.dirty?'Unsaved changes':'Saved';
     const listFocused=state.app==='lists'&&!!document.activeElement?.closest('#items');
     renderList();if(listFocused)focusList();
-  } catch(cause) { const error=asError(cause); state.dirty=true; const s=document.querySelector<HTMLElement>('#save-status')!; if(s) s.textContent='Save failed · keep this page open'; throw error; } finally { state.savePromise=null; updateSaveButton(); }})();
+  } catch(cause) {
+    const error=asError(cause);state.dirty=true;
+    const status=document.querySelector<HTMLElement>('#save-status');
+    if(payload.kind==='calendar'&&state.current?.id===id&&document.querySelector('#calendar-event-error')){
+      calendarSaveFailure={id,message:error.message};
+      if(status)status.textContent=firstSave?'Unsaved draft':'Unsaved changes';
+      throw new DraftCancelled();
+    }
+    if(status)status.textContent='Save failed · keep this page open';
+    throw error;
+  } finally { state.savePromise=null; updateSaveButton(); }})();
   updateSaveButton();
   await state.savePromise; if(state.dirty) await commit();
   if(state.app==='tasks'&&state.current&&(firstSave||state.current.id===id)&&!state.dirty){
