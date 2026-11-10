@@ -20,15 +20,21 @@ The packaging script copies only release sources and an empty data directory. It
 
 ## Prepare a GitHub release
 
-Set the release version in [`app/VERSION`](../app/VERSION). Office shows it beneath the heading in **Keyboard shortcuts** (`?`). Place an official PHP x64 NTS ZIP at `.runtime/php.zip`, double-click **Build Office Release.bat** in the repository root, and paste the ZIP's published SHA-256 when prompted.
+Set the release version in [`app/VERSION`](../app/VERSION). Office shows it beneath the heading in **Keyboard shortcuts** (`?`). Place an official PHP x64 NTS ZIP at `.runtime/php.zip`. To save its published checksum, create `.runtime/.env` with this line, replacing the placeholder with the 64-character SHA-256 for that ZIP:
+
+```dotenv
+OFFICE_PHP_SHA256=<published SHA-256>
+```
+
+Double-click **Build Office Release.bat** in the repository root. The builder reads the saved value and verifies the ZIP on every build. If the setting is missing, the builder prompts for the checksum. Update the saved value when you replace the PHP ZIP. Git and the release packager both exclude `.runtime/`.
 
 You can also run the release builder from PowerShell:
 
 ```powershell
-./scripts/release.ps1 -ExpectedSha256 '<official PHP SHA-256>'
+./scripts/release.ps1
 ```
 
-Use `-WindowsRuntimeArchive` to select a different PHP ZIP. To bundle portable Apache in the Windows ZIP, also supply `-ApacheRuntimeArchive` and `-ApacheExpectedSha256`.
+Pass `-ExpectedSha256` to override the saved value. If you use `-WindowsRuntimeArchive` to select a PHP ZIP, also pass `-ExpectedSha256` for that archive. To bundle portable Apache in the Windows ZIP, also supply `-ApacheRuntimeArchive` and `-ApacheExpectedSha256`.
 
 For a manual unsigned release of version `0.1.0`, upload `portable-office-v0.1.0-hosting.zip`, `portable-office-v0.1.0-windows.zip`, and `SHA256SUMS.txt` from `dist/release-v0.1.0/`. Use tag `v0.1.0` and select the commit that matches the packaged files. To rebuild the same version, move its existing release folder first.
 

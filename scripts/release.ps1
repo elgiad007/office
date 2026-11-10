@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$WindowsRuntimeArchive,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedSha256,
+    [string]$ExpectedSha256,
     [string]$ApacheRuntimeArchive,
     [string]$ApacheExpectedSha256,
     [string]$ReleasePublicKeyFile,
@@ -10,7 +10,27 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $officeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-if (!$WindowsRuntimeArchive) { $WindowsRuntimeArchive = Join-Path $officeRoot '.runtime/php.zip' }
+if (!$WindowsRuntimeArchive) {
+    $WindowsRuntimeArchive = Join-Path $officeRoot '.runtime/php.zip'
+    if (!$PSBoundParameters.ContainsKey('ExpectedSha256')) {
+        $checksumFile = Join-Path $officeRoot '.runtime/.env'
+        if (Test-Path -LiteralPath $checksumFile -PathType Leaf) {
+            $checksumEntry = Select-String -LiteralPath $checksumFile -Pattern '^\s*OFFICE_PHP_SHA256\s*=\s*(.*?)\s*$' | Select-Object -Last 1
+            if ($checksumEntry) {
+                $ExpectedSha256 = $checksumEntry.Matches[0].Groups[1].Value
+                if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+                    throw 'Set OFFICE_PHP_SHA256 in .runtime/.env to the 64-character SHA-256 published for .runtime/php.zip.'
+                }
+            }
+        }
+        if (!$ExpectedSha256) {
+            $ExpectedSha256 = Read-Host 'Enter the published SHA-256 for .runtime/php.zip'
+        }
+    }
+}
+if ($ExpectedSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+    throw 'Supply the published 64-character SHA-256 for the Windows PHP archive with -ExpectedSha256.'
+}
 if ([bool]$ApacheRuntimeArchive -ne [bool]$ApacheExpectedSha256) {
     throw 'Supply both the Apache archive and its publisher SHA-256 to include Apache.'
 }

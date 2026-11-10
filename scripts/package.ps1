@@ -25,7 +25,9 @@ if ($ReleasePublicKeyFile) {
 }
 $officeZipName='portable-office-hosting.zip'
 if ($WindowsRuntimeArchive) {
-    if (-not $ExpectedSha256 -or (Get-FileHash -LiteralPath $WindowsRuntimeArchive -Algorithm SHA256).Hash -ne $ExpectedSha256) { throw 'A matching official SHA-256 is required for the Windows runtime archive.' }
+    if (-not $ExpectedSha256 -or (Get-FileHash -LiteralPath $WindowsRuntimeArchive -Algorithm SHA256).Hash -ne $ExpectedSha256) {
+        throw "The Windows PHP archive at '$WindowsRuntimeArchive' requires a matching published SHA-256. Check -ExpectedSha256 or OFFICE_PHP_SHA256 in .runtime/.env if you used the saved value."
+    }
     Expand-Archive -LiteralPath $WindowsRuntimeArchive -DestinationPath (Join-Path $officePackage 'runtime\windows') -Force
     New-Item -ItemType File -Path (Join-Path $officePackage 'app/windows-release') | Out-Null
     $officeZipName='portable-office-windows.zip'
