@@ -12,7 +12,7 @@ Use **Calendars** to show or hide local events and individual account calendars.
 
 Choose **New event**, select a date number, or select a time slot in Week or Day view. Enter a title, start and end, and optionally a location and description. Save the event to add it to your local calendar.
 
-Timed events use your browser's local time when you enter them. All-day events use dates. The end date is exclusive, so for a one-day event on May 4, use May 4 as the start and May 5 as the end.
+Timed events use your browser's local time. For an all-day event, choose the first and last dates you want it to appear. Use May 4 for both dates for a one-day event, or May 4 through May 6 for a three-day event.
 
 ## Import, export, and sync
 

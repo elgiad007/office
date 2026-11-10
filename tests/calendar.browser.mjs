@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import {addDays,dayKey} from '../public/calendar.js';
 export async function testCalendar(page,url){
  const now=new Date(),day=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+ const weekStart=addDays(now,14-now.getDay());
+ const [first,middle,last,after]=Array.from({length:4},(_,i)=>dayKey(addDays(weekStart,i)));
  let rows=Array.from({length:5},(_,i)=>({id:'cal-'+i,kind:'calendar',title:'Event '+i,body:'Notes',revision:1,meta:{start:day+'T09:00:00',end:day+'T10:00:00'}}));
  rows.push({id:'remote',kind:'calendar',title:'Remote event',body:'Read only',revision:1,meta:{start:day,end:day,remote:true,account:'caldav'}});
  rows.push({id:'past',kind:'calendar',title:'Past event',body:'Notes',revision:1,meta:{start:'2000-01-01',end:'2000-01-02',remote:true,account:'caldav'}});
  const saved=[];let nextSaveError='';const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
  await page.route(routes,async route=>{const action=new URL(route.request().url()).searchParams.get('r');if(action==='save'){
   if(nextSaveError){const error=nextSaveError;nextSaveError='';await route.fulfill({status:400,json:{error}});return;}
-  const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||'created',revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;
+  const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||`created-${saved.length}`,revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;
  }const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences:{theme:'dark'}},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
   await page.goto(url+'#calendar');await page.reload();await page.locator('.calendar-month').waitFor();
@@ -29,27 +31,29 @@ export async function testCalendar(page,url){
   const start=page.locator('#detail [name=start]'),end=page.locator('#detail [name=end]');
   const endError=page.locator('#detail #calendar-event-error'),save=page.getByRole('button',{name:'Save',exact:true});
   const beforeDraft=saved.length;
-  await start.fill('2040-11-20');assert.equal(await end.inputValue(),'2040-11-21');
-  await end.fill('2040-11-09');assert.equal(await end.inputValue(),'2040-11-09');
-  assert.equal(await endError.textContent(),'End must be after start.');assert.ok(await save.isDisabled());
+  assert.equal(await end.inputValue(),day,'A date-cell draft starts as a one-day event');
+  await start.fill(first);assert.equal(await end.inputValue(),first);assert.ok(await save.isEnabled());
+  await end.fill(day);assert.equal(await end.inputValue(),day);
+  assert.equal(await endError.textContent(),'End date cannot be before start date.');assert.ok(await save.isDisabled());
   await page.keyboard.press('Control+s');assert.equal(saved.length,beforeDraft);
-  await end.fill('2040-11-22');await start.fill('2040-11-21');
-  assert.equal(await end.inputValue(),'2040-11-22');assert.equal(await endError.textContent(),'');
+  await end.fill(last);
+  assert.equal(await end.inputValue(),last);assert.equal(await endError.textContent(),'');
   await page.locator('#detail [name=title]').fill('All day saved');
   const rejection='Could not save this event.';
   nextSaveError=rejection;await save.click();
   await page.locator('#detail').getByText(rejection,{exact:true}).waitFor();
   assert.ok(!(await page.locator('#notice').textContent()).includes(rejection));
-  assert.equal(await end.inputValue(),'2040-11-22');
+  assert.equal(await end.inputValue(),last);
   await save.click();
   await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
   assert.equal(await endError.textContent(),'');
   assert.equal(saved.length,beforeDraft+1);
-  assert.equal(saved.at(-1).meta.start,'2040-11-21');assert.equal(saved.at(-1).meta.end,'2040-11-22');
+  assert.equal(saved.at(-1).meta.start,first);assert.equal(saved.at(-1).meta.end,after);
+  assert.equal(await end.inputValue(),last);
   await closeEvent.click();await page.getByRole('button',{name:'New event',exact:true}).click();
   const allDay=page.getByRole('checkbox',{name:'All day',exact:true});
   await start.fill('2040-11-21T09:00');await allDay.check();
-  assert.equal(await page.getByLabel('End (exclusive date)',{exact:true}).inputValue(),'2040-11-22');
+  assert.equal(await page.getByLabel('End (last day)',{exact:true}).inputValue(),'2040-11-21');
   await allDay.uncheck();assert.equal(await page.getByLabel('End (local time)',{exact:true}).inputValue(),'2040-11-22T00:00');
   await end.fill('2040-11-21T10:00');
   await start.fill('2040-11-21T23:30');assert.equal(await end.inputValue(),'2040-11-22T00:30');
@@ -77,11 +81,10 @@ export async function testCalendar(page,url){
    await page.locator('[data-app=calendar]').click();await page.locator(`.calendar-mini .primary[data-jump="${browsedDate}"]`).waitFor();
    assert.equal(await toggle.getAttribute('aria-pressed'),'true');assert.equal(await closeEvent.count(),0);
   }
-  const weekStart=addDays(now,14-now.getDay());
-  const [first,middle,last,after]=Array.from({length:4},(_,i)=>dayKey(addDays(weekStart,i)));
   const allDayIds=Array.from({length:4},(_,i)=>`multi-all-day-${i}`);
   const addEvent=(id,start,end)=>rows.push({id,kind:'calendar',title:id,body:'',revision:1,meta:{start,end}});
   for(const id of allDayIds)addEvent(id,first,after);
+  allDayIds.push(rows.find(r=>r.title==='All day saved').id);
   addEvent('multi-timed',first+'T18:00',last+'T01:00');
   addEvent('single-busy',middle+'T08:00',middle+'T09:00');
   await page.reload();await page.locator('[data-view=week]').click();await page.locator('[data-period=today]').click();

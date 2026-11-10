@@ -1864,12 +1864,14 @@ function detailContent(r) {
         content += `<div class="fields">${field('Email', 'email', m.email, 'email')}${field('Phone', 'phone', m.phone, 'tel')}${field('Company', 'company', m.company)}${field('Group', 'group', m.group)}</div>`;
     if (state.app === 'calendar') {
         const allDay = dateOnly(m.start), type = allDay ? 'date' : 'datetime-local';
+        const storedEnd = calendarDate(m.end || '');
+        const end = allDay ? (Number.isFinite(+storedEnd) ? dayKey(new Date(+storedEnd - 1)) : m.start) : localInput(m.end);
         content += `<div id="calendar-event-error" class="error" role="alert"></div>
       <label class="check-label"><input type="checkbox" name="allDay" ${allDay ? 'checked' : ''} ${disabled}> All day</label>
       <div class="fields">
         ${field('Start (local time)', 'start', allDay ? m.start : localInput(m.start), type, disabled)}
         <label><span id="calendar-end-label">${calendarEndLabel(allDay)}</span>
-          <input name="end" type="${type}" value="${e((allDay ? m.end : localInput(m.end)) || '')}" ${disabled}>
+          <input name="end" type="${type}" value="${e(end)}" ${disabled}>
         </label>
         ${field('Location', 'location', m.location, 'text', disabled)}
       </div>${m.rawIcs || m.raw ? '<button type="button" data-action="original-ics">Download original ICS</button>' : ''}${m.recurrence ? `<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>` : ''}`;
@@ -1890,7 +1892,13 @@ function localInput(value) { if (!value)
     return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(value))
     return value + 'T00:00'; if (!/[Zz]|[+-]\d\d:\d\d$/.test(value))
     return value.slice(0, 16); const d = new Date(value); return new Date(+d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
-function calendarEndLabel(allDay) { return allDay ? 'End (exclusive date)' : 'End (local time)'; }
+function calendarEndLabel(allDay) { return allDay ? 'End (last day)' : 'End (local time)'; }
+function calendarEndIsInvalid(start, end) {
+    if (!start.value || !end.value)
+        return false;
+    const order = +calendarDate(end.value) - +calendarDate(start.value);
+    return order < 0 || (order === 0 && end.type !== 'date');
+}
 function bindCalendarDates(form) {
     const start = form.querySelector('[name="start"]');
     const end = form.querySelector('[name="end"]');
@@ -1898,22 +1906,22 @@ function bindCalendarDates(form) {
     form.oninput = event => {
         calendarSaveFailure = undefined;
         if (event.target === allDay) {
-            for (const input of [start, end]) {
-                const value = input.value;
-                input.type = allDay.checked ? 'date' : 'datetime-local';
-                input.value = allDay.checked ? value.slice(0, 10) : value + 'T00:00';
-            }
+            const startValue = start.value, endValue = end.value;
+            const validRange = startValue && endValue && !calendarEndIsInvalid(start, end);
+            start.type = end.type = allDay.checked ? 'date' : 'datetime-local';
+            start.value = allDay.checked ? startValue.slice(0, 10) : localInput(startValue);
+            end.value = allDay.checked
+                ? (validRange ? dayKey(new Date(+calendarDate(endValue) - 1)) : endValue.slice(0, 10))
+                : (endValue ? localInput(dayKey(addDays(calendarDate(endValue), 1))) : '');
             form.querySelector('#calendar-end-label').textContent = calendarEndLabel(allDay.checked);
         }
-        if ((event.target === start || event.target === allDay) && start.value) {
-            const date = calendarDate(start.value);
-            if (!end.value || calendarDate(end.value) <= date) {
-                if (allDay.checked)
-                    end.value = dayKey(addDays(date, 1));
-                else {
-                    date.setHours(date.getHours() + 1);
-                    end.value = localInput(date.toISOString());
-                }
+        if ((event.target === start || event.target === allDay) && start.value && (!end.value || calendarEndIsInvalid(start, end))) {
+            if (allDay.checked)
+                end.value = start.value;
+            else {
+                const date = calendarDate(start.value);
+                date.setHours(date.getHours() + 1);
+                end.value = localInput(date.toISOString());
             }
         }
         markDirty();
@@ -1926,9 +1934,10 @@ function validateCalendarEnd() {
     if (!end)
         return true;
     const start = end.form.querySelector('[name="start"]');
-    const invalid = !!(start.value && end.value && calendarDate(end.value) <= calendarDate(start.value));
+    const invalid = calendarEndIsInvalid(start, end);
     const error = end.form.querySelector('#calendar-event-error');
-    const message = invalid ? 'End must be after start.' : calendarSaveFailure?.id === state.current.id ? calendarSaveFailure.message : '';
+    const dateError = end.type === 'date' ? 'End date cannot be before start date.' : 'End must be after start.';
+    const message = invalid ? dateError : calendarSaveFailure?.id === state.current.id ? calendarSaveFailure.message : '';
     if (error.textContent !== message)
         error.textContent = message;
     if (invalid) {
@@ -1983,6 +1992,9 @@ function collect() {
     for (const key of ['start', 'end'])
         if (key in values)
             m[key] = values[key] ? (dateOnly(values[key]) ? values[key] : new Date(values[key]).toISOString()) : '';
+    // The editor includes the last day. Stored all-day ranges end the next day.
+    if (dateOnly(values.start) && dateOnly(values.end))
+        m.end = dayKey(addDays(calendarDate(values.end), 1));
     if (state.app === 'tasks')
         m.done = values.done === 'on';
     if (state.app === 'documents')
