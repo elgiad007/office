@@ -31,28 +31,48 @@ export async function testCalendar(page,url){
  const responses={sync:{count:0},'google-settings':{configured:false},'mail-junk-settings':{rules:[],folder:'Junk'},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences},accounts:{accounts},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
   const initialRows=rows;
-  const navigationEvent=(id,hours)=>({id,kind:'calendar',title:id,body:'Notes',revision:1,meta:{
-   start:new Date(+now+hours*3600000).toISOString(),end:new Date(+now+(hours+0.5)*3600000).toISOString(),
+  const initialPreferences=preferences;
+  preferences={...preferences,calendarDisplay:{month:1}};
+  const hoursAfter=(date,hours)=>new Date(+date+hours*3600000);
+  const navigationEvent=(id,start)=>({id,kind:'calendar',title:id,body:'Notes',revision:1,meta:{
+   start:start.toISOString(),end:hoursAfter(start,0.5).toISOString(),
   }});
-  const hiddenEvent=navigationEvent('Hidden upcoming event',1);
+  const upcomingDay=addDays(now,1);
+  upcomingDay.setHours(10,0,0,0);
+  const hiddenEvent=navigationEvent('Hidden upcoming event',hoursAfter(now,1));
   Object.assign(hiddenEvent.meta,{remote:true,account:'caldav'});
-  rows=[initialRows.find(row=>row.id==='past'),navigationEvent('previous',-1),hiddenEvent,
-   navigationEvent('upcoming',2),navigationEvent('following',3)];
-  const selectWithKey=async (key,id)=>{
+  rows=[initialRows.find(row=>row.id==='past'),navigationEvent('previous',hoursAfter(now,-1)),hiddenEvent,
+   navigationEvent('upcoming',upcomingDay),navigationEvent('following',hoursAfter(upcomingDay,1))];
+  const selectWithKey=async (key,id,view='month')=>{
    await page.keyboard.press(key);
-   await page.locator(`#selected-item[data-id="${id}"]`).waitFor();
+   const selected=page.locator(`#selected-item[data-id="${id}"]`);
+   await selected.waitFor();
+   assert.equal(await selected.evaluate(node=>node===document.activeElement),true);
+   assert.equal(await page.locator(`[data-view=${view}]`).getAttribute('aria-pressed'),'true');
   };
   await page.goto(url+'#calendar');await page.reload();
   await page.locator('[data-source=caldav]').uncheck();
   await page.locator('#main').focus();
   await selectWithKey('j','upcoming');
+  const moreOnUpcomingDay=page.locator(`.calendar-more[data-jump="${dayKey(upcomingDay)}"]`);
+  assert.equal(await moreOnUpcomingDay.textContent(),'+1 more');
+  assert.equal(await page.locator('#items [data-id=following]').count(),0);
   await selectWithKey('j','following');
+  assert.equal(await moreOnUpcomingDay.textContent(),'+1 more');
+  assert.equal(await page.locator('#items [data-id=upcoming]').count(),0);
   await selectWithKey('k','upcoming');
-  await page.reload();await page.locator('.calendar-month').waitFor();
-  await page.locator('#main').focus();
-  await selectWithKey('k','previous');
-  await selectWithKey('k','past');
+  await moreOnUpcomingDay.click();
+  assert.equal(await page.locator('[data-view=day]').getAttribute('aria-pressed'),'true');
+  for(const view of ['month','week','day','agenda']){
+   await page.reload();
+   await page.locator(`[data-view=${view}]`).click();
+   await page.locator('#main').focus();
+   await selectWithKey('k','previous',view);
+   await selectWithKey('k','past',view);
+   await selectWithKey('j','previous',view);
+  }
   rows=initialRows;
+  preferences=initialPreferences;
   await page.goto(url+'#calendar');await page.reload();await page.locator('.calendar-month').waitFor();
   await page.getByRole('button',{name:'Rename calendar Work',exact:true}).click();
   await page.getByRole('textbox',{name:'Calendar alias',exact:true}).fill('Work schedule');

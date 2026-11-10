@@ -1756,7 +1756,7 @@ async function openConnectedRecord(id:string,activityRecord?: OfficeRecord){
   const opened=await showAppEntry(record.kind,async entryVersion=>{
     await load(record.id,{selectFirst:!activityRecord&&record.kind!=='mail',revealMail:record.kind==='mail',revealTask:!!activityRecord,entryVersion});
     if(entryVersion!==appEntryVersion)return;
-    if(record.kind==='calendar')calendar.ensureVisible(record.id,true);
+    if(record.kind==='calendar')calendar.ensureVisible(record.id,{reveal:true});
     if(record.kind==='lists'||phoneLayout.matches&&mobileItemOpen||(activityRecord&&record.kind==='tasks'&&!document.querySelector('#selected-item')))focusContent();else focusList();
     document.querySelector<HTMLElement>('#selected-item')?.scrollIntoView({block:'nearest'});
   });
@@ -1837,7 +1837,7 @@ function updateMailListItem(id: string) {
   if(selected)button.id='selected-item';else button.removeAttribute('id');
   const label=button.querySelector<HTMLInputElement>('.mail-read-status .file-input')!;if(label)label.textContent=row.meta.read?'Read':'Unread';
 }
-async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false,openItem: boolean|'linked'=false) {
+async function selectRecord(id: string,focus: boolean|'list-without-scroll'=false,openItem: boolean|'linked'=false,{preserveCalendarView=false}={}) {
   const pane=activePane();
   await waitForAttachments();await leaveEditor();
   const previous=state.current?.id,origin=mailDraftOrigin(false);
@@ -1857,7 +1857,7 @@ async function selectRecord(id: string,focus: boolean|'list-without-scroll'=fals
     if(previous)updateMailListItem(previous);
     if(state.current)updateMailListItem(state.current.id);
   }else renderList();
-  if(state.app==='calendar')calendar.ensureVisible(id);
+  if(state.app==='calendar')calendar.ensureVisible(id,{preserveView:preserveCalendarView});
   renderDetail();
   if(phoneLayout.matches&&mobileItemOpen){
     if(previous!==id||openItem)document.querySelector<HTMLElement>('#detail')!.scrollTop=0;
@@ -1868,6 +1868,9 @@ async function selectRecord(id: string,focus: boolean|'list-without-scroll'=fals
   selected?.focus({preventScroll:true});
   if(focus===true)selected?.scrollIntoView({block:'nearest',inline:'nearest'});
 } }
+function selectRecordFromKeyboard(id: string) {
+  return selectRecord(id,true,false,{preserveCalendarView:true});
+}
 async function clickRecord(id: string,event: MouseEvent) {
   await leaveEditor();
   if(event.shiftKey){
@@ -3444,7 +3447,7 @@ document.addEventListener('keydown',event=>{
   if(Date.now()-sequenceTime>900)keySequence='';sequenceTime=Date.now();
   if(event.repeat&&key==='g'){event.preventDefault();return;}
   if(keySequence==='g'&&appJump){event.preventDefault();keySequence='';void attempt(()=>changeApp(Object.keys(apps)[Number(key)-1] as AppName));return;}
-  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inSidebar){focusSidebar('');return;}if(mailBody){scrollMailBody(target,'start');return;}if(checklistRow){moveChecklistFocus(checklistRow,'first');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecord(row.id,true));return;}
+  if(keySequence==='g'&&key==='g'){keySequence='';event.preventDefault();if(inSidebar){focusSidebar('');return;}if(mailBody){scrollMailBody(target,'start');return;}if(checklistRow){moveChecklistFocus(checklistRow,'first');return;}const row=navigableRows()[0];if(row)void attempt(()=>selectRecordFromKeyboard(row.id));return;}
   if(key==='g'){keySequence='g';event.preventDefault();return;}keySequence='';
   const listArrow=activePane()==='list'?(key==='ArrowUp'||key==='ArrowLeft'?'up':key==='ArrowDown'||key==='ArrowRight'?'down':undefined):undefined;
   const action=(checklistArrow?(key==='ArrowUp'?'up':'down'):listArrow)||Object.keys(k).find(action=>k[action]===key);
@@ -3531,10 +3534,10 @@ document.addEventListener('keydown',event=>{
           closestDistance=distance;
         }
       }
-      if(closest)return selectRecord(closest.id,true);
+      if(closest)return selectRecordFromKeyboard(closest.id);
       return;
     }
-    const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(backwards?-1:1)));if(rows[next])return selectRecord(rows[next].id,true);
+    const next=key==='G'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(backwards?-1:1)));if(rows[next])return selectRecordFromKeyboard(rows[next].id);
   },true);}
 });
 document.addEventListener('focusin',event=>{const target=event.target as HTMLElement;if(!target.closest('.connections-view,.sidebar')&&target.id!=='command-input'&&editable(target))setMode('insert');});

@@ -2440,7 +2440,7 @@ async function openConnectedRecord(id, activityRecord) {
         if (entryVersion !== appEntryVersion)
             return;
         if (record.kind === 'calendar')
-            calendar.ensureVisible(record.id, true);
+            calendar.ensureVisible(record.id, { reveal: true });
         if (record.kind === 'lists' || phoneLayout.matches && mobileItemOpen || (activityRecord && record.kind === 'tasks' && !document.querySelector('#selected-item')))
             focusContent();
         else
@@ -2557,7 +2557,7 @@ function updateMailListItem(id) {
     if (label)
         label.textContent = row.meta.read ? 'Read' : 'Unread';
 }
-async function selectRecord(id, focus = false, openItem = false) {
+async function selectRecord(id, focus = false, openItem = false, { preserveCalendarView = false } = {}) {
     const pane = activePane();
     await waitForAttachments();
     await leaveEditor();
@@ -2590,7 +2590,7 @@ async function selectRecord(id, focus = false, openItem = false) {
     else
         renderList();
     if (state.app === 'calendar')
-        calendar.ensureVisible(id);
+        calendar.ensureVisible(id, { preserveView: preserveCalendarView });
     renderDetail();
     if (phoneLayout.matches && mobileItemOpen) {
         if (previous !== id || openItem)
@@ -2608,6 +2608,9 @@ async function selectRecord(id, focus = false, openItem = false) {
         if (focus === true)
             selected?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
+}
+function selectRecordFromKeyboard(id) {
+    return selectRecord(id, true, false, { preserveCalendarView: true });
 }
 async function clickRecord(id, event) {
     await leaveEditor();
@@ -5041,7 +5044,7 @@ document.addEventListener('keydown', event => {
         }
         const row = navigableRows()[0];
         if (row)
-            void attempt(() => selectRecord(row.id, true));
+            void attempt(() => selectRecordFromKeyboard(row.id));
         return;
     }
     if (key === 'g') {
@@ -5259,12 +5262,12 @@ document.addEventListener('keydown', event => {
                     }
                 }
                 if (closest)
-                    return selectRecord(closest.id, true);
+                    return selectRecordFromKeyboard(closest.id);
                 return;
             }
             const next = key === 'G' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, index + (backwards ? -1 : 1)));
             if (rows[next])
-                return selectRecord(rows[next].id, true);
+                return selectRecordFromKeyboard(rows[next].id);
         }, true);
     }
 });

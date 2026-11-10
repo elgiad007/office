@@ -149,7 +149,13 @@ export function createCalendar(env) {
                 const monthLimit = calendarDisplayLimit('month', display);
                 const spanning = list.filter(r => multiDay.has(r));
                 const limit = display?.month === undefined ? Math.max(monthLimit, spanning.length) : monthLimit;
-                const shown = new Set([...spanning, ...list.filter(r => !multiDay.has(r))].slice(0, limit));
+                const prioritized = [...spanning, ...list.filter(r => !multiDay.has(r))];
+                const shown = new Set(prioritized.slice(0, limit));
+                const selected = list.find(r => r.id === env.current());
+                if (selected && !shown.has(selected)) {
+                    shown.delete(prioritized[limit - 1]);
+                    shown.add(selected);
+                }
                 const visible = list.filter(r => shown.has(r));
                 const more = list.length - visible.length;
                 return `<section class="calendar-day ${d.getMonth() !== anchor.getMonth() ? 'outside' : ''}">${dayButton(d)}${visible.map(r => event(r, d)).join('')}${more ? `<button class="calendar-more" data-jump="${dayKey(d)}">+${more} more</button>` : ''}</section>`;
@@ -230,22 +236,22 @@ export function createCalendar(env) {
             host.querySelector(`[${focusAttribute.name}="${CSS.escape(focusAttribute.value)}"]`)?.focus({ preventScroll: true });
     }
     function showAgendaDate() { document.querySelector('[data-agenda-date]')?.scrollIntoView({ block: 'nearest' }); }
-    function ensureVisible(id, reveal = false) { if (reveal) {
-        const item = env.allRows().find(r => r.id === id);
-        if (item)
-            hidden.delete(calendarSourceId(item));
-    } const row = env.rows().find(r => r.id === id); if (!row)
-        return; if (!env.query().trim() && !isVisible(row))
-        return; if (!document.querySelector(`#items [data-id="${CSS.escape(id)}"]`)) {
-        const bounds = eventBounds(row);
-        if (bounds) {
-            anchor = calendarDate(dayKey(bounds.start));
-            chosenView = 'day';
+    function ensureVisible(id, { reveal = false, preserveView = false } = {}) {
+        if (reveal) {
+            const item = env.allRows().find(r => r.id === id);
+            if (item)
+                hidden.delete(calendarSourceId(item));
         }
-        else
-            chosenView = 'agenda';
+        const row = env.rows().find(r => r.id === id);
+        if (!row || (!env.query().trim() && !isVisible(row)) || document.querySelector(`#items [data-id="${CSS.escape(id)}"]`))
+            return;
+        const bounds = eventBounds(row);
+        if (bounds)
+            anchor = calendarDate(dayKey(bounds.start));
+        if (!preserveView)
+            chosenView = bounds ? 'day' : 'agenda';
         render();
-    } }
+    }
     function isVisible(record) { return !hidden.has(calendarSourceId(record)); }
     const position = () => ({ anchor, chosenView, hidden: [...hidden], compactSourcesOpen });
     function restorePosition(view) {
