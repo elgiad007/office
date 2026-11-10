@@ -160,6 +160,8 @@ let unsavedDraft = null;
 class DraftCancelled extends Error {
 }
 let calendarSaveFailure;
+let calendarSeriesEditor;
+const providerCalendar = (record) => record?.kind === 'calendar' && !!record.meta.remote && !!record.meta.calendarWritable && !record.meta.calendarAbsent;
 const isUnsavedDraft = () => !!unsavedDraft && state.current === unsavedDraft;
 const mailDraftOrigins = new Map();
 let lastMailView = { folder: 'Inbox', scope: null, search: '' };
@@ -1729,13 +1731,13 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
     const fillSender = state.app === 'mail' && !r.meta.remote && r.meta.folder === 'Drafts' && !r.meta.sendAccount ? draftAccount(r) : '';
     if (fillSender)
         r.meta.sendAccount = fillSender;
-    const remote = !!r.meta.remote;
+    const remote = !!r.meta.remote, canEditProvider = providerCalendar(r);
     const mailBadges = state.app === 'mail' ? `${r.meta.folder ? `<span class="badge">${e(mailLocation(r))}</span>` : ''}${remote ? '<span class="badge">Cached</span>' : ''}` : '';
     const bodyKey = viewingMail ? JSON.stringify([r.id, r.body, r.bodyHash, mailBody(r, state.prefs)]) : undefined;
     const retainBody = viewingMail && !newlyOpened && bodyKey === displayedMailBody && !!panel.querySelector('.mail-reader-header');
     displayedMailBody = bodyKey;
     const discardDraft = isUnsavedDraft() || r.kind === 'mail' && r.meta.folder === 'Drafts';
-    const markup = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote ? 'Cached copy' : isUnsavedDraft() ? 'Unsaved draft' : state.dirty ? 'Unsaved changes' : 'Saved'}</span>${!isUnsavedDraft() && ['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiEditing ? 'View page' : 'Edit source'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote ? `<button type="button" class="primary mobile-icon-button" data-action="save" aria-label="Save" title="Save"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M7 3v6h9V3 M7 21v-8h10v8"/></svg></button><button class="quiet danger${discardDraft ? '' : ' mobile-icon-button'}" data-action="delete" title="${discardDraft ? 'Discard Draft' : 'Delete selected item'}" aria-label="${discardDraft ? 'Discard Draft' : 'Delete'}">${discardDraft ? 'Discard Draft' : mobileActionLabel('trash', 'Delete')}</button>` : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
+    const markup = `${viewingMail ? '' : `<div class="detail-toolbar"><div class="left ${state.app === 'mail' ? 'mail-detail-heading' : ''}"><span class="eyebrow">${remote ? (state.app === 'mail' ? 'Cached message' : canEditProvider ? 'Synced event' : 'Synced · read only') : a.singular}</span>${mailBadges}</div><div class="right"><span class="save-status" id="save-status">${remote && !canEditProvider ? 'Cached copy' : isUnsavedDraft() ? 'Unsaved draft' : state.dirty ? 'Unsaved changes' : 'Saved'}</span>${!isUnsavedDraft() && ['wiki', 'documents'].includes(state.app) ? '<button class="quiet" data-action="history">History</button>' : ''}${state.app === 'wiki' ? `<button data-action="wiki-mode">${state.wikiEditing ? 'View page' : 'Edit source'}</button>` : ''}<button class="quiet" data-action="export">Export</button>${!remote || canEditProvider ? `<button type="button" class="primary mobile-icon-button" data-action="save" aria-label="Save" title="Save"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h12l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M7 3v6h9V3 M7 21v-8h10v8"/></svg></button>` : ''}${!remote ? `<button class="quiet danger${discardDraft ? '' : ' mobile-icon-button'}" data-action="delete" title="${discardDraft ? 'Discard Draft' : 'Delete selected item'}" aria-label="${discardDraft ? 'Discard Draft' : 'Delete'}">${discardDraft ? 'Discard Draft' : mobileActionLabel('trash', 'Delete')}</button>` : ''}</div></div><div class="print-only"><h1>${e(r.title)}</h1></div>`}${detailContent(r)}`;
     const template = document.createElement('template');
     template.innerHTML = markup;
     const toolbar = template.content.querySelector('.detail-toolbar .right');
@@ -1817,8 +1819,13 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
         close.className = 'calendar-close';
         close.onclick = () => void attempt(returnToItemList);
         panel.prepend(close);
-        if (form && !remote)
+        if (form && (!remote || canEditProvider))
             bindCalendarDates(form);
+        form?.querySelector('[data-apply-repeat]')?.addEventListener('click', () => applyCalendarRepeat(form));
+        panel.querySelector('[data-calendar-scope]')?.addEventListener('click', event => {
+            const button = event.currentTarget;
+            void attempt(() => openCalendarScope(button.dataset.calendarScope === 'series'));
+        });
     }
     if (fillSender)
         markDirty();
@@ -1844,7 +1851,7 @@ function renderDetail(readerSnapshot = captureMailReader(), toolbarOnly = false)
 function detailContent(r) {
     if (r.kind === 'lists')
         return checklistContent(r);
-    const m = r.meta, disabled = m.remote ? 'disabled' : '';
+    const m = r.meta, disabled = m.remote && !providerCalendar(r) ? 'disabled' : '';
     if (state.app === 'mail' && m.folder !== 'Drafts') {
         const recovery = !!m.remote && ['Recovery copies', 'Not in Inbox'].includes(m.folder || '');
         const actions = recovery ? '<button data-action="keep-local">Save locally</button><button class="danger quiet" data-action="discard-copy">Discard copy</button>' : `${m.folder !== 'Archive' ? `<button data-action="archive">${m.remote ? 'Archive' : 'Archive locally'}</button>` : ''}${m.remote ? m.folder === 'Trash' ? '<button data-action="restore-mail">Restore to Inbox</button>' : `<button data-action="trash-mail" class="mobile-icon-button" aria-label="Move to Trash">${mobileActionLabel('trash', 'Move to Trash')}</button>` : `<button class="danger quiet mobile-icon-button" data-action="delete" aria-label="Delete">${mobileActionLabel('trash', 'Delete')}</button>`}`;
@@ -1866,7 +1873,19 @@ function detailContent(r) {
         const allDay = dateOnly(m.start), type = allDay ? 'date' : 'datetime-local';
         const storedEnd = calendarDate(m.end || '');
         const end = allDay ? (Number.isFinite(+storedEnd) ? dayKey(new Date(+storedEnd - 1)) : m.start) : localInput(m.end);
+        const writable = providerCalendar(r), series = calendarSeriesEditor === r;
+        const scope = writable && m.calendarOccurrence ? '<button type="button" data-calendar-scope="series">Edit entire series</button>'
+            : series ? '<button type="button" data-calendar-scope="occurrence">Back to this occurrence</button>' : '';
+        const rules = writable && !m.calendarOccurrence ? `<details><summary>Repeat and exceptions</summary>
+      ${calendarRepeatControls(m.calendarRules || '')}
+      <p class="muted">Use RDATE for extra dates and EXDATE for skipped dates. Advanced rules can be edited below.</p>
+      <label>Recurrence rules<textarea name="calendarRules" rows="3">${e(m.calendarRules || '')}</textarea></label></details>` : '';
+        const advanced = m.calendarExtra !== undefined ? `<details><summary>CalDAV properties</summary>
+      <p class="muted">iCalendar properties for attendees, reminders, availability, privacy, categories, links, attachments, and custom fields.</p>
+      <label>Additional iCalendar properties<textarea name="calendarExtra" rows="6" ${disabled}>${e(m.calendarExtra)}</textarea></label>
+      ${m.calendarManaged ? `<label>Provider-managed properties<textarea readonly rows="3">${e(m.calendarManaged)}</textarea></label>` : ''}</details>` : '';
         content += `<div id="calendar-event-error" class="error" role="alert"></div>
+      ${scope}${series || m.calendarSeries && !m.calendarOccurrence ? '<p class="recurrence-note">You are editing the entire series.</p>' : m.calendarOccurrence ? '<p class="recurrence-note">Recurring event · this occurrence</p>' : ''}
       <label class="check-label"><input type="checkbox" name="allDay" ${allDay ? 'checked' : ''} ${disabled}> All day</label>
       <div class="fields">
         ${field('Start (local time)', 'start', allDay ? m.start : localInput(m.start), type, disabled)}
@@ -1874,7 +1893,8 @@ function detailContent(r) {
           <input name="end" type="${type}" value="${e(end)}" ${disabled}>
         </label>
         ${field('Location', 'location', m.location, 'text', disabled)}
-      </div>${m.rawIcs || m.raw ? '<button type="button" data-action="original-ics">Download original ICS</button>' : ''}${m.recurrence ? `<p class="recurrence-note">Recurring series: ${e(m.recurrence)}. No additional occurrences are generated locally. Export the original ICS for full fidelity.</p>` : ''}`;
+        ${writable ? field('Event time zone (times shown in your local zone)', 'calendarZone', m.calendarZone) : ''}
+      </div>${rules}${advanced}${m.rawIcs || m.raw ? '<button type="button" data-action="original-ics">Download original ICS</button>' : ''}${m.recurrence && !writable ? `<p class="recurrence-note">Recurring series: ${e(m.recurrence)}</p>` : ''}`;
     }
     if (state.app === 'mail')
         content += `<div class="fields">${field('To (one recipient)', 'to', m.to, 'email', 'required')}<label>Send using<select name="sendAccount" aria-label="Send using"><option value="">Choose an account</option>${m.sendAccount && !mailAccounts().some(a => a.id === m.sendAccount) ? `<option value="${e(m.sendAccount)}" selected>Unavailable account — choose another</option>` : ''}${mailAccounts().map(a => `<option value="${a.id}" ${m.sendAccount === a.id ? 'selected' : ''}>${e(a.label)}</option>`).join('')}</select></label></div>`;
@@ -1892,6 +1912,73 @@ function localInput(value) { if (!value)
     return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(value))
     return value + 'T00:00'; if (!/[Zz]|[+-]\d\d:\d\d$/.test(value))
     return value.slice(0, 16); const d = new Date(value); return new Date(+d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+function calendarRepeatControls(rules) {
+    const rule = rules.split('\n').find(line => /^RRULE:/i.test(line))?.slice(6) || '';
+    const parts = new URLSearchParams(rule.replaceAll(';', '&'));
+    const frequency = parts.get('FREQ') || '';
+    const frequencies = [['', 'Does not repeat'], ['DAILY', 'Daily'], ['WEEKLY', 'Weekly'], ['MONTHLY', 'Monthly'], ['YEARLY', 'Yearly']];
+    if ([...parts.keys()].some(key => !['FREQ', 'INTERVAL', 'BYDAY', 'COUNT', 'UNTIL'].includes(key)) || !frequencies.some(([value]) => value === frequency)
+        || parts.has('BYDAY') && frequency !== 'WEEKLY')
+        return '<p class="muted">This series uses an advanced repeat pattern. Edit its recurrence rules below.</p>';
+    const days = parts.get('BYDAY')?.split(',') || [];
+    const until = parts.get('UNTIL') || '';
+    return `<div class="fields">
+    <label>Repeat<select data-repeat-frequency>${frequencies.map(([value, label]) => `<option value="${value}" ${frequency === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <label>Interval<input data-repeat-interval type="number" min="1" value="${e(parts.get('INTERVAL') || '1')}"></label>
+    <label>Number of occurrences<input data-repeat-count type="number" min="1" value="${e(parts.get('COUNT') || '')}"></label>
+    <label>Or repeat through<input data-repeat-until type="date" value="${e(until.replace(/^(\d{4})(\d{2})(\d{2}).*$/, '$1-$2-$3'))}"></label>
+  </div><fieldset><legend>Repeat days for weekly events</legend><div class="fields">${[['MO', 'Mon'], ['TU', 'Tue'], ['WE', 'Wed'], ['TH', 'Thu'], ['FR', 'Fri'], ['SA', 'Sat'], ['SU', 'Sun']].map(([value, label]) => `<label class="check-label"><input type="checkbox" data-repeat-day value="${value}" ${days.includes(value) ? 'checked' : ''}> ${label}</label>`).join('')}</div></fieldset>
+  <button type="button" data-apply-repeat>Apply repeat pattern</button>`;
+}
+function applyCalendarRepeat(form) {
+    const read = (selector) => form.querySelector(selector);
+    const frequency = read('[data-repeat-frequency]').value;
+    const interval = read('[data-repeat-interval]'), count = read('[data-repeat-count]'), until = read('[data-repeat-until]').value;
+    if (!interval.reportValidity() || !count.reportValidity())
+        return;
+    if (count.value && until) {
+        notice('Choose a repeat count or an end date.', true);
+        return;
+    }
+    const days = Array.from(form.querySelectorAll('[data-repeat-day]:checked'), day => day.value);
+    const field = form.elements.namedItem('calendarRules');
+    const lines = field.value.split('\n').filter(line => line && !/^RRULE:/i.test(line));
+    if (frequency) {
+        const parts = ['FREQ=' + frequency];
+        if (Number(interval.value) > 1)
+            parts.push('INTERVAL=' + interval.value);
+        if (frequency === 'WEEKLY' && days.length)
+            parts.push('BYDAY=' + days.join(','));
+        if (count.value)
+            parts.push('COUNT=' + count.value);
+        if (until) {
+            const allDay = form.elements.namedItem('allDay').checked;
+            const zone = form.elements.namedItem('calendarZone').value;
+            const date = until.replaceAll('-', '');
+            if (!allDay && !zone && state.current?.meta.start?.length === 19)
+                parts.push('UNTIL=' + date + 'T235959');
+            else if (allDay)
+                parts.push('UNTIL=' + date);
+            else {
+                try {
+                    const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: zone || 'UTC', dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23' });
+                    const wall = Date.parse(until + 'T23:59:59Z');
+                    let instant = wall;
+                    for (let pass = 0; pass < 2; pass++)
+                        instant += wall - Date.parse(formatter.format(instant).replace(' ', 'T') + 'Z');
+                    parts.push('UNTIL=' + new Date(instant).toISOString().replace(/[-:]|\.\d{3}/g, ''));
+                }
+                catch {
+                    notice('For this time zone, enter UNTIL as a UTC date and time in the recurrence rules.', true);
+                    return;
+                }
+            }
+        }
+        lines.unshift('RRULE:' + parts.join(';'));
+    }
+    field.value = lines.join('\n');
+    markDirty();
+}
 function calendarEndLabel(allDay) { return allDay ? 'End (last day)' : 'End (local time)'; }
 function calendarEndIsInvalid(start, end) {
     if (!start.value || !end.value)
@@ -1928,7 +2015,7 @@ function bindCalendarDates(form) {
     };
 }
 function validateCalendarEnd() {
-    if (state.current?.kind !== 'calendar' || state.current.meta.remote)
+    if (state.current?.kind !== 'calendar' || state.current.meta.remote && !providerCalendar(state.current))
         return true;
     const end = document.querySelector('#record-form [name="end"]');
     if (!end)
@@ -1949,6 +2036,109 @@ function validateCalendarEnd() {
         end.removeAttribute('aria-describedby');
     }
     return !invalid;
+}
+function providerCalendarChanges() {
+    const form = document.querySelector('#record-form');
+    const changes = {};
+    if (!form)
+        return changes;
+    const allDay = form.elements.namedItem('allDay');
+    for (const key of ['title', 'body', 'location', 'calendarZone', 'calendarRules', 'calendarExtra', 'start', 'end']) {
+        const field = form.elements.namedItem(key);
+        const changedType = (key === 'start' || key === 'end') && allDay.checked !== allDay.defaultChecked;
+        if (!field || (!changedType && field.value === field.defaultValue))
+            continue;
+        if (key === 'start' || key === 'end') {
+            if (!field.value)
+                changes[key] = '';
+            else if (allDay.checked)
+                changes[key] = key === 'end' ? dayKey(addDays(calendarDate(field.value), 1)) : field.value;
+            else
+                changes[key] = new Date(field.value).toISOString();
+        }
+        else
+            changes[key] = field.value;
+    }
+    return changes;
+}
+async function openCalendarScope(series) {
+    const current = state.current;
+    if (!current || !providerCalendar(current))
+        return;
+    await leaveEditor();
+    if (state.current !== current)
+        return;
+    const original = state.rows.find(row => row.id === current.id);
+    if (!original)
+        return;
+    if (series) {
+        const result = await api('calendar-series', { id: original.id, revision: original.revision, scope: 'series' });
+        if (state.current !== current || state.dirty)
+            return;
+        calendarSeriesEditor = result.record;
+        state.current = calendarSeriesEditor;
+    }
+    else {
+        calendarSeriesEditor = undefined;
+        state.current = original;
+    }
+    calendarSaveFailure = undefined;
+    renderDetail();
+    document.querySelector('#record-form [name="title"]')?.focus();
+}
+async function saveProviderCalendar(record) {
+    if (!validateCalendarEnd())
+        throw new DraftCancelled();
+    const changes = providerCalendarChanges();
+    if (!Object.keys(changes).length)
+        return;
+    const series = calendarSeriesEditor === record;
+    const form = document.querySelector('#record-form');
+    const title = form.elements.namedItem('title');
+    if (!title.reportValidity())
+        throw new DraftCancelled();
+    const confirm = record.meta.calendarGuests || /^ATTENDEE[;:]/mi.test(changes.calendarExtra || '');
+    if (confirm) {
+        const accepted = await new Promise(resolve => {
+            confirmation('Save event with guests', 'Saving may send updates to event guests.', () => resolve(true), 'Save event');
+            dialog.addEventListener('close', () => resolve(false), { once: true });
+        });
+        if (!accepted || state.current !== record)
+            throw new DraftCancelled();
+    }
+    form.inert = true;
+    calendarSaveFailure = undefined;
+    let saved = false;
+    state.savePromise = (async () => {
+        try {
+            const result = await api('calendar-save', { id: record.id, revision: record.revision, scope: series ? 'series' : 'occurrence', version: record.meta.calendarEtag, changes, confirmed: !!confirm, browserZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+            saved = true;
+            state.dirty = false;
+            if (result.warning)
+                notice(result.warning, true);
+        }
+        catch (cause) {
+            calendarSaveFailure = { id: record.id, message: asError(cause).message };
+            throw new DraftCancelled();
+        }
+        finally {
+            state.savePromise = null;
+            form.inert = false;
+            updateSaveButton();
+        }
+    })();
+    updateSaveButton();
+    await state.savePromise;
+    if (saved && state.current === record) {
+        calendarSeriesEditor = undefined;
+        try {
+            await load(record.id, { selectFirst: false, preserveSelection: true });
+        }
+        catch {
+            renderDetail();
+            notice('The provider saved the event. Use Sync now to refresh the Office copy.', true);
+        }
+    }
 }
 function workbook(r) {
     r.meta.workbook ??= { sheets: [{ name: 'Sheet 1', cells: {} }] };
@@ -2007,9 +2197,21 @@ function updateSaveButton() {
     const valid = validateCalendarEnd();
     button.disabled = !!state.savePromise || !state.dirty || !valid;
 }
-function markDirty() { collect(); state.dirty = true; updateSaveButton(); const s = document.querySelector('#save-status'); if (s)
-    s.textContent = isUnsavedDraft() ? 'Unsaved draft' : 'Unsaved changes'; clearTimeout(saveTimer); if (!isUnsavedDraft())
-    saveTimer = setTimeout(() => void attempt(() => commit()), 800); }
+function markDirty() {
+    const provider = providerCalendar(state.current);
+    if (provider)
+        calendarSaveFailure = undefined;
+    else
+        collect();
+    state.dirty = provider ? Object.keys(providerCalendarChanges()).length > 0 : true;
+    updateSaveButton();
+    const status = document.querySelector('#save-status');
+    if (status)
+        status.textContent = isUnsavedDraft() ? 'Unsaved draft' : state.dirty ? 'Unsaved changes' : 'Saved';
+    clearTimeout(saveTimer);
+    if (!provider && !isUnsavedDraft())
+        saveTimer = setTimeout(() => void attempt(() => commit()), 800);
+}
 async function completeTask() {
     if (state.app !== 'tasks' || !state.current || state.current.meta.remote)
         return;
@@ -2045,6 +2247,19 @@ function discardUnsavedDraft() {
 async function leaveEditor() {
     if (state.savePromise)
         await state.savePromise;
+    if (providerCalendar(state.current) && state.dirty) {
+        const discard = await new Promise(resolve => {
+            modal('Unsaved event changes', '<p>Discard your edits to this event?</p><div class="dialog-actions"><button data-close-editor>Keep editing</button><button class="danger" data-discard-event>Discard changes</button></div>');
+            dialog.addEventListener('close', () => resolve(false), { once: true });
+            dialog.querySelector('[data-close-editor]').onclick = () => dialog.close();
+            dialog.querySelector('[data-discard-event]').onclick = () => { resolve(true); dialog.close(); };
+        });
+        if (!discard)
+            throw new DraftCancelled();
+        state.dirty = false;
+        calendarSaveFailure = undefined;
+        renderDetail();
+    }
     if (isUnsavedDraft()) {
         collect();
         const choice = await new Promise(resolve => {
@@ -2069,6 +2284,11 @@ async function commit(explicit = false) {
         await state.savePromise;
     if (!state.dirty || !state.current)
         return;
+    if (providerCalendar(state.current)) {
+        if (!explicit)
+            throw new DraftCancelled();
+        return saveProviderCalendar(state.current);
+    }
     if (!validateCalendarEnd())
         throw new DraftCancelled();
     collect();
@@ -2477,7 +2697,7 @@ async function viewWikiPage() {
     focusContent();
 }
 function enterEdit(preferTitle = false) {
-    if (state.current?.meta.remote) {
+    if (state.current?.meta.remote && !providerCalendar(state.current)) {
         notice('This synced copy is read-only.');
         return;
     }
@@ -3048,7 +3268,7 @@ function help(button) {
     const pane = sidebar ? 'sidebar' : activePane();
     const record = state.current?.kind === app && (!mobile || mobileItemOpen) && !viewingPendingSend() ? state.current : null;
     const draft = app === 'mail' && record?.meta.folder === 'Drafts';
-    const unsaved = !!record && isUnsavedDraft(), readOnly = !!record && (!!record.meta.remote || app === 'mail' && !draft);
+    const unsaved = !!record && isUnsavedDraft(), readOnly = !!record && (!!record.meta.remote && !providerCalendar(record) || app === 'mail' && !draft);
     let heading, guidance;
     if (app === 'settings') {
         heading = 'Settings · ' + settingsPages.find(([id]) => id === settingsPage)[1];
@@ -3083,7 +3303,7 @@ function help(button) {
     }
     const item = record ? {
         draft, unsaved, readOnly, complete: !!record.meta.done,
-        deletable: app === 'mail' ? !protectedMail(record) : !readOnly,
+        deletable: app === 'mail' ? !protectedMail(record) : !readOnly && !record.meta.remote,
         move: app === 'mail' && canQuickMoveMail(state.selected.size ? state.rows.filter(row => state.selected.has(row.id)) : [record]),
         reply: app === 'mail' && !!record.meta.from,
     } : undefined;
@@ -3861,7 +4081,7 @@ function renderSettings(entryVersion) {
       <section class="card" id="mail-rules-panel"><h2>Mail Rules</h2><p>Loading rules…</p></section>
     </section>
     <section class="settings-grid" id="settings-accounts" data-settings-page="accounts"${settingsPage === 'accounts' ? '' : ' hidden'}>
-      <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small data-account-status="${e(a.id)}">${settingsAccountStatus(a)}</small></div><div class="actions"><button data-edit-account="${e(a.id)}" aria-label="Edit account ${e(a.label)}">Edit</button>${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>` : ''}<button class="danger quiet mobile-icon-button" data-remove-account="${a.id}" aria-label="Remove account ${e(a.label)}">${mobileActionLabel('close', 'Remove')}</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account" class="mobile-icon-button" aria-label="Add account">${mobileActionLabel('add', '+ Add account')}</button></section>
+      <section class="card"><h2>Connected accounts</h2><div>${state.accounts.map(a => `<div class="account"><div><strong>${e(a.label)} <span class="badge">${e(a.type)}</span></strong><small data-account-status="${e(a.id)}">${settingsAccountStatus(a)}</small></div><div class="actions"><button data-edit-account="${e(a.id)}" aria-label="Edit account ${e(a.label)}">Edit</button>${['imap', 'google'].includes(a.type) ? `<button data-repair-account="${a.id}">Repair / resync</button>` : ''}${a.type === 'google' ? `<button data-google="${a.id}">Authorize</button>${a.googleCalendarEnabled === false ? `<button data-google="${a.id}" data-enable-calendar>Enable Calendar</button>` : ''}` : ''}<button class="danger quiet mobile-icon-button" data-remove-account="${a.id}" aria-label="Remove account ${e(a.label)}">${mobileActionLabel('close', 'Remove')}</button></div></div>`).join('') || '<p>No accounts connected. Your local apps work without a provider.</p>'}</div><button id="add-account" class="mobile-icon-button" aria-label="Add account">${mobileActionLabel('add', '+ Add account')}</button></section>
       <section class="card" id="google-integration"><h2>Google integration</h2><p>Loading…</p></section>
       <section class="card"><details><summary>Sync and connection details</summary><p>Office checks accounts every two minutes while the app is visible and you’ve used it in the last two minutes. You can also choose Sync now. Inbox, Archive, Trash and Junk: headers download in resumable batches of 100, including older history. Message bodies download when opened, or during sync when offline downloads are enabled. Folder membership is reconciled against the server. Agenda: previous week through next 90 days, up to 100 events. Previously downloaded mail remains available offline.</p><p>IMAP uses TLS port 993; SMTP uses TLS port 465 with the same credentials. Office looks for CalDAV calendars on non-Google IMAP accounts. Edit the account to retry or enter a calendar URL. Public hostnames only. For Gmail email without Google integration setup, choose Gmail — app password in Add account. For Google sign-in and optional Calendar access, use the Google integration settings.</p></details></section>
     </section>
@@ -4003,7 +4223,7 @@ function renderSettings(entryVersion) {
     document.querySelectorAll('[data-edit-account]').forEach(b => b.onclick = () => void attempt(() => accountDialog(b.dataset.editAccount)));
     document.querySelector('#keep-recovery').onchange = event => void attempt(async () => { state.prefs = { ...state.prefs, keepRecoveryCopies: event.target.checked }; await api('preferences', { preferences: state.prefs }); notice('Recovery preference saved.'); });
     document.querySelectorAll('[data-repair-account]').forEach(b => b.onclick = () => void repairMail(b.dataset.repairAccount, b));
-    document.querySelectorAll('[data-google]').forEach(b => b.onclick = () => void attempt(async () => { const r = await api('google-connect', { id: b.dataset.google }); location.href = r.url; }));
+    document.querySelectorAll('[data-google]').forEach(b => b.onclick = () => void attempt(async () => { const r = await api('google-connect', { id: b.dataset.google, ...(b.hasAttribute('data-enable-calendar') ? { calendar: true } : {}) }); location.href = r.url; }));
     document.querySelectorAll('[data-remove-account]').forEach(b => b.onclick = () => confirmation('Remove account', 'Remove the saved credentials and downloaded cache from this workspace? The provider account is unaffected.', async () => { await api('account-delete', { id: b.dataset.removeAccount }); state.accounts = (await api('accounts')).accounts; renderSettings(); }));
     if (focusedCategory)
         focusSettingsCategory(focusedCategory);

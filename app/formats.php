@@ -107,7 +107,7 @@ function parse_eml(string $raw): array {
     return json_decode(json_encode($parsed,JSON_INVALID_UTF8_SUBSTITUTE|JSON_THROW_ON_ERROR),true,64,JSON_THROW_ON_ERROR);
 }
 require_once __DIR__.'/ical-timezone.php';
-function ics_unescape(string $value): string { return str_replace(['\\n','\\N','\\,','\\;','\\\\'],["\n","\n",',',';','\\'],$value); }
+function ics_unescape(string $value): string { return preg_replace_callback('/\\\\([nN,;\\\\])/',static fn($part)=>strtolower($part[1])==='n'?"\n":$part[1],$value); }
 function ics_date(string $value,?string $zone=null,array $zones=[]): string {
     try {
         if (preg_match('/^\d{8}$/D',$value)) return substr($value,0,4).'-'.substr($value,4,2).'-'.substr($value,6,2);
@@ -127,17 +127,34 @@ function parse_ics(string $raw): array {
     $original=$raw; $raw=preg_replace('/\r?\n[ \t]/','',$raw); $events=[]; $event=null; $nested=0;
     $zones=ics_timezones($raw);
     foreach (preg_split('/\r?\n/',$raw) as $line) {
-        if ($line==='BEGIN:VEVENT') { $event=['title'=>'Untitled event','body'=>'','meta'=>[]]; $nested=0; continue; }
-        if ($line==='END:VEVENT' && $event!==null) { $event['meta']['rawIcs']=$original; $events[]=$event; $event=null; continue; }
+        $component=strtoupper($line);
+        if ($component==='BEGIN:VEVENT') { $event=['title'=>'Untitled event','body'=>'','meta'=>[]]; $nested=0; $duration=''; $startValue=''; $startZone=null; continue; }
+        if ($component==='END:VEVENT' && $event!==null) {
+            if (empty($event['meta']['end']) && !empty($event['meta']['start']) && $duration!=='') {
+                try {
+                    $start=$event['meta']['start']; $dateOnly=strlen($start)===10;
+                    $interval=new DateInterval(preg_match('/^P(\d+)W$/D',$duration,$weeks)?'P'.((int)$weeks[1]*7).'D':$duration);
+                    if ($startZone && !str_ends_with($startValue,'Z')) {
+                        $wall=DateTimeImmutable::createFromFormat('!Ymd\THis',$startValue,new DateTimeZone('UTC'));
+                        if ($wall) $event['meta']['end']=ics_date($wall->add($interval)->format('Ymd\THis'),$startZone,$zones);
+                    } else {
+                        $floating=strlen($start)===19;
+                        $event['meta']['end']=(new DateTimeImmutable($start,new DateTimeZone('UTC')))->add($interval)->format($dateOnly?'Y-m-d':($floating?'Y-m-d\TH:i:s':'c'));
+                    }
+                } catch (Exception) { /* A malformed duration is ignored. */ }
+            }
+            $event['meta']['rawIcs']=$original; $events[]=$event; $event=null; continue;
+        }
         if ($event===null) continue;
-        if (str_starts_with($line,'BEGIN:')) { $nested++; continue; } if (str_starts_with($line,'END:')) { $nested--; continue; } if ($nested>0) continue;
+        if (str_starts_with($component,'BEGIN:')) { $nested++; continue; } if (str_starts_with($component,'END:')) { $nested--; continue; } if ($nested>0) continue;
         if (!preg_match('/^((?:[^":]++|"[^"]*")*+):(.*)$/D',$line,$property)) continue;
         $key=strtoupper(explode(';',$property[1])[0]); $value=$property[2]; $zone=null;
         if (preg_match('/;TZID=(?:"([^"]+)"|([^;]+))/i',$property[1],$m)) $zone=$m[1]!==''?$m[1]:$m[2];
         if ($key==='SUMMARY') $event['title']=ics_unescape($value);
         if ($key==='DESCRIPTION') $event['body']=ics_unescape($value);
-        if ($key==='DTSTART') $event['meta']['start']=ics_date($value,$zone,$zones);
+        if ($key==='DTSTART') { $startValue=$value; $startZone=$zone; $event['meta']['start']=ics_date($value,$zone,$zones); }
         if ($key==='DTEND') $event['meta']['end']=ics_date($value,$zone,$zones);
+        if ($key==='DURATION') $duration=$value;
         if ($key==='LOCATION') $event['meta']['location']=ics_unescape($value);
         if ($key==='UID') $event['meta']['uid']=$value;
         if ($key==='RRULE') $event['meta']['recurrence']=$value;

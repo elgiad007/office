@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__.'/mail-sync.php';
 require_once __DIR__.'/activity.php';
 require_once __DIR__.'/caldav.php';
+require_once __DIR__.'/calendar-write.php';
 
 function public_host(string $host): string {
     if (!preg_match('/^[a-zA-Z0-9.-]{1,253}$/D',$host)) fail('Use a public DNS hostname.');
@@ -16,13 +17,18 @@ function web_request(string $url, string $method='GET', array $headers=[], ?stri
     $p=parse_url($url);
     if (!$p || ($p['scheme']??'')!=='https' || empty($p['host']) || isset($p['user']) || isset($p['pass']) || isset($p['fragment'])) fail('Use an HTTPS endpoint without embedded credentials.');
     $port=(int)($p['port']??443); if (!in_array($port,$dav?CALDAV_PORTS:[443,8443],true)) fail('Unsupported HTTPS port.');
-    $ip=public_host($p['host']); $ch=curl_init($url); $response='';
+    $ip=public_host($p['host']); $ch=curl_init($url); $response=''; $etag='';
     curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>false,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>min(5,$timeout),CURLOPT_TIMEOUT=>$timeout,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS,CURLOPT_PROXY=>'',CURLOPT_RESOLVE=>[$p['host'].':'.$port.':'.$ip],CURLOPT_WRITEFUNCTION=>static function($ch,$chunk) use (&$response,$limit) { if (strlen($response)+strlen($chunk)>$limit) return 0; $response.=$chunk; return strlen($chunk); }]);
+    if ($returnStatus) curl_setopt($ch,CURLOPT_HEADERFUNCTION,static function($ch,string $line) use (&$etag): int {
+        if (str_starts_with($line,'HTTP/')) $etag='';
+        if (strncasecmp($line,'ETag:',5)===0) $etag=trim(substr($line,5));
+        return strlen($line);
+    });
     if ($body!==null) curl_setopt($ch,CURLOPT_POSTFIELDS,$body);
     $ok=curl_exec($ch); $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
     if ($ok===false) fail('Provider connection failed or exceeded its response limit.');
     if (!$returnStatus && ($status<200 || $status>=300)) fail('Provider returned HTTP '.$status.'. Check the account permissions and endpoint.');
-    return ['status'=>$status,'body'=>$response,'location'=>$returnStatus?(curl_getinfo($ch,CURLINFO_REDIRECT_URL)?:''):''];
+    return ['status'=>$status,'body'=>$response,'location'=>$returnStatus?(curl_getinfo($ch,CURLINFO_REDIRECT_URL)?:''):'','etag'=>$etag];
 }
 function google_json(string $url,string $token,string $method='GET',?array $body=null): array {
     $r=web_request($url,$method,['Authorization: Bearer '.$token,'Content-Type: application/json'],$body===null?null:json_encode($body,JSON_THROW_ON_ERROR));
@@ -56,29 +62,41 @@ function sync_google(array &$a,bool $repair=false): int {
     $token=google_token($a); $base='https://gmail.googleapis.com/gmail/v1/users/me/messages';
     $count=sync_google_mail($a,static fn(string $path):array=>google_json($base.$path,$token),$repair);
     if (($a['config']['calendar'] ?? true) === false) return $count;
+    return $count+sync_google_calendar($a,$token);
+}
+function sync_google_calendar(array $a,string $token): int {
     $start=gmdate('Y-m-d\T00:00:00\Z',time()-7*86400); $end=gmdate('Y-m-d\T00:00:00\Z',time()+90*86400);
     $events=google_json('https://www.googleapis.com/calendar/v3/calendars/primary/events?'.http_build_query(['timeMin'=>$start,'timeMax'=>$end,'singleEvents'=>'true','orderBy'=>'startTime','maxResults'=>100]),$token);
+    $rows=[];
     foreach ($events['items']??[] as $e) {
         if (($e['status']??'')==='cancelled') continue;
-        cache_remote($a,'google-event:'.$e['id'],'calendar',$e['summary']??'(Untitled)',$e['description']??'',['start'=>$e['start']['dateTime']??$e['start']['date']??'','end'=>$e['end']['dateTime']??$e['end']['date']??'','location'=>$e['location']??'','providerId'=>$e['id']]); $count++;
+        $rows['google-event:'.$e['id']]=google_calendar_fields($e,($events['accessRole']??'')==='owner'||($events['accessRole']??'')==='writer',$a,$events['timeZone']??'');
     }
-    return $count;
+    return publish_calendar_rows($a,null,$rows,empty($events['nextPageToken']),$start,$end);
 }
 function sync_caldav(array $a,?array $calendar=null,int $timeout=30): int {
     if (!class_exists('DOMDocument')) fail('The DOM extension is required for CalDAV.');
+    $deadline=microtime(true)+$timeout;
     $start=gmdate('Ymd\T000000\Z',time()-7*86400); $end=gmdate('Ymd\T000000\Z',time()+90*86400);
-    $xml='<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="'.$start.'" end="'.$end.'"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>';
+    $xml='<?xml version="1.0"?><c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><d:current-user-privilege-set/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="'.$start.'" end="'.$end.'"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>';
     $auth=base64_encode($a['credentials']['username'].':'.$a['credentials']['password']);
     $r=web_request($calendar['url']??$a['config']['url'],'REPORT',['Depth: 1','Content-Type: application/xml; charset=utf-8','Authorization: Basic '.$auth],$xml,8388608,true,$timeout);
-    $xp=caldav_xpath($r['body']); $count=0;
-    $meta=$calendar===null?[]:['calendarSource'=>$calendar['id']];
-    $prefix=$calendar===null?'':$calendar['id'].':';
-    foreach ($xp->query('//d:response') as $node) {
-        $ics=$xp->evaluate('string(d:propstat[contains(d:status," 200 ")]/d:prop/c:calendar-data)',$node); if (!$ics) continue;
-        $href=$xp->evaluate('string(d:href)',$node);
-        foreach (parse_ics($ics) as $index=>$e) { cache_remote($a,$prefix.$href.'#'.$index,'calendar',$e['title'],$e['body'],$e['meta']+$meta+['raw'=>$ics]); $count++; if ($count>=100) break 2; }
+    $collection=$calendar['url']??$a['config']['url'];
+    $resources=caldav_report_events($r['body']);
+    $expanded=[];
+    foreach ($resources as $resource) {
+        if (!preg_match('/^(?:RRULE|RDATE|RECURRENCE-ID)[;:]/mi',$resource['ics'])) continue;
+        $remaining=(int)ceil($deadline-microtime(true));
+        if ($remaining<=0) break;
+        $expand=str_replace('<c:calendar-data/>','<c:calendar-data><c:expand start="'.$start.'" end="'.$end.'"/></c:calendar-data>',$xml);
+        try {
+            $response=web_request($collection,'REPORT',['Depth: 1','Content-Type: application/xml; charset=utf-8','Authorization: Basic '.$auth],$expand,8388608,true,min(6,$remaining));
+            $expanded=caldav_report_events($response['body']);
+        } catch (HttpError) { /* The original resource remains available for editing. */ }
+        break;
     }
-    return $count;
+    $rows=caldav_calendar_rows($resources,$expanded,$collection,$calendar['id']??null);
+    return publish_calendar_rows($a,$calendar['id']??null,array_slice($rows,0,100,true),count($rows)<=100,$start,$end);
 }
 function socket_connection(string $host,int $port): mixed {
     if (!in_array($port,[993,465],true)) fail('Only implicit TLS IMAP (993) and SMTP (465) are supported initially.');

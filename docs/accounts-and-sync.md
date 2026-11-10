@@ -11,9 +11,9 @@ You can check a connection before saving where offered. Checks verify access wit
 | Type | What to enter |
 | --- | --- |
 | **Gmail — app password** | Enter your full Gmail address and a Google-generated app password. Office fills the mail server settings. This connects email. |
-| **Gmail with Google sign-in** | Configure Google integration first, then connect your Google account. Select Calendar access if you want a read-only copy of the primary calendar. |
+| **Gmail with Google sign-in** | Configure Google integration first, then connect your Google account. Select Calendar access to sync and edit events in the primary calendar. Use **Authorize** to upgrade an existing read-only grant. |
 | **IMAP/SMTP** | Enter the provider's public hostnames and credentials. Office uses TLS IMAP on port 993 and TLS SMTP on port 465 with the same login. |
-| **CalDAV** | Enter the final HTTPS URL of the calendar collection and its credentials. Use port 443, 8443, or 2080. Events sync as read-only copies. |
+| **CalDAV** | Enter the final HTTPS URL of the calendar collection and its credentials. Use port 443, 8443, or 2080. You can edit events when the provider grants write access. |
 
 Connections require public hostnames and valid TLS certificates. For Gmail app-password availability and help creating one, see [Google Account Help](https://support.google.com/accounts/answer/185833).
 

@@ -14,11 +14,19 @@ Choose **New event**, select a date number, or select a time slot in Week or Day
 
 Timed events use your browser's local time. For an all-day event, choose the first and last dates you want it to appear. Use May 4 for both dates for a one-day event, or May 4 through May 6 for a three-day event.
 
+## Edit a connected event
+
+Open an event in a writable CalDAV calendar or your primary Google Calendar, change its fields, and choose **Save**. Office writes the changes to the provider. If someone changes the event while you're editing, keep a copy of your changes and sync before reopening it. To upgrade an existing Google connection, choose **Authorize** under **Settings → Accounts**, then sync. If you originally connected Gmail only, choose **Enable Calendar**.
+
+For a repeating event, the editor initially applies changes to the selected occurrence. Choose **Edit entire series** to change the parent event or its recurrence. Under **Repeat and exceptions**, set a simple repeat pattern or edit the recurrence properties directly. Use `RDATE` to add dates and `EXDATE` to skip dates. Saving an event with guests may send updates through the provider.
+
+CalDAV's **CalDAV properties** section edits iCalendar fields such as availability (`TRANSP`), privacy (`CLASS`), status, categories, URLs, attendees, attachments, and reminders (`VALARM`). Each property occupies a separate line. Office shows provider-managed values separately and preserves additional properties and time-zone definitions when you edit the main fields.
+
 ## Import, export, and sync
 
 Use **Import** for an `.ics` file and **Export** to share events as ICS. When the original source was retained, **Download original ICS** in the event details preserves it, including recurrence information.
 
-Google Calendar and CalDAV events appear as read-only cached copies. Sync covers the previous week through the next 90 days, up to 100 events. Google supplies expanded instances. Office shows recurrence information for imported and CalDAV series without generating extra occurrences locally. Manage invitations, recurring series edits, and reminders in your calendar provider.
+Google and CalDAV sync cover the previous week through the next 90 days, up to 100 events per calendar. Office uses the provider's expanded instances for recurring events. If a CalDAV server cannot expand a series, Office displays its original event and saved exceptions. Imported ICS series retain their recurrence information.
 
 Calendars discovered from non-Google IMAP accounts appear as individual sources. To retry discovery or approve a separate calendar hostname, open **Settings → Accounts** and edit the mail account.
 

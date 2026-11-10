@@ -11,6 +11,16 @@ export interface ItemMeta {
   remote?: boolean;
   account?: string;
   calendarSource?: string;
+  calendarWritable?: boolean;
+  calendarSeries?: string;
+  calendarOccurrence?: string;
+  calendarEtag?: string;
+  calendarZone?: string;
+  calendarRules?: string;
+  calendarExtra?: string;
+  calendarManaged?: string;
+  calendarGuests?: boolean;
+  calendarAbsent?: boolean;
   folder?: string;
   serverFolder?: string;
   labelIds?: string[];
@@ -68,6 +78,7 @@ export interface MailFolder {
 export interface Account {
   id: string; type: 'imap' | 'google' | 'caldav'; label: string;
   gmailImap?: boolean;
+  googleCalendarEnabled?: boolean;
   calendar?: AccountCalendarStatus;
   folders?: MailFolder[]; last_sync?: string | null; error?: string | null;
 }
@@ -166,6 +177,7 @@ export interface ApiResponses {
   'account-find-calendars': AccountCalendarStatus;
   'account-delete': { ok: boolean };
   'google-connect': { url: string }; 'google-settings': GoogleSettings;
+  'calendar-series': {record: OfficeRecord}; 'calendar-save': {warning?: string};
   preferences: { ok: boolean };
   import: { count: number }; 'import-items': { count: number }; restore: { count: number; preferences?: Preferences };
 }

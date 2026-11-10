@@ -35,7 +35,7 @@ try {
             if (empty($tokens['access_token'])) fail('Google did not return an access token. Connect again.');
             $profile=google_json('https://gmail.googleapis.com/gmail/v1/users/me/profile',$tokens['access_token']);
             finish_google_connection($oauth,$tokens,$profile);
-            $_SESSION['google_notice']=['message'=>!empty($oauth['permanentDelete'])
+            $_SESSION['google_notice']=['message'=>!empty($oauth['requestedPermanentDelete'])
                 ?'Permanent Spam deletion authorized. Return to Mail and choose Empty Spam Folder to review and confirm deletion.'
                 :'Google account connected.','error'=>false];
         } catch (HttpError $e) { $_SESSION['google_notice']=['message'=>$e->getMessage(),'error'=>true]; }
@@ -164,7 +164,7 @@ try {
         session_write_close();
         if($kind==='mail' && ($_GET['view']??'')==='1')json_response(mail_list_page($_GET));
         if($kind==='calendar')repair_cached_caldav_dates();
-        $db=db();$q=$db->prepare('SELECT * FROM records WHERE kind=? ORDER BY updated DESC');$q->execute([$kind]);
+        $db=db();$q=$db->prepare('SELECT * FROM records WHERE kind=?'.($kind==='calendar'?" AND COALESCE(json_extract(meta,'$.calendarAbsent'),0)=0":'').' ORDER BY updated DESC');$q->execute([$kind]);
         if($kind==='mail' && ($_GET['summaries']??'')==='1'){
             $cached=[];$files=$db->query('SELECT record_id,part,name,type,size FROM mail_files ORDER BY rowid');
             foreach($files as $file){$id=$file['record_id'];unset($file['record_id']);$cached[$id][]=$file+['available'=>true];}
@@ -189,6 +189,10 @@ try {
         $record=with_account_mail_mutation($r['meta']['account'],fn()=>download_mail_content($r));
         if(($input['summary']??false)===true)$record=mail_list_record($record);
         json_response(['record'=>$record]);
+    }
+    if (in_array($route,['calendar-series','calendar-save'],true) && $method==='POST') {
+        session_write_close();
+        json_response(calendar_edit_request($input,$route==='calendar-save'));
     }
     if ($route==='save' && $method==='POST') {
         // Only connectors may create linked provider records.
@@ -278,6 +282,7 @@ try {
             if ($row['type']==='imap' && imap_is_gmail(['config'=>$config])) {
                 $row['gmailImap']=true;
             }
+            if ($row['type']==='google') $row['googleCalendarEnabled']=$config['calendar']??true;
             if (imap_calendar_eligible($row+['config'=>$config])) $row['calendar']=imap_calendar_status($row['id']);
             $row['folders']=setting('mail-folders:'.$row['id'],[]);
         }

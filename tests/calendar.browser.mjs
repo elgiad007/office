@@ -7,10 +7,18 @@ export async function testCalendar(page,url){
  let rows=Array.from({length:5},(_,i)=>({id:'cal-'+i,kind:'calendar',title:'Event '+i,body:'Notes',revision:1,meta:{start:day+'T09:00:00',end:day+'T10:00:00'}}));
  rows.push({id:'remote',kind:'calendar',title:'Remote event',body:'Read only',revision:1,meta:{start:day,end:day,remote:true,account:'caldav'}});
  rows.push({id:'past',kind:'calendar',title:'Past event',body:'Notes',revision:1,meta:{start:'2000-01-01',end:'2000-01-02',remote:true,account:'caldav'}});
- const saved=[];let nextSaveError='';let preferences={theme:'dark'};const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
+ const saved=[],providerSaves=[];let nextSaveError='';let preferences={theme:'dark'};const routes=u=>u.pathname.endsWith('/api.php')&&u.searchParams.get('r')!=='activity';
  await page.route(routes,async route=>{const action=new URL(route.request().url()).searchParams.get('r');if(action==='save'){
   if(nextSaveError){const error=nextSaveError;nextSaveError='';await route.fulfill({status:400,json:{error}});return;}
   const input=route.request().postDataJSON();saved.push(input);const record={...input,id:input.id||`created-${saved.length}`,revision:(input.revision||0)+1};rows=rows.filter(r=>r.id!==record.id).concat(record);await route.fulfill({json:{record}});return;
+ }if(action==='calendar-series'){
+  const row=rows.find(r=>r.id==='writable-event');
+  await route.fulfill({json:{record:{...row,title:'Series master',meta:{...row.meta,calendarOccurrence:'',calendarRules:'RRULE:FREQ=WEEKLY',calendarEtag:'"series"'}}}});return;
+ }if(action==='calendar-save'){
+  const input=route.request().postDataJSON();providerSaves.push(input);
+  if(nextSaveError){const error=nextSaveError;nextSaveError='';await route.fulfill({status:409,json:{error}});return;}
+  rows=rows.map(row=>row.id===input.id?{...row,body:input.changes.body??row.body,revision:row.revision+1}:row);
+  await route.fulfill({json:{}});return;
  }if(action==='preferences'){preferences=route.request().postDataJSON().preferences;await route.fulfill({json:{ok:true}});return;}
  const responses={sync:{count:0},connections:{items:[],links:[],more:false},status:{authenticated:true,csrf:'fixture',preferences},accounts:{accounts:[{id:'caldav',type:'caldav',label:'Work'}]},records:{records:rows}};assert.ok(action in responses,action);await route.fulfill({json:responses[action]});});
  try{
@@ -125,5 +133,29 @@ export async function testCalendar(page,url){
    await page.locator(`.calendar-mini [data-jump="${date}"]`).click();
    await assertDay(date,'day',0);
   }
+  rows.push({id:'writable-event',kind:'calendar',title:'Writable event',body:'Notes',revision:1,meta:{
+   start:day,end:dayKey(addDays(now,1)),remote:true,account:'caldav',calendarWritable:true,calendarSeries:'meeting.ics',
+   calendarOccurrence:day,calendarEtag:'"occurrence"',calendarExtra:'CLASS:PRIVATE',calendarGuests:true}});
+  await page.reload();await page.locator('[data-view=agenda]').click();await page.locator('[data-period=today]').click();
+  await page.locator('#items [data-id=writable-event]').click();
+  const notes=page.locator('#detail [name=body]');
+  await notes.fill('Provider notes');
+  await page.waitForTimeout(900);assert.equal(providerSaves.length,0,'Provider edits wait for explicit Save');
+  await save.click();await page.getByRole('dialog').getByRole('button',{name:'Save event',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
+  assert.deepEqual(providerSaves.at(-1).changes,{body:'Provider notes'});
+  assert.equal(providerSaves.at(-1).scope,'occurrence');assert.equal(providerSaves.at(-1).confirmed,true);
+  await page.getByRole('button',{name:'Edit entire series',exact:true}).click();
+  await page.getByText('You are editing the entire series.',{exact:true}).waitFor();
+  await page.getByText('Repeat and exceptions',{exact:true}).click();
+  await page.getByLabel('Number of occurrences',{exact:true}).fill('5');
+  await page.getByRole('button',{name:'Apply repeat pattern',exact:true}).click();
+  const recurrence=page.locator('#detail [name=calendarRules]');
+  assert.equal(await recurrence.inputValue(),'RRULE:FREQ=WEEKLY;COUNT=5');
+  const conflict='Event changed at the provider.';nextSaveError=conflict;
+  await save.click();await page.getByRole('dialog').getByRole('button',{name:'Save event',exact:true}).click();
+  await page.getByText(conflict,{exact:true}).waitFor();
+  assert.equal(providerSaves.at(-1).scope,'series');assert.equal(providerSaves.at(-1).version,'"series"');
+  assert.equal(await recurrence.inputValue(),'RRULE:FREQ=WEEKLY;COUNT=5');
  }finally{await page.unroute(routes);}
 }

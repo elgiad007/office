@@ -13,7 +13,7 @@ export async function renderGoogleSettings(container: HTMLElement, request: Requ
         <ol><li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> and create or select your project.</li>
         <li>Enable Gmail API, and Calendar API if you want calendars.</li>
         <li>Configure Google Auth platform branding and audience. For personal Gmail choose External; while in Testing, add your Google accounts as test users.</li>
-        <li>Add <code>https://www.googleapis.com/auth/gmail.modify</code> and, if needed, <code>https://www.googleapis.com/auth/calendar.readonly</code> under Data Access.</li>
+        <li>Add <code>https://www.googleapis.com/auth/gmail.modify</code> and, for Calendar editing, <code>https://www.googleapis.com/auth/calendar.events</code> under Data Access. Use Authorize on an existing Google account to grant editing access.</li>
         <li>Create a <strong>Web application</strong> OAuth client. Register the exact callback shown below. You can register both your hosted callback and your fixed local callback in the same client.</li></ol>
         <p>Testing grants normally expire after seven days. Personal-use exceptions and production requirements depend on Google’s policies. <a href="https://developers.google.com/identity/protocols/oauth2/web-server" target="_blank" rel="noopener noreferrer">Google authorization guide</a>.</p>
       </details>

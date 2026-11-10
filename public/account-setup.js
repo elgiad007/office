@@ -61,7 +61,7 @@ export function openAccountSetup({ dialog, request, onSaved, existing, onCalenda
                 + (provider === 'caldav' ? '' : input(provider === 'google' ? 'Gmail address' : 'Sender email', 'email', { type: 'email', readonly: provider !== 'imap' }));
         if (provider === 'google')
             return providerSelect() + input('Gmail address', 'email', { type: 'email' })
-                + '<label class="setup-checkbox"><input type="checkbox" name="calendar" ' + (draft().calendar ? 'checked' : '') + '> Include Google Calendar (read-only)</label><p>Sign in on Google’s page and approve access. Google integration must be configured once in Settings.</p>';
+                + '<label class="setup-checkbox"><input type="checkbox" name="calendar" ' + (draft().calendar ? 'checked' : '') + '> Include Google Calendar editing</label><p>Sign in on Google’s page and approve access. Google integration must be configured once in Settings.</p>';
         return providerSelect() + input('Account label', 'label', { help: 'A name to recognize this account, such as Personal Gmail.' })
             + (provider !== 'caldav' ? input('Sender email', 'email', { type: 'email' }) : '');
     }

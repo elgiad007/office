@@ -30,6 +30,9 @@ try{
  const event={kind:'calendar',title:'Range validation',body:'',meta:{start:'2026-11-20',end:'2026-11-09'}};
  assert.equal((await a.call('save',event,400)).error,'End must be after start.');
  const calendarEvent=(await a.call('save',{...event,meta:{start:'2026-11-20',end:'2026-11-21'}})).record;
+ await a.call('calendar-save',{id:calendarEvent.id},403,'bad-token');
+ assert.match((await a.call('calendar-save',{id:calendarEvent.id},403)).error,/read-only/);
+ assert.match((await a.call('calendar-series',{id:calendarEvent.id},403)).error,/read-only/);
  const sameInstant={start:'2026-11-21T00:00:00-05:00',end:'2026-11-21T05:00:00Z'};
  assert.equal((await a.call('save',{...calendarEvent,meta:sameInstant},400)).error,'End must be after start.');
  assert.equal((await a.call('records&kind=calendar')).records[0].revision,calendarEvent.revision);

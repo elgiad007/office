@@ -24,17 +24,19 @@ function save_google_settings(array $input): void {
 
 function start_google_connection(array $input): string {
     $permanentDelete=false;
+    $requestedPermanentDelete=false;
     $imapSpam=false;
     if (!empty($input['id'])) {
         $a = account((string)$input['id']);
-        $permanentDelete=($input['permanentDelete']??false)===true;
-        $imapSpam=$permanentDelete && $a['type']==='imap' && imap_is_gmail($a);
+        $requestedPermanentDelete=($input['permanentDelete']??false)===true;
+        $imapSpam=$requestedPermanentDelete && $a['type']==='imap' && imap_is_gmail($a);
         if (!$imapSpam && $a['type']!=='google') fail('Not a Google account.');
+        $permanentDelete=$requestedPermanentDelete || google_can_delete_mail($a);
         $credentials=$imapSpam?google_settings():$a['credentials'];
         if (!$credentials) fail('Configure Google integration in Office Settings, then try Empty Spam Folder again.');
         $redirect=$imapSpam?$credentials['redirect']:$a['config']['redirect'];
         $email=$imapSpam?gmail_imap_login($a):$a['config']['email'];
-        $calendar=!$imapSpam && ($a['config']['calendar']??true);
+        $calendar=!$imapSpam && (($input['calendar']??false)===true || ($a['config']['calendar']??true));
         $label=$a['label'];
     } else {
         $credentials = google_settings();
@@ -48,12 +50,12 @@ function start_google_connection(array $input): string {
     }
     $state = bin2hex(random_bytes(24));
     $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
-    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,'imapSpam'=>$imapSpam,
+    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,'requestedPermanentDelete'=>$requestedPermanentDelete,'imapSpam'=>$imapSpam,
         'credentials'=>encrypt_secret(['client_id'=>$credentials['client_id'],'client_secret'=>$credentials['client_secret']]),
         'state'=>$state,'verifier'=>$verifier,'time'=>time()];
     return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query([
         'client_id'=>$credentials['client_id'],'redirect_uri'=>$redirect,'response_type'=>'code',
-        'scope'=>($permanentDelete?'https://mail.google.com/':'https://www.googleapis.com/auth/gmail.modify').($calendar ? ' https://www.googleapis.com/auth/calendar.readonly' : ''),
+        'scope'=>($permanentDelete?'https://mail.google.com/':'https://www.googleapis.com/auth/gmail.modify').($calendar ? ' '.GOOGLE_CALENDAR_WRITE_SCOPE : ''),
         'login_hint'=>$email,'access_type'=>'offline','prompt'=>'consent','state'=>$state,
         'code_challenge'=>rtrim(strtr(base64_encode(hash('sha256',$verifier,true)), '+/', '-_'), '='),'code_challenge_method'=>'S256']);
 }
@@ -100,7 +102,7 @@ function finish_google_connection(array $oauth, array $tokens, array $profile): 
     $permanentDelete=($oauth['permanentDelete']??false)===true;
     $mailScope=$permanentDelete?'https://mail.google.com/':'https://www.googleapis.com/auth/gmail.modify';
     if (!in_array($mailScope, $scopes, true)
-        || ($oauth['calendar'] && !in_array('https://www.googleapis.com/auth/calendar.readonly', $scopes, true))) fail('Required Google permissions were not approved. Connect again.');
+        || ($oauth['calendar'] && !in_array(GOOGLE_CALENDAR_WRITE_SCOPE, $scopes, true))) fail('Required Google permissions were not approved. Connect again.');
     $credentials = array_merge($tokens, decrypt_secret($oauth['credentials']), ['expires'=>time()+(int)($tokens['expires_in'] ?? 3600)]);
     if (!empty($oauth['imapSpam'])) {
         if (!$permanentDelete) fail('Google did not grant permanent deletion.');
