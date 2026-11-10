@@ -4,6 +4,16 @@
 
 ## Build release ZIPs
 
+Release builds require Node.js and the frontend development dependencies (`pnpm install`). The scripts check that the generated frontend files are current. Run `pnpm build` if they need to be regenerated.
+
+If Node.js is outside `PATH`, add its full path to `.runtime/.env`. Use a plain path, including any spaces.
+
+```dotenv
+OFFICE_NODE_EXE=C:\Program Files\nodejs\node.exe
+```
+
+**Build Office Release.bat** and both PowerShell scripts read this setting. For a one-time override, pass `-NodeExecutable 'C:\path\to\node.exe'` to either PowerShell script or the batch file. The explicit path takes precedence over the saved setting and `PATH`.
+
 On Windows PowerShell, create a hosting ZIP with:
 
 ```powershell

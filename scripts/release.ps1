@@ -5,11 +5,13 @@ param(
     [string]$ApacheRuntimeArchive,
     [string]$ApacheExpectedSha256,
     [string]$ReleasePublicKeyFile,
-    [string]$SigningKeyFile
+    [string]$SigningKeyFile,
+    [string]$NodeExecutable
 )
 
 $ErrorActionPreference = 'Stop'
 $officeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$nodePath = & (Join-Path $PSScriptRoot 'resolve-node.ps1') -NodeExecutable $NodeExecutable
 if (!$WindowsRuntimeArchive) {
     $WindowsRuntimeArchive = Join-Path $officeRoot '.runtime/php.zip'
     if (!$PSBoundParameters.ContainsKey('ExpectedSha256')) {
@@ -79,10 +81,11 @@ try {
         ApacheExpectedSha256 = $ApacheExpectedSha256
         DestinationPath = Join-Path $staging $windowsZip
         ReleasePublicKeyFile = $ReleasePublicKeyFile
+        NodeExecutable = $nodePath
     }
 
     & $packager @windowsOptions
-    & $packager -DestinationPath (Join-Path $staging $hostingZip) -ReleasePublicKeyFile $ReleasePublicKeyFile
+    & $packager -DestinationPath (Join-Path $staging $hostingZip) -ReleasePublicKeyFile $ReleasePublicKeyFile -NodeExecutable $nodePath
 
     $assets=@{}
     $checksums = foreach ($platform in @('hosting','windows')) {
