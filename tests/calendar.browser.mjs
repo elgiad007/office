@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {addDays,dayKey} from '../public/calendar.js';
 export async function testCalendar(page,url){
  const now=new Date(),day=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
  let rows=Array.from({length:5},(_,i)=>({id:'cal-'+i,kind:'calendar',title:'Event '+i,body:'Notes',revision:1,meta:{start:day+'T09:00:00',end:day+'T10:00:00'}}));
@@ -75,6 +76,37 @@ export async function testCalendar(page,url){
    await page.locator('[data-app=tasks]').click();await page.waitForFunction(()=>document.querySelector('#crumb')?.textContent==='Tasks'&&!document.querySelector('#main[data-app-entry]'));
    await page.locator('[data-app=calendar]').click();await page.locator(`.calendar-mini .primary[data-jump="${browsedDate}"]`).waitFor();
    assert.equal(await toggle.getAttribute('aria-pressed'),'true');assert.equal(await closeEvent.count(),0);
+  }
+  const weekStart=addDays(now,14-now.getDay());
+  const [first,middle,last,after]=Array.from({length:4},(_,i)=>dayKey(addDays(weekStart,i)));
+  const allDayIds=Array.from({length:4},(_,i)=>`multi-all-day-${i}`);
+  const addEvent=(id,start,end)=>rows.push({id,kind:'calendar',title:id,body:'',revision:1,meta:{start,end}});
+  for(const id of allDayIds)addEvent(id,first,after);
+  addEvent('multi-timed',first+'T18:00',last+'T01:00');
+  addEvent('single-busy',middle+'T08:00',middle+'T09:00');
+  await page.reload();await page.locator('[data-view=week]').click();await page.locator('[data-period=today]').click();
+  await page.locator('[data-period=next]').click();await page.locator('[data-period=next]').click();
+  const assertDay=async (date,view,index)=>{
+   const allDayColumn=page.locator(view==='month'?'.calendar-day':'.calendar-all-day').filter({has:page.locator(`[data-day="${date}"]`)});
+   const timedColumn=view==='month'?allDayColumn:page.locator('.calendar-time-day').nth(index);
+   for(const id of allDayIds)assert.equal(await allDayColumn.locator(`[data-id="${id}"]`).count(),date===after?0:1,`${view} ${date} ${id}`);
+   const timed=timedColumn.locator('[data-id=multi-timed]');
+   assert.equal(await timed.count(),date===after?0:1,`${view} ${date} timed event`);
+   if(date===after)return;
+   assert.equal(await timed.locator('time').count(),date===first?1:0);
+   if(view!=='month'){
+    assert.deepEqual(await timed.evaluate(node=>[node.style.top,node.style.height]),
+     date===first?['864px','288px']:date===middle?['0px','1152px']:['0px','48px']);
+   }
+  };
+  const scheduledDays=[first,middle,last,after];
+  for(const [index,date] of scheduledDays.entries())await assertDay(date,'week',index);
+  await page.locator('[data-view=month]').click();
+  for(const date of scheduledDays)await assertDay(date,'month',0);
+  assert.equal(await page.locator(`.calendar-more[data-jump="${middle}"]`).textContent(),'+1 more');
+  for(const date of scheduledDays){
+   await page.locator(`.calendar-mini [data-jump="${date}"]`).click();
+   await assertDay(date,'day',0);
   }
  }finally{await page.unroute(routes);}
 }

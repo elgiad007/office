@@ -79,14 +79,41 @@ export function createCalendar(env) {
         const start = view === 'month' ? monthStart : view === 'week' ? addDays(anchor, -anchor.getDay()) : anchor;
         const days = Array.from({ length: view === 'month' ? 42 : view === 'week' ? 7 : 1 }, (_, i) => addDays(start, i));
         const color = (r) => sources.find(s => s.id === (r.meta.account || 'local'))?.color || colors[0];
-        const event = (r, style = '') => { const selected = env.current() === r.id, id = selected && !selectedRendered ? 'id="selected-item"' : ''; if (selected)
-            selectedRendered = true; return `<button class="calendar-event item ${selected ? 'selected' : ''}" data-id="${e(r.id)}" ${id} data-calendar-style="--event-color:${color(r)};${style}" title="${e(r.title)}" aria-pressed="${selected}">${dateOnly(r.meta.start) || !eventBounds(r) ? '' : `<time>${e(calendarDate(r.meta.start || '').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time> `}${e(r.title)}</button>`; };
+        const event = (r, day, style = '') => {
+            const selected = env.current() === r.id, id = selected && !selectedRendered ? 'id="selected-item"' : '';
+            if (selected)
+                selectedRendered = true;
+            const bounds = eventBounds(r);
+            const time = bounds && !bounds.allDay && (!day || bounds.start >= day)
+                ? `<time>${e(bounds.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time> ` : '';
+            return `<button class="calendar-event item ${selected ? 'selected' : ''}" data-id="${e(r.id)}" ${id} data-calendar-style="--event-color:${color(r)};${style}" title="${e(r.title)}" aria-pressed="${selected}">${time}${e(r.title)}</button>`;
+        };
         const dayButton = (d) => `<button class="calendar-date ${dayKey(d) === dayKey(new Date()) ? 'today' : ''}" data-day="${dayKey(d)}" aria-label="New event on ${e(d.toLocaleDateString())}">${d.getDate()}</button>`;
         const title = env.query() ? 'Search results' : view === 'day' ? anchor.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : view === 'week' ? `${start.toLocaleDateString()} – ${days[6].toLocaleDateString()}` : anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
         const mini = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<span>${d[0]}</span>`).join('') + Array.from({ length: 42 }, (_, i) => { const d = addDays(monthStart, i); return `<button data-jump="${dayKey(d)}" class="${d.getMonth() !== anchor.getMonth() ? 'muted' : ''} ${dayKey(d) === dayKey(anchor) ? 'primary' : ''}" aria-label="${e(d.toLocaleDateString())}">${d.getDate()}</button>`; }).join('');
         let content = '';
-        if (view === 'month')
-            content = `<div class="calendar-month">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="calendar-weekday">${d}</div>`).join('')}${days.map(d => { const list = eventsOn(rows, d); return `<section class="calendar-day ${d.getMonth() !== anchor.getMonth() ? 'outside' : ''}">${dayButton(d)}${list.slice(0, 3).map(r => event(r)).join('')}${list.length > 3 ? `<button class="calendar-more" data-jump="${dayKey(d)}">+${list.length - 3} more</button>` : ''}</section>`; }).join('')}</div>`;
+        if (view === 'month') {
+            const multiDay = new Set(rows.filter(r => {
+                const bounds = eventBounds(r);
+                return bounds && dayKey(bounds.start) !== dayKey(new Date(+bounds.end - 1));
+            }));
+            const cells = days.map(d => {
+                const list = eventsOn(rows, d);
+                const multiDayCount = list.filter(r => multiDay.has(r)).length;
+                let singleDaySlots = Math.max(0, 3 - multiDayCount);
+                const visible = list.filter(r => {
+                    if (multiDay.has(r))
+                        return true;
+                    if (!singleDaySlots)
+                        return false;
+                    singleDaySlots--;
+                    return true;
+                });
+                const more = list.length - visible.length;
+                return `<section class="calendar-day ${d.getMonth() !== anchor.getMonth() ? 'outside' : ''}">${dayButton(d)}${visible.map(r => event(r, d)).join('')}${more ? `<button class="calendar-more" data-jump="${dayKey(d)}">+${more} more</button>` : ''}</section>`;
+            }).join('');
+            content = `<div class="calendar-month">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="calendar-weekday">${d}</div>`).join('')}${cells}</div>`;
+        }
         else if (view === 'agenda') {
             const nextMonth = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1);
             const entries = rows.map(record => ({ record, bounds: eventBounds(record) }))
@@ -97,7 +124,7 @@ export function createCalendar(env) {
             content = `<div class="calendar-agenda">${entriesHtml}${firstAtAnchor < 0 ? dateMarker : ''}${entries.length ? '' : '<p>No matching cached events.</p>'}</div>`;
         }
         else
-            content = `<div class="calendar-time-scroll"><div class="calendar-time-grid" data-calendar-style="--day-count:${days.length}"><div class="calendar-time-label">All day</div>${days.map(d => `<section class="calendar-all-day"><strong>${e(d.toLocaleDateString(undefined, { weekday: 'short' }))}</strong>${dayButton(d)}${eventsOn(rows, d).filter(r => dateOnly(r.meta.start)).map(r => event(r)).join('')}</section>`).join('')}<div class="calendar-hours">${Array.from({ length: 24 }, (_, h) => `<span>${String(h).padStart(2, '0')}:00</span>`).join('')}</div>${days.map(d => `<div class="calendar-time-day">${Array.from({ length: 24 }, (_, h) => `<button class="calendar-slot" data-slot="${dayKey(d)}T${String(h).padStart(2, '0')}:00" aria-label="New event ${dayKey(d)} ${h}:00"></button>`).join('')}${timedLayout(rows, d).map(x => event(x.record, `position:absolute;top:${x.start / 60 * 48}px;height:${Math.max(20, (x.end - x.start) / 60 * 48)}px;left:${x.column / x.columns * 100}%;width:${100 / x.columns}%`)).join('')}</div>`).join('')}</div></div>`;
+            content = `<div class="calendar-time-scroll"><div class="calendar-time-grid" data-calendar-style="--day-count:${days.length}"><div class="calendar-time-label">All day</div>${days.map(d => `<section class="calendar-all-day"><strong>${e(d.toLocaleDateString(undefined, { weekday: 'short' }))}</strong>${dayButton(d)}${eventsOn(rows, d).filter(r => dateOnly(r.meta.start)).map(r => event(r, d)).join('')}</section>`).join('')}<div class="calendar-hours">${Array.from({ length: 24 }, (_, h) => `<span>${String(h).padStart(2, '0')}:00</span>`).join('')}</div>${days.map(d => `<div class="calendar-time-day">${Array.from({ length: 24 }, (_, h) => `<button class="calendar-slot" data-slot="${dayKey(d)}T${String(h).padStart(2, '0')}:00" aria-label="New event ${dayKey(d)} ${h}:00"></button>`).join('')}${timedLayout(rows, d).map(x => event(x.record, d, `position:absolute;top:${x.start / 60 * 48}px;height:${Math.max(20, (x.end - x.start) / 60 * 48)}px;left:${x.column / x.columns * 100}%;width:${100 / x.columns}%`)).join('')}</div>`).join('')}</div></div>`;
         const undated = rows.filter(r => !eventBounds(r));
         host.innerHTML = `<div class="calendar-toolbar"><div><button data-period="today">Today</button><button data-period="prev" ${env.query() ? 'disabled' : ''} aria-label="Previous period">‹</button><button data-period="next" ${env.query() ? 'disabled' : ''} aria-label="Next period">›</button></div><h2 aria-live="polite">${e(title)}</h2><div role="group" aria-label="Calendar view">${['month', 'week', 'day', 'agenda'].map(v => `<button data-view="${v}" aria-pressed="${view === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div></div><div class="calendar-layout"><aside class="calendar-sidebar"><strong>${e(first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))}</strong><div class="calendar-mini">${mini}</div><details class="calendar-sources" ${!compact || compactSourcesOpen ? 'open' : ''}><summary>Calendars</summary>${sources.map(s => `<label><input type="checkbox" data-source="${e(s.id)}" ${hidden.has(s.id) ? '' : 'checked'} data-calendar-style="accent-color:${s.color}"><span data-calendar-style="color:${s.color}">●</span> ${e(s.label)}</label>`).join('')}<p class="muted">Cached events only. Connected calendars are read only.</p></details></aside><div id="items" class="calendar-board list-pane" role="region" aria-label="Calendar events">${content}${view !== 'agenda' && undated.length ? `<section class="calendar-undated"><h3>Unscheduled</h3>${undated.map(r => event(r)).join('')}</section>` : ''}</div></div>`;
         const sourceMenu = host.querySelector('details');
