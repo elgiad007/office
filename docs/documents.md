@@ -2,7 +2,7 @@
 
 [Office user guides](README.md)
 
-Open **Documents**, press `g 5`, or enter `:docs`. Choose **New document**, enter a title, and write in the editor. Use the formatting toolbar for headings, paragraphs, bold, italic, numbered and bulleted lists, tables, links, and undo or redo. On a narrow screen, open **Formatting** to see the toolbar.
+Open **Documents**, press `g 5`, or enter `:docs`. Choose **New document**, enter a file name, and write in the editor. The file name labels the document in your list and names the files you export. It is not added to the document's content, so it does not appear in printouts or in exported HTML or text. Use the formatting toolbar for headings, paragraphs, bold, italic, numbered and bulleted lists, tables, links, and undo or redo. On a narrow screen, open **Formatting** to see the toolbar.
 
 Choose **Image** to embed a PNG, JPEG, GIF, or WebP image under 900 KB. Select text before choosing **Link** to apply an HTTP, HTTPS, or mailto link. Office cleans imported HTML and replaces unsupported or external images with their alternative text when available.
 

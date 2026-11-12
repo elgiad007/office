@@ -12,3 +12,4 @@
 !/runtime/windows/php.ini
 !/runtime/windows/README.md
 !/runtime/windows/cacert.pem
+/patches/*

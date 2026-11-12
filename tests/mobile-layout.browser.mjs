@@ -256,7 +256,7 @@ export async function testMobileLayout(browser, url) {
         await page.locator('#formula').fill('=A1*3');
         assert.equal(await page.locator('[data-cell="B1"]').textContent(),'6');
       }
-      await detail.getByRole('textbox',{name:app==='Lists'?'List name':'Title',exact:true}).fill('Edited '+app);
+      await detail.getByRole('textbox',{name:app==='Lists'?'List name':app==='Documents'?'File name':'Title',exact:true}).fill('Edited '+app);
       await detail.getByRole('button',{name:'Save',exact:true}).tap();
       await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='Saved');
       assert.equal(saves.at(-1).title,'Edited '+app);
