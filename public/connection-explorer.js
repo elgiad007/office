@@ -4,6 +4,7 @@ import { escapeHtml as e } from './formats.js';
 import { showProgressDialog } from './utils.js';
 import { itemTypes } from './item-types.js';
 import { connectionLayout, connectionGroupLayout, connectionTitleLines, connectionNeighbor, connectionArrivalPoint, visibleConnectionItems, GRAPH_LIMIT, GROUP_CARD } from './connection-layout.js';
+import { profileStorageKey } from './profile-context.js';
 const typeLabel = (kind) => itemTypes[kind]?.label || kind;
 const symbols = { mail: '✉', calendar: '▦', tasks: '✓', contacts: '♙', documents: '▤', wiki: '◇', sheets: '▦', lists: '☑' };
 const ORIGIN_ID = 'navigation-origin';
@@ -52,7 +53,7 @@ export async function openConnectionExplorer(env, source = '') {
     const highlightToggle = query('[data-neighbor-highlight]');
     let highlightNeighbors = true;
     try {
-        highlightNeighbors = localStorage.getItem(NEIGHBOR_HIGHLIGHT_KEY) !== 'off';
+        highlightNeighbors = localStorage.getItem(profileStorageKey(NEIGHBOR_HIGHLIGHT_KEY)) !== 'off';
     }
     catch { /* Storage may be unavailable. */ }
     highlightToggle.setAttribute('aria-pressed', String(highlightNeighbors));
@@ -60,7 +61,7 @@ export async function openConnectionExplorer(env, source = '') {
         highlightNeighbors = !highlightNeighbors;
         highlightToggle.setAttribute('aria-pressed', String(highlightNeighbors));
         try {
-            localStorage.setItem(NEIGHBOR_HIGHLIGHT_KEY, highlightNeighbors ? 'on' : 'off');
+            localStorage.setItem(profileStorageKey(NEIGHBOR_HIGHLIGHT_KEY), highlightNeighbors ? 'on' : 'off');
         }
         catch { /* Keep the in-page choice. */ }
         selection();

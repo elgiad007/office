@@ -1,4 +1,5 @@
 // Generated from frontend/panel-sizing.ts by pnpm build. Do not edit.
+import { profileStorageKey } from './profile-context.js';
 const railWidth = 65;
 const collapseThreshold = 150;
 const listMinimum = 180;
@@ -10,7 +11,7 @@ export function panelSplitter(panel) {
     return `<div class="panel-splitter" data-resize-panel="${panel}" role="separator" tabindex="0" aria-label="${label}" aria-orientation="vertical" aria-controls="${panel === 'sidebar' ? 'app-sidebar' : 'item-list-pane'}"></div>`;
 }
 export function setupPanelSizing(shell, onCollapseChange) {
-    const storageKey = (panel) => `office-panel-width-${panel}`;
+    const storageKey = (panel) => profileStorageKey(`office-panel-width-${panel}`);
     const preferred = {};
     for (const panel of ['sidebar', 'list']) {
         try {

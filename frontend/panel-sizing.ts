@@ -1,3 +1,5 @@
+import {profileStorageKey} from './profile-context.js';
+
 const railWidth = 65;
 const collapseThreshold = 150;
 const listMinimum = 180;
@@ -12,7 +14,7 @@ export function panelSplitter(panel: Panel) {
 }
 
 export function setupPanelSizing(shell: HTMLElement, onCollapseChange: () => void) {
-  const storageKey = (panel: Panel) => `office-panel-width-${panel}`;
+  const storageKey = (panel: Panel) => profileStorageKey(`office-panel-width-${panel}`);
   const preferred: Partial<Record<Panel, number>> = {};
   for (const panel of ['sidebar', 'list'] as const) {
     try {

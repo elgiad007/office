@@ -32,7 +32,7 @@ During sync, Office looks for calendars for non-Google IMAP accounts. Each calen
 3. Save the client ID, secret, and callback in Office. Add a Gmail account, select optional Calendar access, and choose **Connect with Google**.
 4. Sign in as the account you intend to connect. If access expires, choose **Authorize** for that account and sign in with the original address.
 
-Each installation needs its own setup and account authorization. A new hostname or port can require an updated callback registration.
+Each Office profile saves its own Google integration settings and authorizes its own accounts. Profiles on the same installation can use the same registered callback URL. A new hostname or port can require an updated callback registration.
 
 A blank client secret keeps the saved secret when the client ID stays the same. Changing the integration credentials applies to future connections. Existing Google accounts keep the client settings and callback used for their authorization.
 

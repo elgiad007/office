@@ -44,6 +44,8 @@ function Assert-Workspace {
     $records=Invoke-RestMethod -Uri ($base+'records&kind=tasks') -WebSession $session
     if ($records.records[0].title -cne 'Keep this task') { throw 'The update lost a workspace record.' }
     if ((Get-Content -Raw -LiteralPath (Join-Path $office 'data/secret.key')) -cne 'fixture-secret') { throw 'The private key file was not preserved.' }
+    $records=Invoke-RestMethod -Uri ($base+'records&kind=tasks') -WebSession $familySession -Headers @{'X-Office-Profile'=$familyId}
+    if ($records.records[0].title -cne 'Keep this family task') { throw 'The update lost a secondary profile record.' }
 }
 
 try {
@@ -100,6 +102,14 @@ try {
     $auth=Invoke-Office 'setup' @{token=$token;password=$password}
     $script:csrf=$auth.csrf
     Invoke-Office 'save' @{kind='tasks';title='Keep this task';body='';meta=@{}} | Out-Null
+    $invite=Invoke-Office 'profile-invite' @{}
+    $familyStatus=Invoke-RestMethod -Uri ($base+'status') -SessionVariable familySession
+    $familyAuth=Invoke-RestMethod -Uri ($base+'profile-create') -Method Post -WebSession $familySession -ContentType 'application/json' `
+        -Headers @{'X-CSRF-Token'=$familyStatus.csrf} -Body (@{code=$invite.code;name='Family';password='fixture-family-password'} | ConvertTo-Json)
+    $familyId=$familyAuth.profile.id
+    Invoke-RestMethod -Uri ($base+'save') -Method Post -WebSession $familySession -ContentType 'application/json' `
+        -Headers @{'X-CSRF-Token'=$familyAuth.csrf;'X-Office-Profile'=$familyId} `
+        -Body (@{kind='tasks';title='Keep this family task';body='';meta=@{}} | ConvertTo-Json) | Out-Null
     [IO.File]::WriteAllText((Join-Path $office 'data/secret.key'),'fixture-secret')
     $check=Invoke-RestMethod -Uri ($base+'update-check') -WebSession $session
     if (!$check.canInstall -or $check.latest -cne '0.1.1') { throw 'A valid signed update was not offered.' }
@@ -134,7 +144,7 @@ try {
         $entry=$archive.CreateEntry('office/public/api.php')
         $writer=[IO.StreamWriter]::new($entry.Open())
         try {
-            $writer.Write('<?php require dirname(__DIR__)."/app/bootstrap.php"; if(isset($_SERVER["HTTP_X_OFFICE_UPDATE_HEALTH"])){db()->exec("DELETE FROM records");} http_response_code(500);')
+            $writer.Write('<?php require dirname(__DIR__)."/app/bootstrap.php"; if(isset($_SERVER["HTTP_X_OFFICE_UPDATE_HEALTH"])){foreach(office_profiles() as $profile)office_profile_database($profile)->exec("DELETE FROM records");} http_response_code(500);')
         } finally { $writer.Dispose() }
     } finally { $archive.Dispose() }
     $envelope=$signed | ConvertFrom-Json
@@ -158,6 +168,9 @@ try {
     Assert-Workspace
     if (!(Test-Path -LiteralPath (Join-Path $office ".office-update/$($queued.job)/data-before-update/office.sqlite"))) {
         throw 'The successful update did not leave a recovery snapshot.'
+    }
+    if (!(Test-Path -LiteralPath (Join-Path $office ".office-update/$($queued.job)/data-before-update/profiles/$familyId/office.sqlite"))) {
+        throw 'The recovery snapshot did not include the secondary profile.'
     }
     Write-Output "PASS signed update, tampered manifest and ZIP, failed startup rollback, and preserved workspace on port $Port."
 } finally {

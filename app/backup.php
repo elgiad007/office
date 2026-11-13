@@ -129,7 +129,7 @@ function restore_office_backup(iterable $records,iterable $histories,mixed $pref
     $db=db();
     $db->exec('BEGIN IMMEDIATE');
     try {
-        if((int)$db->query('SELECT COUNT(*) FROM records')->fetchColumn()!==0)fail('Restore requires an empty workspace. Use a fresh installation to keep existing work safe.',409);
+        if((int)$db->query('SELECT COUNT(*) FROM records')->fetchColumn()!==0)fail('Restore requires an empty workspace. Use an empty profile to keep existing work safe.',409);
         $seen=[];
         $insertRecord=$db->prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?)');
         foreach($records as $r){

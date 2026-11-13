@@ -1,11 +1,12 @@
 import type {OfficeRecord, Preferences} from './types.js';
 import {escapeHtml as e} from './formats.js';
+import {profileQuery,profileStorageKey} from './profile-context.js';
 
 const modes=new Map<string, string>(), imageConsent=new Set<string>(), originalColors=new Set<string>();
 const imageConsentPrefix='office:mail-images:';
 function hasImageConsent(id: string) {
   if(imageConsent.has(id))return true;
-  try{return localStorage.getItem(imageConsentPrefix+id)==='1';}
+  try{return localStorage.getItem(profileStorageKey(imageConsentPrefix+id))==='1';}
   catch{return false;}
 }
 let readerSize: ResizeObserver | undefined;
@@ -27,7 +28,7 @@ export function mailBody(record: OfficeRecord,prefs: Preferences) {
   const mode=hasHtml ? displayMode(record,prefs) : 'text';
   const theme=document.documentElement.dataset.theme==='dark'?'dark':'light';
   const accent=['green','blue','plum'].includes(document.documentElement.dataset.accent!)?document.documentElement.dataset.accent!:'green';
-  return mode==='html'?`<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id)?'&colors=original':''}${hasImageConsent(record.id)?'&images=1':''}"></iframe>`:`<div class="mail-body">${e(record.body)}</div>`;
+  return mode==='html'?`<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}${profileQuery()}&theme=${theme}&accent=${accent}${originalColors.has(record.id)?'&colors=original':''}${hasImageConsent(record.id)?'&images=1':''}"></iframe>`:`<div class="mail-body">${e(record.body)}</div>`;
 }
 let bridgeCleanup: (()=>void)|undefined;
 export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: () => void,navigation: Record<string,string>={},onInteraction?: () => void) {
@@ -103,7 +104,7 @@ export function bindMailReader(panel: HTMLElement,record: OfficeRecord,render: (
   const images=panel.querySelector<HTMLButtonElement>('[data-mail-images]')!;
   if(images) images.onclick=()=>{
     imageConsent.add(record.id);
-    try{localStorage.setItem(imageConsentPrefix+record.id,'1');}catch{/* Keep the in-page choice. */}
+    try{localStorage.setItem(profileStorageKey(imageConsentPrefix+record.id),'1');}catch{/* Keep the in-page choice. */}
     render();
   };
 }

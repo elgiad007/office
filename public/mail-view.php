@@ -11,7 +11,7 @@ $remote=($_GET['images']??'')==='1';
 $nonce=base64_encode(random_bytes(24));
 header("Content-Security-Policy: default-src 'none'; script-src 'nonce-$nonce'; style-src 'unsafe-inline'; img-src data:".($remote?' https:':'')."; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox");
 try {
-    start_session(); owner();
+    start_session(); owner(); office_require_profile_context($_GET['profile']??null);
     session_write_close();
     $record=get_record((string)($_GET['id']??''));
     if ($record['kind']!=='mail' || ($record['meta']['folder']??'')==='Drafts') fail('Select a received email.',400);

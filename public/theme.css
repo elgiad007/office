@@ -373,6 +373,9 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .compact .topbar-controls { padding-block: 5px; }
 .topbar-controls > .top-actions { margin-inline-start: auto; max-width: 100%; }
 .top-actions-overflow { display: contents; }
+.profile-switch { max-width: 9rem; min-width: 0; }
+.profile-switch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#profile-auth-toggle { margin-top: 1rem; }
 .app-toolbar, .header-action-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .app-toolbar[hidden], .header-action-group[hidden] { display: none; }
 .app-toolbar input { width: 210px; min-width: 0; max-width: 100%; }

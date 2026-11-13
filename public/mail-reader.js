@@ -1,12 +1,13 @@
 // Generated from frontend/mail-reader.ts by pnpm build. Do not edit.
 import { escapeHtml as e } from './formats.js';
+import { profileQuery, profileStorageKey } from './profile-context.js';
 const modes = new Map(), imageConsent = new Set(), originalColors = new Set();
 const imageConsentPrefix = 'office:mail-images:';
 function hasImageConsent(id) {
     if (imageConsent.has(id))
         return true;
     try {
-        return localStorage.getItem(imageConsentPrefix + id) === '1';
+        return localStorage.getItem(profileStorageKey(imageConsentPrefix + id)) === '1';
     }
     catch {
         return false;
@@ -33,7 +34,7 @@ export function mailBody(record, prefs) {
     const mode = hasHtml ? displayMode(record, prefs) : 'text';
     const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     const accent = ['green', 'blue', 'plum'].includes(document.documentElement.dataset.accent) ? document.documentElement.dataset.accent : 'green';
-    return mode === 'html' ? `<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}&theme=${theme}&accent=${accent}${originalColors.has(record.id) ? '&colors=original' : ''}${hasImageConsent(record.id) ? '&images=1' : ''}"></iframe>` : `<div class="mail-body">${e(record.body)}</div>`;
+    return mode === 'html' ? `<iframe class="mail-html" title="HTML email" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src="mail-view.php?id=${encodeURIComponent(record.id)}${profileQuery()}&theme=${theme}&accent=${accent}${originalColors.has(record.id) ? '&colors=original' : ''}${hasImageConsent(record.id) ? '&images=1' : ''}"></iframe>` : `<div class="mail-body">${e(record.body)}</div>`;
 }
 let bridgeCleanup;
 export function bindMailReader(panel, record, render, navigation = {}, onInteraction) {
@@ -157,7 +158,7 @@ export function bindMailReader(panel, record, render, navigation = {}, onInterac
         images.onclick = () => {
             imageConsent.add(record.id);
             try {
-                localStorage.setItem(imageConsentPrefix + record.id, '1');
+                localStorage.setItem(profileStorageKey(imageConsentPrefix + record.id), '1');
             }
             catch { /* Keep the in-page choice. */ }
             render();

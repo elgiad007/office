@@ -29,6 +29,13 @@ import {addDays,agendaEventLabel,calendarDate,calendarDisplayFields,calendarDisp
 import {timestampLabel, configureTimeLabels, refreshTimeLabels} from './time-labels.js';
 import {panelSplitter, setupPanelSizing} from './panel-sizing.js';
 import {mobileActionLabel, mobileDisclosure, mobileIcon, phoneLayout, setDisclosure} from './mobile-layout.js';
+import {profileHeaders, profileStorageKey, setProfileContext} from './profile-context.js';
+
+let activeProfile: Status['profile'];
+let installationOwner=false;
+let leavingProfile=false;
+const profileRequests=new AbortController();
+const profileChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('office-profile-session:'+location.pathname.replace(/index\.php$/,'')):undefined;
 
 const apps: Record<string, {name: string; singular: string; empty: string; hint: string; icon: string}> = {
   mail:{name:'Mail', singular:'message', empty:'No messages yet.',hint:'Connect an account in Settings, import an EML file, or compose your first message.',icon:'M3 5h18v14H3z M3 5l9 7 9-7'},
@@ -219,7 +226,13 @@ function closeCommand(restore=false) {
   if(restore)(commandFocus?.isConnected?commandFocus:document.querySelector<HTMLElement>('#main'))?.focus({preventScroll:true});
   commandFocus=null;
 }
-async function signOut() {await waitForAttachments();await leaveEditor();clearSwipeActions();await api('logout',{});await boot();}
+async function signOut() {
+  await waitForAttachments();
+  await leaveEditor();
+  await api('logout',{});
+  profileChannel?.postMessage('changed');
+  goToProfilePicker();
+}
 const commandHandlers={
   mail:async(accountQuery?:string)=>{
     if(accountQuery===undefined){await changeApp('mail');return;}
@@ -337,15 +350,18 @@ function refreshMailRecord(record: OfficeRecord) {
   if(state.current?.id===record.id)state.current=state.rows.find(row=>row.id===record.id)||null;
 }
 async function requestApi(route: ApiRoute, data?: ApiData, signal?: AbortSignal): Promise<WireResult> {
+  if(leavingProfile)throw new DraftCancelled();
+  signal=signal?AbortSignal.any([signal,profileRequests.signal]):profileRequests.signal;
   let payload = data as RequestPayload | undefined;
   if(route==='mail-action')payload={...payload,summary:true};
   const file=route==='restore'&&data instanceof File?data:undefined;
-  const response=await fetch('api.php?r='+route,{method:payload===undefined?'GET':'POST',headers:payload===undefined?{}:{'Content-Type':file?sqliteBackupType:'application/json','X-CSRF-Token':state.csrf,'X-Office-Progress':'1'},body:file??(payload===undefined?undefined:JSON.stringify(payload)),cache:'no-store',signal});
+  const response=await fetch('api.php?r='+route,{method:payload===undefined?'GET':'POST',headers:{...profileHeaders(),...(payload===undefined?{}:{'Content-Type':file?sqliteBackupType:'application/json','X-CSRF-Token':state.csrf,'X-Office-Progress':'1'})},body:file??(payload===undefined?undefined:JSON.stringify(payload)),cache:'no-store',signal});
   let result!: WireResult,status=response.status;
   let cacheRefresh: Promise<void> | undefined;
   if(response.headers.get('Content-Type')?.includes('application/x-ndjson')){
     const reader=response.body!.getReader(),decoder=new TextDecoder();let buffer='',finished=false;
     const consume=(line: string)=>{
+      if(leavingProfile)throw new DraftCancelled();
       if(!line.trim())return;
       const event=JSON.parse(line) as {type: 'activity'; entry: ActivityEntry} | {type: 'activity-progress'; entry: ActivityProgress} | {type: 'result'; body: WireResult; status: number};
       if(event.type==='activity'||event.type==='activity-progress'){
@@ -372,9 +388,10 @@ async function requestApi(route: ApiRoute, data?: ApiData, signal?: AbortSignal)
     if(!finished)throw Error(syncRequest?syncInterrupted:'The connection ended before the operation was confirmed. Check recent activity and sync before retrying.');
   }else try { result=await response.json() as WireResult; } catch { signal?.throwIfAborted();throw Error('The server did not return JSON. Check PHP configuration and upload limits.'); }
   await cacheRefresh;
+  if(leavingProfile)throw new DraftCancelled();
   if (status>=400) {
     if(status===409&&result.code==='mail_revision_conflict'&&result.record)refreshMailRecord(result.record);
-    if (status===401 && route!=='login') await lockExpiredSession();
+    if (status===401 && route!=='login') lockExpiredSession();
     throw Object.assign(Error(result.error || 'Request failed.'),{status,code:result.code,record:result.record});
   }
   for(const record of result.records||[])rememberMail(record);
@@ -455,11 +472,46 @@ function applyTheme() {
     if(url.href!==frame.src) frame.src=url.href;
   });
 }
-function authView(status: Status) {
+function authView(status: Status,create=false) {
   mailSnapshots.clear();mailLatest.clear();trashedMailCopies.clear();failedMailActions.clear();
   const setup=status.setup;
-  root.innerHTML=`<main class="auth"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div><h1>${setup?'Set up Office':'Sign in'}</h1><p>${setup?'Create your owner password to get started. Retrieve the setup token from <code>data/setup-token.txt</code> using your local file manager or cPanel File Manager.':'Enter your password.'}</p><form id="auth-form">${setup?field('Setup token','token','','text','required autocomplete="off"'):''}${field(setup?'Create password (at least 12 characters)':'Password','password','','password',`required ${setup?'minlength="12" autocomplete="new-password"':'autocomplete="current-password"'}`)}<button class="primary">${setup?'Create workspace':'Open workspace'}</button><p id="auth-error" class="error" role="alert"></p></form><p class="foot">PHP / SQLite · no scheduled jobs required</p></main>`;
-  document.querySelector<HTMLFormElement>('#auth-form')!.onsubmit=async event=>{event.preventDefault(); const button=(event.target as HTMLElement).querySelector<HTMLButtonElement>('button')!; busyButton(button,true); try { const r=await api(setup?'setup':'login',Object.fromEntries(new FormData(event.target as HTMLFormElement))); state.csrf=r.csrf; await boot(); } catch(cause) { const error=asError(cause); document.querySelector<HTMLElement>('#auth-error')!.textContent=error.message; } finally { busyButton(button,false); } };
+  const creating=setup||create;
+  const googleExpired=!creating&&new URLSearchParams(location.search).get('google-expired')==='1';
+  const profileOptions=(status.profiles||[]).map(profile=>`<option value="${e(profile.id)}">${e(profile.name)}</option>`).join('');
+  root.innerHTML=`<main class="auth"><div class="brand"><div class="brandmark">o.</div><div><strong>Office</strong></div></div>
+    <h1>${setup?'Set up Office':create?'Create profile':'Sign in'}</h1>
+    <p>${setup?'Create the first profile. Retrieve the setup token from <code>data/setup-token.txt</code> using your local file manager or cPanel File Manager.':create?'Ask the installation owner for an invitation code to create your private workspace.':'Choose your profile and enter its password.'}</p>
+    ${googleExpired?'<p class="error" role="alert">Google authorization expired or belongs to another profile. Sign in to the profile you want to connect, then try again.</p>':''}
+    <form id="auth-form">
+      ${setup?field('Setup token','token','','text','required autocomplete="off"'):create?field('Invitation code','code','','text','required autocomplete="off" spellcheck="false"'):''}
+      ${creating?field('Profile name','name',setup?'Default':'','text','required maxlength="120"'):profileOptions?`<label>Choose profile<select name="profile" autocomplete="username" required>${profileOptions}</select></label>`:''}
+      ${field(creating?'Create password (at least 12 characters)':'Password','password','','password',`required ${creating?'minlength="12" autocomplete="new-password"':'autocomplete="current-password"'}`)}
+      <button type="submit" class="primary">${setup?'Create workspace':create?'Create profile':'Open workspace'}</button>
+      <p id="auth-error" class="error" role="alert" hidden></p>
+    </form>
+    ${setup?'':`<button type="button" class="quiet" id="profile-auth-toggle">${create?'Back to sign in':'Create profile'}</button>`}
+    <p class="foot">Each profile has its own private workspace.</p></main>`;
+  const form=root.querySelector<HTMLFormElement>('#auth-form')!;
+  const toggle=root.querySelector<HTMLButtonElement>('#profile-auth-toggle');
+  if(toggle)toggle.onclick=()=>{
+    authView(status,!create);
+    root.querySelector<HTMLElement>('form select, form input')?.focus();
+  };
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    const button=form.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    const error=form.querySelector<HTMLElement>('#auth-error')!;
+    busyButton(button,true);if(toggle)toggle.disabled=true;error.hidden=true;
+    try {
+      await api(setup?'setup':create?'profile-create':'login',Object.fromEntries(new FormData(form)));
+      profileChannel?.postMessage('changed');
+      const url=new URL(location.href);url.searchParams.delete('profile-picker');url.searchParams.delete('google-expired');
+      location.replace(url.href);
+    } catch(cause) {
+      error.textContent=asError(cause).message;error.hidden=false;
+      busyButton(button,false);if(toggle)toggle.disabled=false;
+    }
+  };
 }
 async function boot() {
   clearSwipeActions();
@@ -478,7 +530,16 @@ async function boot() {
   state.current=null;
   document.querySelector<HTMLElement>('#sync-status')!.hidden=true;
   lastMailDelete=undefined;
-  try { const status=await api('status'); state.csrf=status.csrf;activity.configure(!!status.authenticated&&!!status.activity); if (!status.authenticated) { authView(status); return; }
+  try {
+    const picker=new URLSearchParams(location.search).get('profile-picker')==='1';
+    const status=await api(picker?'status&picker=1':'status');
+    if(leavingProfile)return;
+    state.csrf=status.csrf;
+    if (!status.authenticated) { activity.configure(false);authView(status); return; }
+    activeProfile=status.profile;installationOwner=status.installationOwner===true;
+    setProfileContext(activeProfile?.id);
+    loadSettingsPage();
+    activity.configure(!!status.activity);
     remoteSenderIcons=status.remoteSenderIcons===true;
     lastSessionActivity=status.lastInteraction?Math.min(Date.now(),status.lastInteraction*1000):Date.now();
     state.prefs=status.preferences||{}; applyTheme();
@@ -488,17 +549,30 @@ async function boot() {
     const [accounts,records]=await Promise.all([api('accounts'),initial]);state.accounts=accounts.accounts;
     shell(); await load(undefined,{enteringApp:true},records??undefined);
     if (state.accounts.length) void syncAccounts(false);
-  } catch(cause) { const error=asError(cause); root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector<HTMLElement>('#retry')!.onclick=boot; }
+  } catch(cause) { if(leavingProfile)return;const error=asError(cause); root.innerHTML=`<main class="auth"><h1>Workspace unavailable</h1><p class="error">${e(error.message)}</p><p>Requires PHP 8.2+, PDO SQLite and a writable private data directory. Point the domain at <code>public/</code>.</p><button id="retry">Try again</button></main>`; document.querySelector<HTMLElement>('#retry')!.onclick=boot; }
 }
-async function lockExpiredSession() {
-  if(!root.querySelector('.shell'))return;
+function goToProfilePicker() {
+  if(leavingProfile)return;
+  leavingProfile=true;
+  profileRequests.abort(new DraftCancelled());
   state.dirty=false;
+  appEntryVersion++;
+  clearTimeout(mailQueryTimer);
+  clearSwipeActions();
+  backupRequest?.abort();
   root.replaceChildren();
   if(dialog.open)dialog.close();
   dialog.replaceChildren();
   activity.configure(false);
-  await boot();
+  const url=new URL(location.href);
+  url.searchParams.set('profile-picker','1');url.hash='';
+  location.replace(url.href);
 }
+function lockExpiredSession() {
+  if(activeProfile||root.querySelector('.shell'))goToProfilePicker();
+}
+profileChannel?.addEventListener('message',()=>lockExpiredSession());
+window.addEventListener('pageshow',event=>{if(event.persisted)lockExpiredSession();});
 function reportSessionActivity() {
   const now=Date.now();
   if(document.hidden||!root.querySelector('.shell')||now-lastSessionActivity<30_000)return;
@@ -510,7 +584,7 @@ window.addEventListener('resize',()=>panelSizing?.refresh());
 function shell() {
   const syncStatus=document.querySelector<HTMLElement>('#sync-status')!;
   syncStatus.textContent='Automatic sync';syncStatus.hidden=false;
-  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><button type="button" class="mobile-only mobile-menu-close mobile-icon-button" data-action="mobile-menu-close" aria-label="Close menu" title="Close menu">${mobileIcon('close')}</button><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?`<div id="mobile-folder-control" class="mobile-only">${mobileDisclosure('mail-folder-navigation','Mail folders','mobile-folder-toggle')}</div><section id="mail-folder-navigation" aria-label="Mail folders"></section>`:''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="mobile-only mobile-menu-backdrop" data-mobile-menu-backdrop></div><div class="workspace"><header class="topbar"><div class="breadcrumb"><button type="button" id="mobile-menu" class="mobile-only mobile-icon-button" data-action="mobile-menu" aria-controls="app-sidebar" aria-expanded="false" aria-label="Menu" title="Menu">${mobileIcon('menu')}</button><h1 id="crumb"></h1></div><div id="header-controls" class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new','Compose','compose')}${headerAction('import','Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button type="button" class="quiet mobile-icon-button" data-action="sync" id="sync-button" aria-label="Sync now" title="Refresh connected accounts">${mobileIcon('refresh')}<span class="mobile-icon-label" aria-hidden="true">↻</span><span class="mobile-icon-label">Sync now</span></button>${mobileDisclosure('header-controls','More','mobile-header-more','more')}<span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary class="mobile-icon-button" title="Upcoming agenda"><time></time><span class="mobile-only">${icon('calendar')}</span></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><time class="mobile-only top-agenda-clock"></time><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><div class="top-actions-overflow"><button class="avatar" data-action="logout" title="Sign out" aria-label="Sign out">ME</button></div></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
+  root.innerHTML=`<div class="shell"><aside id="app-sidebar" class="sidebar" aria-label="Application navigation"><div class="brand"><div><strong>Office</strong></div></div><button type="button" class="mobile-only mobile-menu-close mobile-icon-button" data-action="mobile-menu-close" aria-label="Close menu" title="Close menu">${mobileIcon('close')}</button><p class="eyebrow nav-label">Applications</p><nav class="nav application-nav">${Object.entries(apps).map(([id,a],i)=>`<button data-app="${id}" title="${a.name} · g ${i+1}" aria-label="${a.name}">${icon(id)}<span>${a.name}</span><kbd>${i+1}</kbd></button>${id==='mail'?`<div id="mobile-folder-control" class="mobile-only">${mobileDisclosure('mail-folder-navigation','Mail folders','mobile-folder-toggle')}</div><section id="mail-folder-navigation" aria-label="Mail folders"></section>`:''}`).join('')}</nav><div class="sidebar-bottom"><nav class="nav"><button data-action="connections" title="All connections" aria-label="All connections">${icon('wiki')}<span>Connections</span></button><button data-app="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M10 2h4l1 3 3 1 3 4v4l-3 1-1 3-3 3h-4l-1-3-3-1-3-3v-4l3-1 1-3z"/></svg><span>Settings</span></button><button data-action="help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">${icon('wiki')}<span>Keyboard shortcuts</span><kbd>?</kbd></button></nav><div class="privacy-note"><span class="privacy-dot"></span> Stored in your application folder.</div></div>${panelSplitter('sidebar')}</aside><div class="mobile-only mobile-menu-backdrop" data-mobile-menu-backdrop></div><div class="workspace"><header class="topbar"><div class="breadcrumb"><button type="button" id="mobile-menu" class="mobile-only mobile-icon-button" data-action="mobile-menu" aria-controls="app-sidebar" aria-expanded="false" aria-label="Menu" title="Menu">${mobileIcon('menu')}</button><h1 id="crumb"></h1></div><div id="header-controls" class="topbar-controls"><div class="header-action-group" id="mail-toolbar" hidden>${headerAction('new','Compose','compose')}${headerAction('import','Import')}${mailExportMenu()}<span class="mail-export-status" id="mail-export-status" role="status"></span><button type="button" class="quiet" id="cancel-mail-export" hidden>Cancel export</button></div><div class="app-toolbar" id="app-toolbar" hidden></div><div class="top-actions"><button type="button" class="quiet mobile-icon-button" data-action="sync" id="sync-button" aria-label="Sync now" title="Refresh connected accounts">${mobileIcon('refresh')}<span class="mobile-icon-label" aria-hidden="true">↻</span><span class="mobile-icon-label">Sync now</span></button>${mobileDisclosure('header-controls','More','mobile-header-more','more')}<span class="mode" id="mode">NORMAL</span><details id="top-agenda" class="top-agenda"><summary class="mobile-icon-button" title="Upcoming agenda"><time></time><span class="mobile-only">${icon('calendar')}</span></summary><section class="top-agenda-panel" aria-label="Upcoming agenda"><time class="mobile-only top-agenda-clock"></time><h2>Upcoming agenda</h2><div class="top-agenda-events"></div></section></details><div class="top-actions-overflow"><button type="button" class="profile-switch" data-action="logout" title="Switch profile" aria-label="Switch profile"><span>${e(activeProfile?.name||'Default')}</span></button></div></div></div></header><main id="main" tabindex="-1"></main></div></div>`;
   panelSizing=setupPanelSizing(root.querySelector<HTMLElement>('.shell')!,()=>setMailFolderPanel(false));
   setupTopAgenda();
   root.onclick=handleClick;
@@ -2100,6 +2174,19 @@ async function withRecentSignIn<T>(operation: () => Promise<T>): Promise<T> {
     return operation();
   }
 }
+async function createProfileInvitation() {
+  const {code,expires}=await withRecentSignIn(()=>api('profile-invite',{}));
+  modal('Profile invitation',`<p>Give this code to the person creating a profile. It can be used once and expires on ${e(new Date(expires*1000).toLocaleString())}.</p>
+    ${field('Invitation code','invite',code,'text','readonly spellcheck="false"')}
+    <div class="dialog-actions"><button type="button" data-copy-invite>Copy code</button></div>`);
+  const input=dialog.querySelector<HTMLInputElement>('input')!;
+  input.focus();input.select();
+  const button=dialog.querySelector<HTMLButtonElement>('[data-copy-invite]')!;
+  button.onclick=async()=>{
+    try {await navigator.clipboard.writeText(code);button.textContent='Copied';}
+    catch {input.focus();input.select();button.textContent='Select code to copy';}
+  };
+}
 function download(name: string,text: BlobPart,type='text/plain') { const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name.replace(/[\\/:*?"<>|]/g,'_');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
 function originalMail(record: OfficeRecord) { return record.meta.rawBase64 ? Uint8Array.from(atob(record.meta.rawBase64),c=>c.charCodeAt(0)) : record.meta.raw || ''; }
 async function viewMessageHeaders() {
@@ -2181,7 +2268,8 @@ async function exportAllMail(complete: boolean) {
     }
     if(!menu.isConnected)return;
     status.textContent='Preparing mail download…';
-    const response=await fetch('api.php?r=mail-export'+(complete?'&complete=1':''),{cache:'no-store',signal});
+    const response=await fetch('api.php?r=mail-export'+(complete?'&complete=1':''),{cache:'no-store',signal:AbortSignal.any([signal,profileRequests.signal]),headers:profileHeaders()});
+    if(response.status===401)lockExpiredSession();
     if(!response.ok){
       const error=await response.json().catch(()=>null);
       throw Error(error?.error||'The mail archive could not be downloaded.');
@@ -2261,7 +2349,7 @@ async function prepareBackup() {
   activity.running(tracking);
   try {
     const response=await withRecentSignIn(async()=>{
-      const result=await fetch('api.php?r=backup',{cache:'no-store',signal:request.signal});
+      const result=await fetch('api.php?r=backup',{cache:'no-store',signal:request.signal,headers:profileHeaders()});
       if(result.status===428)throw Object.assign(Error('Confirm your password to continue.'),{status:428});
       return result;
     });
@@ -2734,7 +2822,7 @@ function renderJunkSettings() {
   select.onchange=()=>void render();
   void render();
 }
-const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['calendar','Calendar'],['accounts','Accounts'],['activity-log','Activity Log'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups'],['swipe','Swipe Actions'],['updates','Updates']] as const;
+const settingsPages=[['appearance','Appearance'],['mail','Mail'],['mail-rules','Mail Rules'],['calendar','Calendar'],['accounts','Accounts'],['activity-log','Activity Log'],['connections','Connections'],['keyboard','Keyboard'],['backups','Backups'],['swipe','Swipe Actions'],['updates','Updates'],['profiles','Profiles']] as const;
 let updateInstalling=false;
 let updateChecking=false;
 let updateRelease: ApiResponse<'update-check'> | undefined;
@@ -2810,13 +2898,16 @@ async function installOfficeUpdate(version: string) {
 }
 const settingsPageKey='office-settings-page';
 let settingsPage='appearance';
-try {
-  const savedPage=sessionStorage.getItem(settingsPageKey);
-  if(savedPage&&settingsPages.some(([id])=>id===savedPage))settingsPage=savedPage;
-} catch {/* Storage may be unavailable. */}
+function loadSettingsPage() {
+  settingsPage='appearance';
+  try {
+    const savedPage=sessionStorage.getItem(profileStorageKey(settingsPageKey));
+    if(savedPage&&settingsPages.some(([id])=>id===savedPage))settingsPage=savedPage;
+  } catch {/* Storage may be unavailable. */}
+}
 function selectSettingsPage(page: string) {
   settingsPage=page;
-  try {sessionStorage.setItem(settingsPageKey,page);} catch {/* Keep the in-page choice. */}
+  try {sessionStorage.setItem(profileStorageKey(settingsPageKey),page);} catch {/* Keep the in-page choice. */}
 }
 function settingsAccountStatus(account:AppState['accounts'][number]) {
   const checked=account.last_sync?'Last checked '+timestampLabel(account.last_sync,new Date(account.last_sync).toLocaleString()):'Not checked yet';
@@ -2917,7 +3008,7 @@ function renderSettings(entryVersion?: number) {
       </form></section>
     </section>
     <section class="settings-grid" id="settings-backups" data-settings-page="backups"${settingsPage==='backups'?'':' hidden'}>
-      <section class="card"><h2>Backups</h2><p>SQLite backups include local records, cached messages, saved attachments, revisions, connections and preferences. Account credentials and your password are excluded.</p><button id="backup">Prepare backup</button> <button id="backup-download" hidden>↓ Download SQLite backup</button><div><progress id="backup-progress" aria-label="Backup progress" hidden></progress><div id="backup-status" role="status"></div></div><p>Restore a SQLite or JSON backup into an empty installation. Synced copies become local archives. Reconnect provider accounts after restoring.</p><button id="restore">↑ Restore backup</button></section>
+      <section class="card"><h2>Backups</h2><p>SQLite backups include local records, cached messages, saved attachments, revisions, connections and preferences. Account credentials and your password are excluded.</p><button id="backup">Prepare backup</button> <button id="backup-download" hidden>↓ Download SQLite backup</button><div><progress id="backup-progress" aria-label="Backup progress" hidden></progress><div id="backup-status" role="status"></div></div><p>Restore a SQLite or JSON backup into an empty profile. Synced copies become local archives. Reconnect provider accounts after restoring.</p><button id="restore">↑ Restore backup</button></section>
     </section>
     <section class="settings-grid" id="settings-updates" data-settings-page="updates"${settingsPage==='updates'?'':' hidden'}>
       <section class="card"><h2>Office updates</h2>
@@ -2926,6 +3017,10 @@ function renderSettings(entryVersion?: number) {
         <p id="update-status" role="status"></p>
         <p><a id="update-download" hidden>Download ZIP</a> <a id="update-notes" target="_blank" rel="noopener noreferrer" hidden>Release notes</a> <a href="https://github.com/elgiad007/office/releases" target="_blank" rel="noopener noreferrer">GitHub Releases</a></p>
       </section>
+    </section>
+    <section class="settings-grid" id="settings-profiles" data-settings-page="profiles"${settingsPage==='profiles'?'':' hidden'}>
+      <section class="card"><h2>Profiles</h2><p>Signed in as <strong>${e(activeProfile?.name||'Default')}</strong>. Each profile has its own workspace and password.</p>
+      ${installationOwner?'<p>Create a single-use code for someone to enter under Create profile on the sign-in screen.</p><button type="button" id="create-profile-invite">Create invitation</button>':''}</section>
     </section>
     <section class="settings-grid" id="settings-swipe" data-settings-page="swipe"${settingsPage==='swipe'?'':' hidden'}>
       <section class="card"><h2>Swipe actions</h2><p>Swipe across a row on a touchscreen or with a pen. Move to folder opens the folder picker for synced mail.</p>
@@ -3016,6 +3111,8 @@ function renderSettings(entryVersion?: number) {
   };
   renderBackupStatus();
   main.querySelector<HTMLButtonElement>('#check-update')!.onclick=()=>void checkOfficeUpdate();
+  const invite=main.querySelector<HTMLButtonElement>('#create-profile-invite');
+  if(invite)invite.onclick=async()=>{invite.disabled=true;try{await attempt(createProfileInvitation);}finally{invite.disabled=false;}};
   main.querySelector<HTMLButtonElement>('#install-update')!.onclick=()=>{
     const version=updateRelease?.latest;
     if(version&&updateRelease?.canInstall&&!updateInstalling)confirmation('Install Office '+version,'Office will restart after downloading the update. Save any open edits in other Office tabs first.',()=>installOfficeUpdate(version),'Install and restart');

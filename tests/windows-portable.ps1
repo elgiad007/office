@@ -1,4 +1,4 @@
-param([int]$Port=8775,[switch]$CleanupOnly)
+param([int]$Port=8775,[switch]$CleanupOnly,[string]$Archive)
 $ErrorActionPreference='Stop'
 $officeRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if($CleanupOnly){
@@ -11,7 +11,8 @@ if($CleanupOnly){
     exit 0
 }
 $officeSmoke=Join-Path $officeRoot ('.runtime\portable smoke test '+[Guid]::NewGuid().ToString('N'))
-Expand-Archive -LiteralPath (Join-Path $officeRoot 'dist\portable-office-windows.zip') -DestinationPath $officeSmoke
+if (!$Archive) { $Archive=Join-Path $officeRoot 'dist\portable-office-windows.zip' }
+Expand-Archive -LiteralPath $Archive -DestinationPath $officeSmoke
 $officeExtracted=Join-Path $officeSmoke 'office'
 $officeUrl="http://127.0.0.1:$Port/api.php?r="
 $officeStarted=$false

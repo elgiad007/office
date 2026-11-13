@@ -21,14 +21,24 @@ try {
     if ($route==='update-progress' && $method==='GET') json_response(office_update_progress($_GET['job']??null));
     start_session();
     if ($route==='status' && $method==='GET') {
-        $ready=setting('owner')!==null; if (!$ready) setup_token();
-        $authenticated=!empty($_SESSION['owner']);
-        json_response(['setup'=>!$ready,'authenticated'=>$authenticated,'activity'=>$authenticated,'csrf'=>$_SESSION['csrf'],'extensions'=>['sqlite'=>true,'openssl'=>extension_loaded('openssl'),'curl'=>extension_loaded('curl'),'dom'=>extension_loaded('dom')],'preferences'=>$authenticated?setting('preferences',[]):[],'lastInteraction'=>$authenticated?$_SESSION['seen']:null,'remoteSenderIcons'=>$authenticated && getenv('OFFICE_REMOTE_SENDER_ICONS')==='1']);
+        $profiles=office_profiles();
+        if (!$profiles) setup_token();
+        $profile=($_GET['picker']??'')==='1'?null:office_session_profile();
+        if ($profile) {
+            office_bind_profile($profile);
+            $expected=$_SERVER['HTTP_X_OFFICE_PROFILE']??null;
+            if ($expected!==null) office_require_profile_context($expected);
+        }
+        $authenticated=$profile!==null;
+        json_response(['setup'=>!$profiles,'profiles'=>$authenticated?[]:$profiles,'profile'=>$profile,'installationOwner'=>$profile && $profile['id']===OFFICE_DEFAULT_PROFILE,'authenticated'=>$authenticated,'activity'=>$authenticated,'csrf'=>$_SESSION['csrf'],'extensions'=>['sqlite'=>true,'openssl'=>extension_loaded('openssl'),'curl'=>extension_loaded('curl'),'dom'=>extension_loaded('dom')],'preferences'=>$authenticated?setting('preferences',[]):[],'lastInteraction'=>$authenticated?$_SESSION['seen']:null,'remoteSenderIcons'=>$authenticated && getenv('OFFICE_REMOTE_SENDER_ICONS')==='1']);
     }
     if ($route==='oauth-callback' && $method==='GET') {
-        owner(); $oauth=$_SESSION['oauth']??null; unset($_SESSION['oauth']);
+        owner(); $oauth=$_SESSION['oauth']??null;
+        if (!$oauth || ($oauth['profile']??null)!==office_request_profile()['id'] || time()-$oauth['time']>600 || !is_string($_GET['state']??null) || !hash_equals($oauth['state'],$_GET['state'])) {
+            header('Location: ./?profile-picker=1&google-expired=1',true,303); exit;
+        }
+        unset($_SESSION['oauth']);
         try {
-            if (!$oauth || time()-$oauth['time']>600 || !is_string($_GET['state']??null) || !hash_equals($oauth['state'],$_GET['state'])) fail('Expired or invalid Google authorization. Connect again.');
             if (!empty($_GET['error']) || !is_string($_GET['code']??null) || !$_GET['code']) fail('Google authorization was cancelled or denied. You can try connecting again.');
             $s=decrypt_secret($oauth['credentials']);
             $response=web_request('https://oauth2.googleapis.com/token','POST',['Content-Type: application/x-www-form-urlencoded'],http_build_query(['code'=>$_GET['code'],'client_id'=>$s['client_id'],'client_secret'=>$s['client_secret'],'redirect_uri'=>$oauth['redirect'],'grant_type'=>'authorization_code','code_verifier'=>$oauth['verifier']]));
@@ -45,34 +55,32 @@ try {
     }
     $sqliteRestore=$route==='restore' && ($_SERVER['CONTENT_TYPE']??'')===OFFICE_BACKUP_TYPE;
     if (!in_array($method,['GET','POST'],true)) fail('Method not allowed.',405);
-    if (in_array($route,['setup','login','reauthenticate'],true) && $method==='POST') {
-        if ($route==='reauthenticate') owner();
+    if (in_array($route,['setup','login','profile-create','reauthenticate'],true) && $method==='POST') {
+        if ($route==='reauthenticate') {
+            owner();
+            office_require_profile_context($_SERVER['HTTP_X_OFFICE_PROFILE']??null);
+        }
         csrf();
         throttle();
         $input=request_json(16384);
         if ($route==='setup') {
-            if (setting('owner')!==null) fail('Already configured.',409);
-            $token=$input['token']??null;
-            if (!is_string($token) || !hash_equals(setup_token(),$token)) fail('Incorrect setup token.',403);
-            $password=$input['password']??null;
-            $algorithm=owner_password_algorithm();$maxBytes=$algorithm===PASSWORD_BCRYPT?72:1024;
-            if (!is_string($password) || strlen($password)<12 || strlen($password)>$maxBytes || str_contains($password,"\0")) fail("Use a password between 12 and $maxBytes bytes, without null characters.");
-            $hash=password_hash($password,$algorithm); $db=db(); $db->exec('BEGIN IMMEDIATE');
-            try { if (setting('owner')!==null) fail('Already configured.',409); set_setting('owner',['password'=>$hash]); $db->exec('COMMIT'); } catch(Throwable $e) { $db->exec('ROLLBACK'); throw $e; }
-            @unlink(data_dir().'/setup-token.txt');
-        } elseif (!verify_owner_password($input['password']??null)) {
-            fail('Incorrect password.',$route==='reauthenticate'?403:401);
-        }
-        $now=time();
-        if ($route==='reauthenticate') {
-            $_SESSION['seen']=$_SESSION['verified_at']=$now;
+            $profile=office_create_first_profile($input);
+        } elseif ($route==='profile-create') {
+            $profile=office_redeem_profile_invite($input);
+        } elseif ($route==='reauthenticate') {
+            if (!verify_owner_password($input['password']??null)) fail('Incorrect password.',403);
+            $_SESSION['seen']=$_SESSION['verified_at']=time();
             json_response(['ok'=>true]);
+        } else {
+            office_profiles();
+            $profile=office_find_profile($input['profile']??OFFICE_DEFAULT_PROFILE);
+            if (!$profile || !verify_owner_password($input['password']??null,office_profile_database($profile))) fail('Incorrect profile or password.',401);
         }
-        session_regenerate_id(true);
-        $_SESSION=['owner'=>true,'csrf'=>bin2hex(random_bytes(32)),'seen'=>$now,'signed_in'=>$now,'verified_at'=>$now];
-        json_response(['ok'=>true,'csrf'=>$_SESSION['csrf']]);
+        office_start_profile_session($profile);
+        json_response(['ok'=>true,'csrf'=>$_SESSION['csrf'],'profile'=>$profile]);
     }
     owner();
+    office_require_profile_context($_SERVER['HTTP_X_OFFICE_PROFILE']??null);
     if ($method==='POST') {
         csrf();
         $input=$sqliteRestore?[]:request_json($route==='restore'?128*1024*1024:16*1024*1024);
@@ -81,15 +89,22 @@ try {
         $_SESSION['seen']=time();
         json_response(['ok'=>true]);
     }
+    if (in_array($route,['update-install','profile-invite'],true)) office_require_installation_owner();
     if (($route==='backup' && $method==='GET') ||
         ($route==='update-install' && $method==='POST') ||
+        ($route==='profile-invite' && $method==='POST') ||
         ($route==='mail-empty-junk' && $method==='POST' && ($input['action']??null)==='empty') ||
         ($route==='google-connect' && $method==='POST' && ($input['permanentDelete']??false)===true)) {
         require_recent_sign_in();
     }
+    if ($route==='profile-invite' && $method==='POST') json_response(office_issue_profile_invite(),201);
     if ($route==='update-check' && $method==='GET') {
         session_write_close();
-        try { json_response(office_update_check()); }
+        try {
+            $update=office_update_check();
+            if (office_request_profile()['id']!==OFFICE_DEFAULT_PROFILE) $update['canInstall']=false;
+            json_response($update);
+        }
         catch (RuntimeException $error) { fail($error->getMessage(),503); }
     }
     if ($route==='update-install' && $method==='POST') {

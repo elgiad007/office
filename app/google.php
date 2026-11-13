@@ -50,7 +50,7 @@ function start_google_connection(array $input): string {
     }
     $state = bin2hex(random_bytes(24));
     $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
-    $_SESSION['oauth'] = ['account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,'requestedPermanentDelete'=>$requestedPermanentDelete,'imapSpam'=>$imapSpam,
+    $_SESSION['oauth'] = ['profile'=>office_request_profile()['id']??OFFICE_DEFAULT_PROFILE,'account'=>$a['id'] ?? null,'email'=>$email,'label'=>$label,'calendar'=>$calendar,'redirect'=>$redirect,'permanentDelete'=>$permanentDelete,'requestedPermanentDelete'=>$requestedPermanentDelete,'imapSpam'=>$imapSpam,
         'credentials'=>encrypt_secret(['client_id'=>$credentials['client_id'],'client_secret'=>$credentials['client_secret']]),
         'state'=>$state,'verifier'=>$verifier,'time'=>time()];
     return 'https://accounts.google.com/o/oauth2/v2/auth?'.http_build_query([

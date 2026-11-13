@@ -7,7 +7,7 @@ header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store');
 try {
     if(getenv('OFFICE_REMOTE_SENDER_ICONS')!=='1')fail('Remote sender icons are disabled.',404);
-    start_session();owner();session_write_close();
+    start_session();owner();office_require_profile_context($_GET['profile']??null);session_write_close();
     if($_SERVER['REQUEST_METHOD']!=='GET')fail('Method not allowed.',405);
     if(isset($_SERVER['HTTP_SEC_FETCH_SITE']) && $_SERVER['HTTP_SEC_FETCH_SITE']!=='same-origin')fail('Same-origin image request required.',403);
     serve_sender_favicon((string)($_GET['domain']??''));

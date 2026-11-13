@@ -2,6 +2,7 @@
 import { escapeHtml as e } from './formats.js';
 import { messageTime } from './mail-sort.js';
 import { timestampLabel } from './time-labels.js';
+import { profileQuery } from './profile-context.js';
 const fields = { none: 'Hidden', sender: 'Sender', date: 'Sent date', subject: 'Subject', attachment: 'Attachment', preview: 'Body preview' };
 export function senderDomain(from) {
     const address = from.match(/<([^<>]+)>/)?.[1] || from.trim();
@@ -11,7 +12,7 @@ export function senderDomain(from) {
 export function renderMailListIcon(record, selected, fallback, remoteIcons = false) {
     const domain = remoteIcons ? senderDomain(record.meta.from || '') : undefined;
     const count = record.connectionCount || 0;
-    return `<span class="item-icon mail-list-icons"><span class="mail-sender-icon" aria-hidden="true">${selected ? '✓' : `${fallback}${domain ? `<img class="mail-sender-favicon" src="sender-favicon.php?domain=${encodeURIComponent(domain)}&amp;v=2" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}`}</span><span class="mail-list-connections" ${count ? '' : 'hidden'} title="${count} ${count === 1 ? 'connection' : 'connections'}" aria-label="${count} ${count === 1 ? 'connection' : 'connections'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2"/></svg><span>${count}</span></span></span>`;
+    return `<span class="item-icon mail-list-icons"><span class="mail-sender-icon" aria-hidden="true">${selected ? '✓' : `${fallback}${domain ? `<img class="mail-sender-favicon" src="sender-favicon.php?domain=${encodeURIComponent(domain)}${profileQuery()}&amp;v=2" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}`}</span><span class="mail-list-connections" ${count ? '' : 'hidden'} title="${count} ${count === 1 ? 'connection' : 'connections'}" aria-label="${count} ${count === 1 ? 'connection' : 'connections'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2"/></svg><span>${count}</span></span></span>`;
 }
 export function bindMailFavicons(container) {
     container.querySelectorAll('.mail-sender-favicon').forEach(img => {

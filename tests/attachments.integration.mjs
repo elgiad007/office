@@ -12,6 +12,7 @@ import {testMailHeaders} from './mail-headers.browser.mjs';
 import {testLargeMail} from './large-mail.browser.mjs';
 import {testMailCompact} from './mail-compact.browser.mjs';
 import {testMailReaderSync} from './mail-reader-sync.browser.mjs';
+import {testProfiles} from './profiles.browser.mjs';
 
 const require=createRequire(process.env.OFFICE_NODE_MODULES||new URL('../package.json',import.meta.url)),{chromium}=require('playwright');
 await mkdir('.runtime',{recursive:true});await mkdir('test-results',{recursive:true});
@@ -32,14 +33,16 @@ let browser;const errors=[],serverLog=[],requests=new Set();server.stderr.on('da
 try{
   for(let i=0;i<60;i++){try{if((await fetch(url+'api.php?r=status')).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   browser=await chromium.launch({headless:true,...(process.env.OFFICE_BROWSER_CHANNEL?{channel:process.env.OFFICE_BROWSER_CHANNEL}:{})});
-  const page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',error=>errors.push(error.message));
+  const context=await browser.newContext({viewport:{width:1440,height:1000}});
+  const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   page.on('request',r=>requests.add(r.url()));page.on('requestfinished',r=>requests.delete(r.url()));page.on('requestfailed',r=>requests.delete(r.url()));
   try{
     await page.goto(url);await page.getByLabel('Setup token',{exact:true}).fill((await readFile(data+'/setup-token.txt','utf8')).trim());
     await page.getByLabel('Create password (at least 12 characters)',{exact:true}).fill('attachment-tests-only-123');
     await page.getByRole('button',{name:'Create workspace',exact:true}).click();await page.getByRole('button',{name:'Compose',exact:true}).waitFor();
-    await testMessageHeaders(page,url);await testMailReaderSync(page,url);await testMailCompact(page,url);await testAttachments(page,url);await testMailHtml(page,url);await testMailCache(page,url);await testMailHeaders(page,url);await testLargeMail(page,url);
+    if(process.argv.includes('--profiles')) await testProfiles(page,url,'attachment-tests-only-123');
+    else {await testMessageHeaders(page,url);await testMailReaderSync(page,url);await testMailCompact(page,url);await testAttachments(page,url);await testMailHtml(page,url);await testMailCache(page,url);await testMailHeaders(page,url);await testLargeMail(page,url);}
     if(errors.length)throw Error(errors.join('\n'));
-    console.log('PASS attachment integration and mail HTML, original-cache, header and large-message regressions.');
+    if(!process.argv.includes('--profiles'))console.log('PASS attachment integration and mail HTML, original-cache, header and large-message regressions.');
   }catch(error){console.error('Browser errors:',errors,'Pending requests:',Array.from(requests));console.error(serverLog.join('').slice(-3000));console.error((await page.locator('body').innerText()).slice(-1600));await page.screenshot({path:'test-results/attachments-failure.png',fullPage:true});throw error;}
 }finally{await browser?.close();server.kill();proxy.closeAllConnections();await new Promise(resolve=>proxy.close(resolve));}

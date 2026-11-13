@@ -143,11 +143,15 @@ export interface GoogleSettings {
   configured: boolean; client_id: string; redirect: string;
   notice?: { error: boolean; message: string } | null;
 }
+export interface Profile { id: string; name: string }
 export interface Status {
   setup: boolean; authenticated: boolean; activity: boolean;
   csrf: string; preferences: Preferences;
   lastInteraction?: number | null;
   remoteSenderIcons?: boolean;
+  profiles?: Profile[];
+  profile?: Profile | null;
+  installationOwner?: boolean;
 }
 export interface MutationResult { record: OfficeRecord; removedIds?: string[] }
 export interface CalendarSearchMatch {
@@ -162,6 +166,7 @@ export interface ApiResponses {
   status: Status;
   accounts: { accounts: Account[] };
   setup: { csrf: string }; login: { csrf: string }; logout: { ok: boolean };
+  'profile-create': {csrf: string}; 'profile-invite': {code: string; expires: number};
   'session-activity': { ok: boolean }; reauthenticate: { ok: boolean };
   save: MutationResult; delete: { ok: boolean; undoToken?: string }; 'mail-action': MailActionResult;
   'mail-undo': MutationResult;
@@ -194,8 +199,9 @@ export interface ConnectionItem {id:string;kind:string;title:string;excerpt:stri
 export interface ConnectionEdge {a:string;b:string;created:string;archived?:boolean}
 export interface ConnectionGroup {id:string;title:string;kind:string;items:number;links:number;archivedLinks?:number}
 export interface ConnectionList {links:ConnectionEdge[];items:ConnectionItem[];more:boolean;total?:number;activeTotal?:number;archivedTotal?:number;groups?:ConnectionGroup[];itemTotal?:number;groupTotal?:number}
-export type ApiRoute = keyof ApiResponses | `records&${string}` | `record&${string}` | `history&${string}` | `connection-search&${string}` | `connections&${string}` | `calendar-original&${string}`;
+export type ApiRoute = keyof ApiResponses | 'status&picker=1' | `records&${string}` | `record&${string}` | `history&${string}` | `connection-search&${string}` | `connections&${string}` | `calendar-original&${string}`;
 export type ApiResponse<R extends ApiRoute> = R extends keyof ApiResponses ? ApiResponses[R]
+  : R extends 'status&picker=1' ? Status
   : R extends `connection-search&${string}` ? {items:ConnectionItem[]}
   : R extends `connections&${string}` ? ConnectionList
   : R extends `records&${string}` ? RecordList

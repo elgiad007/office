@@ -4,6 +4,7 @@ import {showProgressDialog} from './utils.js';
 import {itemTypes,type ItemKind} from './item-types.js';
 import {connectionLayout,connectionGroupLayout,connectionTitleLines,connectionNeighbor,connectionArrivalPoint,visibleConnectionItems,GRAPH_LIMIT,GROUP_CARD} from './connection-layout.js';
 import type {ConnectionItem,ConnectionList,ConnectionVisibility,RequestApi} from './types.js';
+import {profileStorageKey} from './profile-context.js';
 
 type Place={mode:'overview'|'graph'|'items';id:string;group:string;q:string;kind:string};
 type Camera={x:number;y:number;w:number;h:number};
@@ -55,12 +56,12 @@ export async function openConnectionExplorer(env:Env,source='') {
   const status=query<HTMLElement>('[data-connection-status]');
   const highlightToggle=query<HTMLButtonElement>('[data-neighbor-highlight]');
   let highlightNeighbors=true;
-  try{highlightNeighbors=localStorage.getItem(NEIGHBOR_HIGHLIGHT_KEY)!=='off';}catch{/* Storage may be unavailable. */}
+  try{highlightNeighbors=localStorage.getItem(profileStorageKey(NEIGHBOR_HIGHLIGHT_KEY))!=='off';}catch{/* Storage may be unavailable. */}
   highlightToggle.setAttribute('aria-pressed',String(highlightNeighbors));
   highlightToggle.onclick=()=>{
     highlightNeighbors=!highlightNeighbors;
     highlightToggle.setAttribute('aria-pressed',String(highlightNeighbors));
-    try{localStorage.setItem(NEIGHBOR_HIGHLIGHT_KEY,highlightNeighbors?'on':'off');}catch{/* Keep the in-page choice. */}
+    try{localStorage.setItem(profileStorageKey(NEIGHBOR_HIGHLIGHT_KEY),highlightNeighbors?'on':'off');}catch{/* Keep the in-page choice. */}
     selection();
   };
   const textMeasure=document.createElement('canvas').getContext('2d');

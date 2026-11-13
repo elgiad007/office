@@ -1,6 +1,7 @@
 // Generated from frontend/mail-attachments.ts by pnpm build. Do not edit.
 import { escapeHtml as e } from './formats.js';
 import { mobileActionLabel } from './mobile-layout.js';
+import { profileQuery } from './profile-context.js';
 let pending = null;
 let lastError = '';
 export async function waitForAttachments() { const active = pending; await active; if (active && lastError)
@@ -12,7 +13,7 @@ export function attachmentSection(record) {
     const contents = `<div class="head-actions">${draft ? `<strong>Attachments</strong><button type="button" data-attach class="mobile-icon-button" aria-label="Add files">${mobileActionLabel('attach', 'Add files')}</button><input class="file-input" type="file" multiple data-attach-input aria-label="Attach files">` : '<button type="button" data-file-list>Check attachments</button>'}<button type="button" data-save-files hidden>Save all</button></div><div data-file-rows></div><p class="muted" data-file-status role="status">${draft ? 'Choose files or drop them into this message. Up to 10 MB per file, 20 MB total.' : 'Files download when you choose Preview, Download, or Save all.'}</p>`;
     return draft ? `<section class="mail-attachments" aria-label="Attachments" data-mail-files>${contents}</section>` : `<details class="mail-files-disclosure" data-mail-disclosure="files" data-mail-files><summary>Attachments${record.meta.attachments?.length ? ' (' + record.meta.attachments.length + ')' : ''}</summary><section class="mail-reader-popover mail-files-popover" aria-label="Attachments">${contents}</section></details>`;
 }
-const fileUrl = (id, part) => `mail-file.php?id=${encodeURIComponent(id)}${part === undefined ? '&all=1' : '&part=' + encodeURIComponent(part)}`;
+const fileUrl = (id, part) => `mail-file.php?id=${encodeURIComponent(id)}${profileQuery()}${part === undefined ? '&all=1' : '&part=' + encodeURIComponent(part)}`;
 function saveUrl(url) { const link = document.createElement('a'); link.href = url; link.download = ''; document.body.append(link); link.click(); link.remove(); }
 const size = (bytes) => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : bytes >= 1024 ? Math.ceil(bytes / 1024) + ' KB' : bytes + ' B';
 function base64(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(Error('Could not read ' + file.name)); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file); }); }

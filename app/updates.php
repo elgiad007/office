@@ -36,7 +36,7 @@ function office_update_request_gate(): void {
         $token=trim((string)file_get_contents($marker));
         if ($token!=='' && hash_equals($token,$_SERVER['HTTP_X_OFFICE_UPDATE_HEALTH']??'')) return;
     }
-    $lock=@fopen(data_dir().'/update-requests.lock','c+b');
+    $lock=@fopen(installation_data_dir().'/update-requests.lock','c+b');
     if (!$lock || !flock($lock,LOCK_SH|LOCK_NB) || is_file($marker)) {
         http_response_code(503);
         header('Cache-Control: no-store');

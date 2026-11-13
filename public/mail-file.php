@@ -6,7 +6,8 @@ header('Cache-Control: no-store');header('X-Content-Type-Options: nosniff');head
 // Attachment content never shares Office's script or network permissions.
 header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'; sandbox");
 try{
-    start_session();owner();$r=get_record((string)($_GET['id']??''));session_write_close();
+    start_session();owner();office_require_profile_context($_GET['profile']??null);
+    $r=get_record((string)($_GET['id']??''));session_write_close();
     if($r['kind']!=='mail')fail('Choose mail.');
     if(($_GET['all']??'')==='1'){$bytes=attachment_zip($r);$name='attachments.zip';$type='application/zip';$preview=false;}
     else {

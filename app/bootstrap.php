@@ -6,17 +6,27 @@ require_once __DIR__.'/attachments.php';
 require_once __DIR__.'/connections.php';
 require_once __DIR__.'/mail-index.php';
 require_once __DIR__.'/updates.php';
+require_once __DIR__.'/profiles.php';
 office_update_request_gate();
 
-function data_dir(): string {
+function installation_data_dir(): string {
     $dir = getenv('OFFICE_DATA_DIR') ?: dirname(__DIR__) . '/data';
-    if (!is_dir($dir) && !mkdir($dir, 0700, true)) throw new RuntimeException('Cannot create private data directory.');
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) throw new RuntimeException('Cannot create private data directory.');
     return $dir;
 }
+function data_dir(): string {
+    $profile=office_request_profile();
+    if ($profile) return office_profile_dir($profile['id']);
+    if (PHP_SAPI==='cli') return installation_data_dir();
+    fail('Sign in required.',401);
+}
 function db(): PDO {
-    static $db;
-    if ($db) return $db;
-    $db = new PDO('sqlite:' . data_dir() . '/office.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    return workspace_db(data_dir());
+}
+function workspace_db(string $dir): PDO {
+    static $databases=[];
+    if (isset($databases[$dir])) return $databases[$dir];
+    $db = new PDO('sqlite:' . $dir . '/office.sqlite', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     $db->exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
     $db->exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, meta TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, updated TEXT NOT NULL);
@@ -26,7 +36,7 @@ function db(): PDO {
         CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, label TEXT NOT NULL, type TEXT NOT NULL, config TEXT NOT NULL, secret TEXT NOT NULL, last_sync TEXT, error TEXT);
         CREATE TABLE IF NOT EXISTS attempts (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, started INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS mail_files (record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, part TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(record_id,part));');
-    @chmod(data_dir() . '/office.sqlite', 0600);
+    @chmod($dir . '/office.sqlite', 0600);
     $db->exec('CREATE TABLE IF NOT EXISTS connections (a TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, b TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE, created TEXT NOT NULL, PRIMARY KEY(a,b), CHECK(a<b)); CREATE INDEX IF NOT EXISTS connections_b ON connections(b);');
     if(!in_array('archived',array_column($db->query('PRAGMA table_info(connections)')->fetchAll(),'name'),true)){
         $db->exec('BEGIN IMMEDIATE');
@@ -37,7 +47,7 @@ function db(): PDO {
     }
     $db->exec('CREATE INDEX IF NOT EXISTS connections_active_a ON connections(archived,a); CREATE INDEX IF NOT EXISTS connections_active_b ON connections(archived,b);');
     ensure_mail_index($db);
-    return $db;
+    return $databases[$dir]=$db;
 }
 function setting(string $key, mixed $fallback = null): mixed {
     $q = db()->prepare('SELECT value FROM settings WHERE key=?'); $q->execute([$key]);
@@ -66,35 +76,41 @@ function start_session(): void {
     ini_set('session.use_only_cookies','1');
     ini_set('session.gc_maxlifetime','3600');
     session_name('portable_office');
-    session_save_path(data_dir());
+    session_save_path(installation_data_dir());
     session_set_cookie_params(['httponly'=>true,'secure'=>!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off','samesite'=>'Lax','path'=>'/','domain'=>'']);
     session_start();
     $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
     $now=time();
-    if (!empty($_SESSION['owner']) && ($now-($_SESSION['seen']??0)>=3600 || $now-($_SESSION['signed_in']??0)>=12*3600)) {
+    if (isset($_SESSION['owner']) || (isset($_SESSION['profile']) && ($now-($_SESSION['seen']??0)>=3600 || $now-($_SESSION['signed_in']??0)>=12*3600))) {
         $_SESSION=['csrf'=>bin2hex(random_bytes(32))];
     }
 }
 function csrf(): void {
     if (!hash_equals($_SESSION['csrf'], $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '')) fail('Session expired. Refresh and try again.',403);
 }
-function owner(): void { if (empty($_SESSION['owner'])) fail('Sign in required.',401); }
+function owner(): void {
+    $profile=office_session_profile();
+    if (!$profile) fail('Sign in required.',401);
+    office_bind_profile($profile);
+}
 function require_recent_sign_in(): void {
     if (time()-($_SESSION['verified_at']??0)>=300) fail('Confirm your password to continue.',428);
 }
 function owner_password_algorithm(): string|int {
     return in_array('argon2id',password_algos(),true)?PASSWORD_ARGON2ID:PASSWORD_BCRYPT;
 }
-function verify_owner_password(mixed $password): bool {
+function verify_owner_password(mixed $password, ?PDO $db=null): bool {
     if (!is_string($password) || strlen($password)>1024 || str_contains($password,"\0")) return false;
-    $user=setting('owner');
+    $db??=db();
+    $value=$db->query("SELECT value FROM settings WHERE key='owner'")->fetchColumn();
+    $user=$value===false?null:json_decode($value,true,512,JSON_THROW_ON_ERROR);
     if (!$user) return false;
     $bcrypt=password_get_info($user['password'])['algoName']==='bcrypt';
     if (($bcrypt && strlen($password)>72) || !password_verify($password,$user['password'])) return false;
     $algorithm=owner_password_algorithm();
     // A legacy bcrypt suffix was never verified. Upgrade only a fully checked password.
     if (($bcrypt || $algorithm!==PASSWORD_BCRYPT) && password_needs_rehash($user['password'],$algorithm)) {
-        $q=db()->prepare("UPDATE settings SET value=? WHERE key='owner' AND value=?");
+        $q=$db->prepare("UPDATE settings SET value=? WHERE key='owner' AND value=?");
         $q->execute([json_encode(['password'=>password_hash($password,$algorithm)],JSON_THROW_ON_ERROR),json_encode($user,JSON_THROW_ON_ERROR)]);
     }
     return true;
@@ -102,7 +118,7 @@ function verify_owner_password(mixed $password): bool {
 function throttle(): void {
     $bucket = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'local');
     $now=time();$cutoff=$now-900;
-    $q=db()->prepare('INSERT INTO attempts VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET
+    $q=office_profile_registry()->prepare('INSERT INTO attempts VALUES(?,1,?) ON CONFLICT(bucket) DO UPDATE SET
         count=CASE WHEN started<=? THEN 1 ELSE count+1 END,
         started=CASE WHEN started<=? THEN excluded.started ELSE started END
         WHERE count<10 OR started<=?');
@@ -115,7 +131,7 @@ function public_ipv4(string $ip): bool {
         && (int)explode('.',$ip,2)[0]<224;
 }
 function setup_token(): string {
-    $path = data_dir() . '/setup-token.txt';
+    $path = installation_data_dir() . '/setup-token.txt';
     // Exclusive creation prevents concurrent visitors from choosing different tokens.
     if ($file = @fopen($path, 'x')) { chmod($path,0600); fwrite($file, bin2hex(random_bytes(24))); fclose($file); }
     $token=trim((string)file_get_contents($path));
