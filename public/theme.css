@@ -287,6 +287,8 @@ dialog.connection-opening-dialog[open] { display:grid; place-items:center; }
 .mail-group-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-group-count { margin-left: auto; color: var(--muted); font-weight: 400; }
 .list-summary:has(#mail-list-view) { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; position: relative; }
+#mail-show-more { padding: 4px 7px; font-size: 12px; }
+#mail-show-more[hidden] { display: none; }
 #mail-list-view { margin-left: auto; font-size: 12px; }
 #mail-list-view > summary { cursor: pointer; padding: 3px 5px; border-radius: 4px; }
 .mail-view-menu { position: absolute; top: 100%; right: 6px; z-index: 8; width: min(270px, calc(100% - 12px)); padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 6px 20px #0002; color: var(--text); }

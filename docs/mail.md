@@ -6,7 +6,7 @@ Open **Mail**, press `g 1`, or enter `:mail`. Use the Mail sidebar to browse loc
 
 ## Browse and search
 
-Expand an account and choose **Refresh folders** to discover its IMAP folders or Gmail labels. Open a folder to refresh it. **Load next batch** indexes more messages from the server. **Show next 100 messages** reveals more rows from the existing cache. The cached count can grow as older mail downloads.
+Expand an account and choose **Refresh folders** to discover its IMAP folders or Gmail labels. Open a folder to refresh it. **Load next batch** indexes more messages from the server. The count above the message list shows how many cached messages are visible. Choose **Show next 100 messages** beside it to reveal more. The cached total can grow as older mail downloads.
 
 Search in the current view by subject, correspondent, or downloaded body text. Open **List view** above the message rows to group by date or sender, turn grouping off, or sort by date, sender, or subject. Select a group heading or choose **Expand all** or **Collapse all**. The default is newest first with date groups. Open Junk, Trash, or Recovery copies separately to see messages outside **All cached mail**.
 

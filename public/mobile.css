@@ -177,6 +177,7 @@
   .help-table td:empty { display: none; }
 
   #main :is(.search-wrap, .list-summary) { padding: 6px 10px; }
+  #mail-show-more { min-height: 44px; }
   .search-wrap:has([data-action="mobile-folders"]) { display: flex; gap: 6px; flex-wrap: wrap; }
   .search-wrap label { flex: 1 1 140px; min-width: 0; }
   .search-wrap .folder-current { flex: 1 0 100%; min-width: 0; margin-top: 0; }

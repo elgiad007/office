@@ -1544,7 +1544,7 @@ function renderWorkspace(readerSnapshot, restoringNavigation = false) {
     }
     const folderButtons = state.app === 'mail' ? `<button type="button" class="mobile-only mobile-icon-button" data-action="mobile-folders" aria-label="Folders" title="Folders">${mobileIcon('folder')}</button>
     <button type="button" id="desktop-mail-folders" data-action="toggle-mail-folders" aria-label="Folders" title="Folders" aria-controls="mail-folder-navigation" aria-expanded="${!!root.querySelector('.folders-open')}">${mobileIcon('folder')}</button>` : '';
-    document.querySelector('#main').innerHTML = `<div class="work-grid">${mobileItemControls}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${folderButtons}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected ' + a.singular)}</div>`;
+    document.querySelector('#main').innerHTML = `<div class="work-grid">${mobileItemControls}<section id="item-list-pane" class="list-pane" aria-label="${a.name} list"><div class="search-wrap">${folderButtons}<label><span class="file-input">Search ${a.name}</span><input id="search" type="search" value="${e(state.search)}" placeholder="Search ${a.name.toLowerCase()}…   /" autocomplete="off"></label></div><div class="list-summary"><span id="list-count"${state.app === 'mail' ? ' aria-live="polite"' : ''}></span><span id="selection-count"></span></div><div class="items" id="items" role="region" aria-label="Items"></div><div class="bottom-hint"><span><kbd>j</kbd> <kbd>k</kbd> navigate</span><span><kbd>i</kbd> edit</span><span><kbd>?</kbd> help</span></div>${panelSplitter('list')}</section>${itemPane('Selected ' + a.singular)}</div>`;
     panelSizing.bindList(document.querySelector('[data-resize-panel="list"]'));
     document.querySelector('#search').oninput = event => { state.search = event.target.value; mailListLimit = 100; renderList(); };
     if (state.app === 'tasks')
@@ -1606,6 +1606,7 @@ function setMailView(value) {
 function bindMailViewControls() {
     const prefs = mailViewPreferences(state.prefs.mailView);
     const options = (values, selected) => Object.entries(values).map(([key, label]) => `<option value="${key}" ${key === selected ? 'selected' : ''}>${label}</option>`).join('');
+    document.querySelector('.list-summary').insertAdjacentHTML('beforeend', '<button type="button" id="mail-show-more" aria-controls="items" hidden>Show next 100 messages</button>');
     document.querySelector('.list-summary').insertAdjacentHTML('beforeend', `<details id="mail-list-view"><summary class="mobile-icon-button" aria-label="List view" title="List view">${mobileIcon('listView')}<span class="mobile-icon-label">List view</span></summary><div class="mail-view-menu"><label>Group by<select aria-label="Group mail by" data-mail-group>${options({ date: 'Date', sender: 'Sender', none: 'None' }, prefs.group)}</select></label><label>Sort by<select aria-label="Sort mail by" data-mail-sort>${options({ 'date-desc': 'Date · newest first', 'date-asc': 'Date · oldest first', 'sender-asc': 'Sender · A–Z', 'sender-desc': 'Sender · Z–A', 'subject-asc': 'Subject · A–Z', 'subject-desc': 'Subject · Z–A' }, prefs.sort)}</select></label><div><button type="button" data-mail-expand>Expand all</button><button type="button" data-mail-collapse>Collapse all</button></div></div></details>`);
     const menu = document.querySelector('#mail-list-view');
     menu.querySelector('[data-mail-group]').onchange = event => setMailView({ ...mailViewPreferences(state.prefs.mailView), group: event.target.value });
@@ -1678,7 +1679,10 @@ function taskBadges(row) {
     return `<span class="task-badges"><span class="badge task-status">${row.meta.done ? '✓ Completed' : '○ Unfinished'}</span><span class="badge task-priority ${['high', 'normal', 'low'].includes(level) ? 'task-priority-' + level : ''}">${level === 'high' ? '↑' : level === 'low' ? '↓' : '•'} ${e(priority)}</span>${!row.meta.done && ['overdue', 'today'].includes(due) ? `<span class="badge task-due-${due}">${due === 'overdue' ? '! Overdue' : '◷ Due today'}</span>` : ''}</span>`;
 }
 function renderList() {
+    const showMore = document.querySelector('#mail-show-more');
     if (state.app === 'mail' && mailPage && mailPage.context !== mailQueryContext()) {
+        if (showMore)
+            showMore.hidden = true;
         document.querySelector('#items').innerHTML = '<div class="list-empty" role="status">Loading messages…</div>';
         document.querySelector('#list-count').textContent = 'Loading…';
         scheduleMailQuery();
@@ -1692,13 +1696,19 @@ function renderList() {
     }
     const model = state.app === 'mail' ? mailView(matchingRows(), state.prefs.mailView) : state.app === 'tasks' ? taskView(matchingRows(), state.prefs.taskView) : undefined;
     const rows = model?.rows || filteredRows(), count = document.querySelector('#list-count');
-    count.textContent = state.app === 'mail' ? `${mailPage?.more ? rows.length + ' of ' + mailPage.total : rows.length} cached ${rows.length === 1 && !mailPage?.more ? 'message' : 'messages'}` : `${rows.length} ${rows.length === 1 ? apps[state.app].singular : 'items'}`;
-    count.title = state.app === 'mail' ? 'Messages stored in Office for this view. This count can grow as older mail downloads.' : '';
     document.querySelector('#selection-count').textContent = state.selected.size ? `${state.selected.size} selected` : '';
     const expanded = model?.visible || rows;
     if (state.app === 'mail')
         mailListLimit = Math.max(mailListLimit, expanded.findIndex(r => r.id === state.current?.id) + 1);
     const visible = state.app === 'mail' ? expanded.slice(0, mailListLimit) : expanded;
+    if (state.app === 'mail') {
+        const total = mailPage?.more ? mailPage.total : rows.length;
+        const shown = visible.length === total ? String(total) : `${visible.length} of ${total}`;
+        count.textContent = `${shown} cached ${total === 1 ? 'message' : 'messages'}`;
+        count.title = 'Messages shown and total cached for this view. The total can grow as older mail downloads.';
+    }
+    else
+        count.textContent = `${rows.length} ${rows.length === 1 ? apps[state.app].singular : 'items'}`;
     const item = (r) => {
         const hint = state.app === 'mail' ? (r.meta.from || r.meta.to || r.meta.folder || 'Local archive') : state.app === 'calendar' ? (r.meta.start ? dateLabel(r.meta.start) + ' · ' : '') + e(r.meta.location || '') : state.app === 'tasks' ? (r.meta.done ? 'Completed' : r.meta.due ? 'Due ' + dateLabel(r.meta.due) : 'No due date') : state.app === 'contacts' ? e(r.meta.email || r.meta.company || '') : state.app === 'wiki' ? e(r.title.includes(':') ? r.title.split(':').slice(0, -1).join(':') : 'Root namespace') : state.app === 'lists' ? checklistProgress(r.meta.checklist ?? []) : 'Edited ' + dateLabel(r.updated);
         const selected = state.current?.id === r.id;
@@ -1727,21 +1737,27 @@ function renderList() {
     });
     if (focusedGroup)
         list.querySelector(`[data-mail-group-key="${CSS.escape(focusedGroup)}"]`)?.focus({ preventScroll: true });
-    if (state.app === 'mail' && (visible.length < expanded.length || mailPage?.more)) {
-        const button = document.createElement('button');
-        button.textContent = 'Show next 100 messages';
-        button.onclick = () => { mailListLimit += 100; if (mailPage?.more && mailListLimit > expanded.length) {
-            button.disabled = true;
-            void attempt(async () => { try {
-                await refreshMailQuery();
+    if (showMore) {
+        const hasMore = visible.length < expanded.length || !!mailPage?.more;
+        if (!hasMore && document.activeElement === showMore)
+            focusList();
+        showMore.hidden = !hasMore;
+        showMore.onclick = () => {
+            mailListLimit += 100;
+            if (!mailPage?.more || mailListLimit <= expanded.length) {
+                renderList();
+                return;
             }
-            finally {
-                button.disabled = false;
-            } });
-        }
-        else
-            renderList(); };
-        list.append(button);
+            showMore.disabled = true;
+            void attempt(async () => {
+                try {
+                    await refreshMailQuery();
+                }
+                finally {
+                    showMore.disabled = false;
+                }
+            });
+        };
     }
 }
 const bodyDownloads = new Set(), bodyFailures = new Set();

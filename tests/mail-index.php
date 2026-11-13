@@ -9,15 +9,23 @@ try {
     $legacy=new PDO('sqlite:'.$testDir.'/office.sqlite');
     $legacy->exec('CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,meta TEXT NOT NULL,revision INTEGER NOT NULL,updated TEXT NOT NULL)');
     $insert=$legacy->prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?)');
-    for($i=0;$i<205;$i++)$insert->execute([sprintf('mail-%03d',$i),'mail','Message '.$i,'Body '.$i,json_encode(['folder'=>'Inbox','date'=>gmdate(DATE_RFC2822,1700000000+$i),'hasAttachments'=>false,'hasHtml'=>false,'rawBase64'=>base64_encode(str_repeat('original ',100))]),1,'2026-01-01T00:00:00Z']);
+    for($i=0;$i<205;$i++)$insert->execute([sprintf('mail-%03d',$i),'mail','Message '.$i,'Body '.$i,json_encode(['folder'=>'Inbox','remote'=>true,'account'=>'indexed-imap','serverFolder'=>'INBOX','uidValidity'=>'1','providerId'=>(string)($i+1),'date'=>gmdate(DATE_RFC2822,1700000000+$i),'hasAttachments'=>false,'hasHtml'=>false,'rawBase64'=>base64_encode(str_repeat('original ',100))]),1,'2026-01-01T00:00:00Z']);
     $legacy=null;$db=db();
+    $db->prepare('INSERT INTO accounts(id,label,type,config,secret) VALUES(?,?,?,?,?)')->execute(['indexed-imap','Indexed IMAP','imap','{}','']);
     check_index((int)$db->query('SELECT COUNT(*) FROM mail_index')->fetchColumn()===205,'legacy mail backfilled');
     $first=mail_list_page(['page'=>'1']);$second=mail_list_page(['page'=>'1','offset'=>'100']);$last=mail_list_page(['page'=>'1','offset'=>'200']);
     check_index(count($first['records'])===100&&$first['mailPage']['total']===205&&$first['mailPage']['more'],'first page is bounded and has full count');
     $ids=array_column(array_merge($first['records'],$second['records'],$last['records']),'id');
     check_index(count(array_unique($ids))===205&&$ids[0]==='mail-204'&&end($ids)==='mail-000'&&!$last['mailPage']['more'],'stable pages in RFC message-date order without gaps');
     check_index(!isset($first['records'][0]['meta']['rawBase64'])&&$first['records'][0]['hasOriginal'],'paged summaries exclude originals');
-    check_index(count(mail_list_page(['folder'=>'Inbox'])['records'])===205,'complete scoped view available for search and alternate grouping');
+    $scope=['account'=>'indexed-imap','folder'=>'INBOX'];
+    $searchable=array_column(mail_list_page($scope)['records'],'id');
+    $browsable=[];
+    foreach([0,100,200] as $offset){
+        $page=mail_list_page($scope+['page'=>'1','offset'=>(string)$offset]);
+        $browsable=array_merge($browsable,array_column($page['records'],'id'));
+    }
+    check_index($searchable===$ids&&$browsable===$searchable,'all searchable IMAP Inbox messages are reachable through browsing');
     $plan=implode(' ',array_column($db->query("EXPLAIN QUERY PLAN SELECT id FROM mail_index WHERE folder='Inbox' ORDER BY message_time DESC,id LIMIT 100")->fetchAll(),'detail'));
     check_index(str_contains($plan,'mail_index_folder_date')&&!str_contains($plan,'TEMP B-TREE'),'folder/date query uses covering index without sorting');
     check_index(mail_index_time(['date'=>'invalid','sentAt'=>'2026-01-01T01:00:00+01:00'])===1767225600000&&mail_index_time([])===null,'invalid date falls back to sentAt; missing dates stay undated');

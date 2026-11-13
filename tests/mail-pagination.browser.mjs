@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export async function testMailPagination(page,url) {
-  const records=Array.from({length:235},(_,i)=>({id:`paged-${String(i).padStart(3,'0')}`,kind:'mail',title:`Message ${i}`,body:i===234?'Needle beyond first page':'Body',revision:1,summary:true,meta:{folder:i<230?'Inbox':'Archive',date:new Date(1760000000000-i*1000).toISOString(),from:'sender@example.com',read:true,hasAttachments:false}}));
+  const records=Array.from({length:235},(_,i)=>({id:`paged-${String(i).padStart(3,'0')}`,kind:'mail',title:`Message ${i}`,body:i===234?'Needle beyond first page':'Body',revision:1,summary:true,meta:{remote:true,account:'fixture-imap',serverFolder:i<230?'INBOX':'Archive',uidValidity:'1',providerId:String(235-i),folder:i<230?'Inbox':'Archive',date:new Date(1760000000000-i*1000).toISOString(),from:'sender@example.com',read:true,hasAttachments:false}}));
   records[229].body='Hidden inbox needle';
   let preferences={},fail=false,hold=false,release;const requests=[];
   const routes=t=>t.pathname.endsWith('/api.php')&&t.searchParams.get('r')!=='activity';
@@ -24,11 +24,14 @@ export async function testMailPagination(page,url) {
   });
   const items=page.locator('#items .item');
   const count=async n=>page.waitForFunction(n=>document.querySelectorAll('#items .item').length===n,n);
+  const showMore=page.getByRole('button',{name:'Show next 100 messages',exact:true});
+  const viewport=page.viewportSize();
   try {
     await page.goto(url+'?pagination#mail');await count(100);
     assert.match(await page.locator('#list-count').textContent(),/100 of 230/);
     assert.equal(requests[0].page,'1');assert.equal(requests[0].folder,'Inbox');
-    await page.getByRole('button',{name:'Show next 100 messages',exact:true}).click();await count(200);
+    assert.equal(await showMore.evaluate(button=>button.parentElement.matches('.list-summary')),true,'paging is available above the message rows');
+    await showMore.click();await count(200);
     await page.locator('#items [data-id="paged-199"]').click();await page.keyboard.press('j');
     await page.waitForFunction(()=>document.querySelector('#selected-item')?.dataset.id==='paged-200');
     await count(230);
@@ -48,6 +51,7 @@ export async function testMailPagination(page,url) {
     await page.getByLabel('Sort mail by',{exact:true}).selectOption('subject-desc');await count(100);
     await page.waitForFunction(()=>document.querySelector('#items .item')?.dataset.id==='paged-229');
     assert.equal(requests.at(-1).page,undefined);
+    assert.match(await page.locator('#list-count').textContent(),/100 of 230/);
     await page.locator('#mail-list-view summary').click();
     await page.locator('#mail-folder').selectOption('Archive');await count(5);
     assert.equal(requests.at(-1).folder,'Archive');
@@ -61,6 +65,15 @@ export async function testMailPagination(page,url) {
     await page.locator('#search').fill('Needle');await count(1);release();
     await page.waitForTimeout(100);
     assert.equal(await items.first().getAttribute('data-id'),'paged-234');
+    // After a reload, a phone user can reach the same Inbox search hit by browsing.
+    preferences={};
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(url+'?pagination-mobile#mail');await count(100);
+    assert.equal(await showMore.evaluate(button=>button.getBoundingClientRect().bottom<=innerHeight),true);
+    await showMore.click();await count(200);
+    await showMore.click();await count(230);
+    assert.equal(await items.last().getAttribute('data-id'),'paged-229');
+    assert.equal(await showMore.isVisible(),false);
     console.log('PASS paginated mail: bounds, older keyboard navigation, full search/sort, cache, folders, retry and stale responses.');
-  }finally{release?.();await page.unroute(routes);}
+  }finally{release?.();if(viewport)await page.setViewportSize(viewport);await page.unroute(routes);}
 }
