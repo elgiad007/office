@@ -6,6 +6,9 @@ function mail_index_time(array $meta): ?int {
     foreach (['date','sentAt'] as $key) {
         $value=$meta[$key]??null;
         if(!is_string($value)||trim($value)==='')continue;
+        // In an RFC mail date, the numeric offset is authoritative. PHP can
+        // mistake a trailing comment such as (UTC) for a second timezone.
+        $value=preg_replace('/([+-][0-9]{4})(?:\s*\([^()]*\))+\s*$/D','$1',$value)??$value;
         $parts=date_parse($value);
         if($parts['error_count']||$parts['warning_count']||!$parts['year']||!$parts['month']||!$parts['day'])continue;
         try {$date=new DateTimeImmutable($value,new DateTimeZone('UTC'));return (int)$date->format('U')*1000+(int)$date->format('v');}
@@ -25,11 +28,14 @@ function mail_index_record(PDO $db,string $id,string $kind,array $meta): void {
 }
 
 function ensure_mail_index(PDO $db): void {
-    if($db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mail_index'")->fetchColumn())return;
+    $indexExists=static fn()=> (bool)$db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mail_index'")->fetchColumn();
+    $timeVersion=static fn()=> (int)$db->query("SELECT value FROM settings WHERE key='mail-index-time-version'")->fetchColumn();
+    if($indexExists() && $timeVersion()>=1)return;
     $db->exec('BEGIN IMMEDIATE');
     try {
         // Another request may have completed migration while this one waited.
-        if(!$db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mail_index'")->fetchColumn()){
+        $exists=$indexExists();
+        if(!$exists){
             $db->exec('CREATE TABLE mail_index (
                 id TEXT PRIMARY KEY REFERENCES records(id) ON DELETE CASCADE,
                 account TEXT NOT NULL, remote INTEGER NOT NULL, folder TEXT NOT NULL,
@@ -42,6 +48,23 @@ function ensure_mail_index(PDO $db): void {
             // Stream the backfill; never hydrate MIME, attachment data or reader records.
             foreach($db->query("SELECT id,kind,meta FROM records WHERE kind='mail'") as $row)
                 mail_index_record($db,$row['id'],$row['kind'],json_decode($row['meta'],true,64,JSON_THROW_ON_ERROR));
+        }
+        if($timeVersion()<1){
+            if($exists){
+                // Recheck both missing sort dates and dates that fell back to sentAt.
+                // Update only derived timestamps. Message data stays in records.
+                $update=$db->prepare('UPDATE mail_index SET message_time=? WHERE id=? AND message_time IS NOT ?');
+                $rows=$db->query("SELECT id, json_extract(meta,'$.date') AS date, json_extract(meta,'$.sentAt') AS sentAt
+                    FROM records WHERE kind='mail' AND (instr(json_extract(meta,'$.date'),'(')>0 OR instr(json_extract(meta,'$.sentAt'),'(')>0)");
+                foreach($rows as $row){
+                    $time=mail_index_time($row);
+                    $update->bindValue(1,$time,$time===null?PDO::PARAM_NULL:PDO::PARAM_INT);
+                    $update->bindValue(2,$row['id']);
+                    $update->bindValue(3,$time,$time===null?PDO::PARAM_NULL:PDO::PARAM_INT);
+                    $update->execute();
+                }
+            }
+            $db->exec("INSERT INTO settings(key,value) VALUES('mail-index-time-version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value");
         }
         $db->exec('COMMIT');
     } catch(Throwable $error) {$db->exec('ROLLBACK');throw $error;}

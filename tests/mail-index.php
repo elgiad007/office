@@ -30,6 +30,25 @@ try {
     check_index(str_contains($plan,'mail_index_folder_date')&&!str_contains($plan,'TEMP B-TREE'),'folder/date query uses covering index without sorting');
     check_index(mail_index_time(['date'=>'invalid','sentAt'=>'2026-01-01T01:00:00+01:00'])===1767225600000&&mail_index_time([])===null,'invalid date falls back to sentAt; missing dates stay undated');
     check_index(mail_index_time(['date'=>'1970-01-01T00:00:00.9999Z'])===999&&mail_index_time(['date'=>'1969-12-31T23:59:59.500Z'])===-500,'timestamps retain browser millisecond precision before and after the epoch');
+    $recent=[];
+    foreach(['Fri, 13 Nov 2026 11:20:51 +0000 (UTC)','Fri, 13 Nov 2026 06:20:24 -0500 (EST)'] as $date){
+        $recent[]=save_record(['kind'=>'mail','title'=>'Recent IMAP message','body'=>'','meta'=>[
+            'folder'=>'Inbox','account'=>'indexed-imap','remote'=>true,'serverFolder'=>'INBOX','date'=>$date,
+        ]],true);
+    }
+    $recentIds=array_column($recent,'id');
+    $firstPageIds=static fn(array $scope=[])=>array_column(mail_list_page($scope+['page'=>'1'])['records'],'id');
+    check_index(array_slice($firstPageIds(),0,2)===$recentIds,'new IMAP messages with timezone comments appear in date order on the first Inbox page');
+    check_index(mail_index_time(['date'=>'31 Feb 2026 11:20:51 +0000 (UTC)'])===null,'a timezone comment does not make an invalid calendar date valid');
+
+    // Simulate a workspace whose old index stored a null date or used sentAt as a fallback.
+    $db->prepare('UPDATE mail_index SET message_time=NULL WHERE id=?')->execute([$recentIds[0]]);
+    $db->prepare('UPDATE mail_index SET message_time=1700000000000 WHERE id=?')->execute([$recentIds[1]]);
+    $db->exec("DELETE FROM settings WHERE key='mail-index-time-version'");
+    $recordsBefore=array_map('get_record',$recentIds);
+    ensure_mail_index($db);
+    check_index(array_slice($firstPageIds(),0,2)===$recentIds&&array_slice($firstPageIds($scope),0,2)===$recentIds,'migration restores both messages to the first page of combined and account Inbox views');
+    check_index(array_map('get_record',$recentIds)===$recordsBefore,'migration leaves message contents and revisions untouched');
     $local=save_record(['kind'=>'mail','title'=>'Undated','body'=>'','meta'=>['folder'=>'Inbox','hasAttachments'=>false,'hasHtml'=>false]]);
     $local['meta']['folder']='Junk';save_record($local);
     check_index(mail_list_page(['folder'=>'Local Junk'])['records'][0]['id']===$local['id'],'folder edits update metadata in the same save');
