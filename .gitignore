@@ -13,3 +13,4 @@
 !/runtime/windows/README.md
 !/runtime/windows/cacert.pem
 /patches/*
+/.upgrade_keys/
