@@ -16,7 +16,7 @@ if ($NodeExecutable) {
     return $nodeFile.FullName
 }
 
-$nodeCommand = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue
+$nodeCommand = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 if (!$nodeCommand) {
     throw 'Node.js is required to build Office. Add Node.js to PATH and open a new terminal, or set OFFICE_NODE_EXE in .runtime/.env to the full path to node.exe. You can also pass -NodeExecutable.'
 }
